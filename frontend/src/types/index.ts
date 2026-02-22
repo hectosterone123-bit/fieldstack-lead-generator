@@ -1,0 +1,209 @@
+export type ServiceType =
+  | 'hvac' | 'plumbing' | 'electrical'
+  | 'roofing' | 'landscaping' | 'pest_control' | 'general';
+
+export type LeadStatus =
+  | 'new' | 'contacted' | 'qualified'
+  | 'proposal_sent' | 'booked' | 'lost' | 'closed_won';
+
+export type ActivityType =
+  | 'status_change' | 'note' | 'call_attempt'
+  | 'email_sent' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
+
+export type TemplateChannel = 'email' | 'sms' | 'call_script';
+
+export interface Template {
+  id: number;
+  name: string;
+  channel: TemplateChannel;
+  status_stage: LeadStatus;
+  step_order: number;
+  subject: string | null;
+  body: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplatePreview extends Template {
+  rendered_subject: string | null;
+  rendered_body: string;
+}
+
+export interface TemplateVariable {
+  variable: string;
+  description: string;
+  fallback: string;
+}
+
+export interface Lead {
+  id: number;
+  business_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  service_type: ServiceType;
+  status: LeadStatus;
+  heat_score: number;
+  estimated_value: number;
+  website: string | null;
+  has_website: 0 | 1;
+  website_live: 0 | 1;
+  google_maps_url: string | null;
+  source: 'manual' | 'osm_finder' | 'csv_import' | 'google_places';
+  osm_id: string | null;
+  osm_type: string | null;
+  google_place_id: string | null;
+  rating: number | null;
+  review_count: number | null;
+  contact_count: number;
+  last_contacted_at: string | null;
+  next_followup_at: string | null;
+  tags: string | null;
+  notes: string | null;
+  enrichment_data: string | null;
+  enriched_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnrichmentData {
+  emails: string[];
+  team_names: string[];
+  services: string[];
+  tech_stack: string;
+  scraped_at: string;
+  error?: string;
+}
+
+export interface Activity {
+  id: number;
+  lead_id: number;
+  type: ActivityType;
+  title: string;
+  description: string | null;
+  metadata: string | null;
+  created_at: string;
+  business_name?: string;
+}
+
+export interface FinderResult {
+  osm_id: string | null;
+  osm_type: string | null;
+  google_place_id: string | null;
+  business_name: string;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  service_type: ServiceType;
+  has_website: boolean;
+  website_live: boolean;
+  google_maps_url: string | null;
+  heat_score: number;
+  already_imported: boolean;
+  rating: number | null;
+  review_count: number | null;
+  source: string;
+}
+
+export interface Stats {
+  total_leads: number;
+  by_status: { status: LeadStatus; count: number }[];
+  by_service_type: { service_type: ServiceType; count: number }[];
+  pipeline_value: number;
+  hot_leads_count: number;
+  booked_count: number;
+  conversion_rate: number;
+  contacted_this_week: number;
+  recent_activities: (Activity & { business_name: string })[];
+}
+
+export const STATUS_LABELS: Record<LeadStatus, string> = {
+  new: 'New',
+  contacted: 'Contacted',
+  qualified: 'Qualified',
+  proposal_sent: 'Proposal Sent',
+  booked: 'Booked',
+  lost: 'Lost',
+  closed_won: 'Closed Won',
+};
+
+export const STATUS_COLORS: Record<LeadStatus, string> = {
+  new: 'bg-zinc-700 text-zinc-200',
+  contacted: 'bg-blue-900 text-blue-200',
+  qualified: 'bg-purple-900 text-purple-200',
+  proposal_sent: 'bg-yellow-900 text-yellow-200',
+  booked: 'bg-green-900 text-green-200',
+  lost: 'bg-red-900 text-red-300',
+  closed_won: 'bg-emerald-900 text-emerald-200',
+};
+
+export const SERVICE_LABELS: Record<ServiceType, string> = {
+  hvac: 'HVAC',
+  plumbing: 'Plumbing',
+  electrical: 'Electrical',
+  roofing: 'Roofing',
+  landscaping: 'Landscaping',
+  pest_control: 'Pest Control',
+  general: 'General',
+};
+
+export const PREDEFINED_TAGS = ['priority', 'referral', 'cold', 'hot', 'callback'] as const;
+
+export const TAG_COLORS: Record<string, string> = {
+  priority: 'bg-orange-900 text-orange-200',
+  referral: 'bg-blue-900 text-blue-200',
+  cold: 'bg-cyan-900 text-cyan-200',
+  hot: 'bg-red-900 text-red-200',
+  callback: 'bg-yellow-900 text-yellow-200',
+};
+
+export const TAG_COLOR_DEFAULT = 'bg-zinc-700 text-zinc-300';
+
+export const SERVICE_COLORS: Record<ServiceType, string> = {
+  hvac: 'bg-orange-900 text-orange-200',
+  plumbing: 'bg-cyan-900 text-cyan-200',
+  electrical: 'bg-yellow-900 text-yellow-200',
+  roofing: 'bg-stone-700 text-stone-200',
+  landscaping: 'bg-green-900 text-green-200',
+  pest_control: 'bg-red-900 text-red-200',
+  general: 'bg-zinc-700 text-zinc-300',
+};
+
+// ─── Chat / Copilot ─────────────────────────────────────────────────────────
+
+export interface Conversation {
+  id: number;
+  title: string;
+  context: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversation_id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  tool_name: string | null;
+  created_at: string;
+}
+
+export interface CopilotContext {
+  page: string;
+  lead_id?: number;
+  lead_name?: string;
+}

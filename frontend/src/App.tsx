@@ -1,0 +1,23 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AppLayout } from './components/layout/AppLayout';
+import { Dashboard } from './pages/Dashboard';
+import { Finder } from './pages/Finder';
+import { Leads } from './pages/Leads';
+import { Templates } from './pages/Templates';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/finder" element={<Finder />} />
+          <Route path="/leads" element={<Leads />} />
+          <Route path="/templates" element={<Templates />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;

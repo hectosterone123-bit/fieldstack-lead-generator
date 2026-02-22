@@ -1,0 +1,23 @@
+{
+  "name": "fieldstack-lead-generator-backend",
+  "version": "1.0.0",
+  "description": "Fieldstack Lead Generator Backend",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "sql.js": "^1.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
