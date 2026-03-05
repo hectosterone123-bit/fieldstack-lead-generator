@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
-  Clock, CheckCircle, RefreshCw, FileText, Mail, Thermometer,
-  Download, Sparkles, ChevronRight,
+  Clock, CheckCircle, RefreshCw, FileText, Mail, MessageSquare as MessageSquareIcon, Thermometer,
+  Download, Sparkles, ChevronRight, Database, Send, Zap,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -11,6 +11,7 @@ import type { Lead, LeadStatus, ActivityType } from '../types';
 import { Link } from 'react-router-dom';
 import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
 import { useToast } from '../lib/toast';
+import { OutreachQueue } from '../components/sequences/OutreachQueue';
 
 // Per-status bar colors for the distribution chart
 const STATUS_BAR_COLORS: Record<LeadStatus, string> = {
@@ -29,6 +30,7 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   note: FileText,
   call_attempt: Phone,
   email_sent: Mail,
+  sms_sent: MessageSquareIcon,
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
@@ -39,6 +41,7 @@ const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
   note: 'text-zinc-400',
   call_attempt: 'text-green-400',
   email_sent: 'text-violet-400',
+  sms_sent: 'text-emerald-400',
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
@@ -57,15 +60,20 @@ export function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
-        <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="p-6 max-w-5xl">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-28 bg-zinc-900 rounded-xl animate-pulse" />
+            <div key={i} className="h-28 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-6">
-          <div className="h-64 bg-zinc-900 rounded-xl animate-pulse" />
-          <div className="h-64 bg-zinc-900 rounded-xl animate-pulse" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-28 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="h-64 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
+          <div className="h-64 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
         </div>
       </div>
     );
@@ -86,23 +94,100 @@ export function Dashboard() {
 
   return (
     <div className="p-6 max-w-5xl">
-      {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-zinc-100 font-semibold text-lg tracking-tight">Dashboard</h1>
-        <p className="text-zinc-500 text-sm mt-0.5">Overview of your lead pipeline</p>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {/* Pipeline Value — highlight card */}
+      {/* KPI Cards — Row 1: Lead Gen Health */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
+        {/* Leads Found This Week — hero card */}
         <div className="relative overflow-hidden bg-gradient-to-br from-orange-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
           <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-orange-500/10 blur-2xl pointer-events-none" />
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-500/15 text-orange-400">
-              <DollarSign className="w-4 h-4" />
+              <Search className="w-4 h-4" />
             </div>
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-gradient-orange">
+            {stats?.leads_found_this_week ?? 0}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Leads Found This Week</p>
+        </div>
+
+        {/* Enrichment Rate */}
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-violet-500/10 text-violet-400">
+              <Database className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {stats?.enrichment_rate ?? 0}%
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Enrichment Rate</p>
+          <p className="text-[10px] text-zinc-600 mt-1.5">phone or email on file</p>
+        </div>
+
+        {/* Outreach Coverage */}
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400">
+              <Send className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {stats?.outreach_coverage ?? 0}%
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Outreach Coverage</p>
+          <p className="text-[10px] text-zinc-600 mt-1.5">leads past 'new' status</p>
+        </div>
+
+        {/* Speed to Lead */}
+        <div className={cn(
+          'bg-zinc-900 border rounded-xl p-5 shadow-surface',
+          stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes <= 5
+            ? 'border-emerald-500/20'
+            : stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes > 60
+              ? 'border-red-500/20'
+              : 'border-white/[0.06]',
+        )}>
+          <div className="flex items-start justify-between mb-4">
+            <div className={cn(
+              'w-9 h-9 rounded-lg flex items-center justify-center',
+              stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes <= 5
+                ? 'bg-emerald-500/10 text-emerald-400'
+                : stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes > 60
+                  ? 'bg-red-500/10 text-red-400'
+                  : 'bg-orange-500/10 text-orange-400',
+            )}>
+              <Zap className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {stats?.avg_speed_to_lead_minutes != null
+              ? stats.avg_speed_to_lead_minutes < 1
+                ? `${Math.round(stats.avg_speed_to_lead_minutes * 60)}s`
+                : stats.avg_speed_to_lead_minutes < 60
+                  ? `${Math.round(stats.avg_speed_to_lead_minutes)}m`
+                  : `${Math.round(stats.avg_speed_to_lead_minutes / 60)}h ${Math.round(stats.avg_speed_to_lead_minutes % 60)}m`
+              : '--'}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Speed to Lead</p>
+          <p className="text-[10px] text-zinc-600 mt-1.5">
+            {stats?.speed_to_lead_sample
+              ? `avg response time (${stats.speed_to_lead_sample} leads)`
+              : 'avg time to first contact'}
+          </p>
+        </div>
+      </div>
+
+      {/* KPI Cards — Row 2: Pipeline */}
+      <p className="text-overline text-zinc-700 mb-3">Pipeline</p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* Pipeline Value */}
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-400">
+              <DollarSign className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
             {formatCurrency(stats?.pipeline_value ?? 0)}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Pipeline Value</p>
@@ -242,6 +327,9 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Outreach Queue */}
+      <OutreachQueue />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Leads by Status */}
         <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface overflow-hidden">
@@ -329,7 +417,7 @@ export function Dashboard() {
           </p>
           <Link
             to="/finder"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium text-sm rounded-lg transition-all shadow-[0_0_20px_-6px_rgba(249,115,22,0.6)] hover:shadow-[0_0_24px_-4px_rgba(249,115,22,0.8)]"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium text-sm rounded-lg transition-colors shadow-[0_0_20px_-6px_rgba(249,115,22,0.6)] hover:shadow-[0_0_24px_-4px_rgba(249,115,22,0.8)]"
           >
             <Search className="w-4 h-4" /> Start Finding Leads
             <ChevronRight className="w-4 h-4" />

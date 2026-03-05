@@ -1,8 +1,22 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const { AuthenticationError, RateLimitError, APIConnectionError } = Anthropic;
 const db = require('../db');
 const { renderTemplate } = require('./templateService');
+const { recomputeHeatScore } = require('./heatScoreService');
 
 const client = new Anthropic();
+
+const VALID_STATUSES = ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'];
+const FOLLOWUP_DAYS = { new: 1, contacted: 3, qualified: 2, proposal_sent: 5, booked: 1 };
+
+function autoUpdateHeatScore(id) {
+  const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
+  if (!lead) return;
+  const newScore = recomputeHeatScore(lead);
+  if (newScore !== lead.heat_score) {
+    db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, id]);
+  }
+}
 
 const SYSTEM_PROMPT = `You are FieldStack AI, a sales copilot for HVAC and home service contractors. You help manage a lead generation CRM.
 
@@ -13,6 +27,11 @@ Your capabilities:
 - Provide sales coaching and strategy advice for the contractor services industry
 - Suggest which templates to use for specific leads
 - Analyze pipeline health and conversion metrics
+- Update lead statuses through the pipeline (e.g., mark as contacted, qualified, booked)
+- Log activities like calls, emails, SMS, and notes on leads
+- Schedule follow-up reminders for leads
+- Adjust heat scores manually
+- Add notes to leads
 
 Guidelines:
 - Be concise and actionable. Contractors are busy.
@@ -83,6 +102,68 @@ const tools = [
       },
       required: ['template_id', 'lead_id']
     }
+  },
+  {
+    name: 'update_lead_status',
+    description: 'Change a lead\'s pipeline status. Use when the user says things like "mark as contacted", "move to qualified", "close the deal", "mark as lost". This also auto-schedules a follow-up and recomputes the heat score.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'The lead ID' },
+        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] }
+      },
+      required: ['lead_id', 'status']
+    }
+  },
+  {
+    name: 'log_activity',
+    description: 'Log a call attempt, email sent, SMS sent, or note on a lead. Use when the user says "log a call", "I emailed them", "sent a text", or "add a note".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'The lead ID' },
+        type: { type: 'string', enum: ['note', 'call_attempt', 'email_sent', 'sms_sent'], description: 'Activity type (default: note)' },
+        title: { type: 'string', description: 'Short title for the activity' },
+        description: { type: 'string', description: 'Optional longer description' }
+      },
+      required: ['lead_id', 'title']
+    }
+  },
+  {
+    name: 'set_followup',
+    description: 'Schedule a follow-up reminder for a lead N days from now. Use when the user says "remind me in 3 days", "follow up next week", "snooze this lead".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'The lead ID' },
+        days: { type: 'integer', description: 'Number of days from now (minimum 1)' }
+      },
+      required: ['lead_id', 'days']
+    }
+  },
+  {
+    name: 'update_heat_score',
+    description: 'Manually set a lead\'s heat score (0-100). Use when the user says "set heat to 80", "this lead is hot", "cool down this lead".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'The lead ID' },
+        heat_score: { type: 'integer', description: 'New heat score (0-100)' }
+      },
+      required: ['lead_id', 'heat_score']
+    }
+  },
+  {
+    name: 'add_note',
+    description: 'Add a note to a lead\'s notes field. Appends to existing notes. Use when the user says "note that...", "remember that...", "jot down...".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'The lead ID' },
+        note: { type: 'string', description: 'The note text to add' }
+      },
+      required: ['lead_id', 'note']
+    }
   }
 ];
 
@@ -129,7 +210,7 @@ function executeTool(toolName, input) {
       );
       const today = new Date().toISOString().slice(0, 10);
       const overdue = all.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) < today);
-      const due_today = all.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) >= today);
+      const due_today = all.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) === today);
       return { overdue, due_today };
     }
 
@@ -164,6 +245,111 @@ function executeTool(toolName, input) {
         subject: renderTemplate(template.subject, lead),
         body: renderTemplate(template.body, lead),
       };
+    }
+
+    case 'update_lead_status': {
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [input.lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (!VALID_STATUSES.includes(input.status)) return { error: `Invalid status: ${input.status}` };
+
+      const oldStatus = lead.status;
+      db.run('UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [input.status, input.lead_id]);
+
+      if (input.status === 'contacted') {
+        db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP WHERE id = ?', [input.lead_id]);
+      }
+
+      db.run(
+        `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'status_change', ?, ?)`,
+        [input.lead_id, `Status changed to ${input.status}`, `Was: ${oldStatus} → Now: ${input.status}`]
+      );
+
+      autoUpdateHeatScore(input.lead_id);
+
+      // Auto-schedule follow-up or clear for terminal statuses
+      if (['lost', 'closed_won'].includes(input.status)) {
+        db.run('UPDATE leads SET next_followup_at = NULL WHERE id = ?', [input.lead_id]);
+      } else if (FOLLOWUP_DAYS[input.status]) {
+        const days = FOLLOWUP_DAYS[input.status];
+        db.run(`UPDATE leads SET next_followup_at = datetime('now', '+' || ? || ' days') WHERE id = ?`, [days, input.lead_id]);
+        db.run(
+          `INSERT INTO activities (lead_id, type, title) VALUES (?, 'note', ?)`,
+          [input.lead_id, `Auto-scheduled follow-up in ${days} day(s)`]
+        );
+      }
+
+      const updated = db.get('SELECT * FROM leads WHERE id = ?', [input.lead_id]);
+      return { success: true, lead: updated, message: `Status changed from ${oldStatus} to ${input.status}` };
+    }
+
+    case 'log_activity': {
+      const lead = db.get('SELECT id FROM leads WHERE id = ?', [input.lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      const type = input.type || 'note';
+
+      if (type === 'call_attempt') {
+        db.run(
+          'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [input.lead_id]
+        );
+        autoUpdateHeatScore(input.lead_id);
+      }
+
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+        [input.lead_id, type, input.title, input.description || null]
+      );
+
+      const activity = db.get('SELECT * FROM activities WHERE lead_id = ? ORDER BY id DESC LIMIT 1', [input.lead_id]);
+      return { success: true, activity, message: `Logged ${type}: ${input.title}` };
+    }
+
+    case 'set_followup': {
+      const lead = db.get('SELECT id, business_name FROM leads WHERE id = ?', [input.lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      const days = Math.max(1, parseInt(input.days) || 1);
+      db.run(
+        `UPDATE leads SET next_followup_at = datetime('now', '+' || ? || ' days'), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [days, input.lead_id]
+      );
+      db.run(
+        `INSERT INTO activities (lead_id, type, title) VALUES (?, 'note', ?)`,
+        [input.lead_id, `Follow-up scheduled in ${days} day(s)`]
+      );
+
+      const updated = db.get('SELECT * FROM leads WHERE id = ?', [input.lead_id]);
+      return { success: true, lead: updated, message: `Follow-up for ${lead.business_name} set in ${days} day(s)` };
+    }
+
+    case 'update_heat_score': {
+      const lead = db.get('SELECT id, business_name, heat_score FROM leads WHERE id = ?', [input.lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      const score = Math.max(0, Math.min(100, parseInt(input.heat_score) || 0));
+      db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [score, input.lead_id]);
+      db.run(
+        `INSERT INTO activities (lead_id, type, title) VALUES (?, 'heat_update', ?)`,
+        [input.lead_id, `Heat score updated to ${score}`]
+      );
+
+      return { success: true, old_score: lead.heat_score, new_score: score, message: `Heat score for ${lead.business_name} changed from ${lead.heat_score} to ${score}` };
+    }
+
+    case 'add_note': {
+      const lead = db.get('SELECT id, business_name, notes FROM leads WHERE id = ?', [input.lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      const existingNotes = lead.notes || '';
+      const newNotes = existingNotes ? `${existingNotes}\n${input.note}` : input.note;
+      db.run('UPDATE leads SET notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newNotes, input.lead_id]);
+      db.run(
+        `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Note added', ?)`,
+        [input.lead_id, input.note]
+      );
+
+      return { success: true, message: `Note added to ${lead.business_name}` };
     }
 
     default:
@@ -209,78 +395,103 @@ async function streamChat(dbMessages, context, onEvent) {
   let claudeMessages = convertToClaudeMessages(dbMessages);
   let toolRounds = 0;
 
-  while (true) {
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: claudeMessages,
-      tools,
-    });
+  try {
+    while (true) {
+      const stream = client.messages.stream({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: claudeMessages,
+        tools,
+      });
 
-    let fullText = '';
-    let toolUseBlocks = [];
-    let currentToolUse = null;
+      let fullText = '';
+      let toolUseBlocks = [];
+      let currentToolUse = null;
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_start') {
-        if (event.content_block.type === 'tool_use') {
-          currentToolUse = { id: event.content_block.id, name: event.content_block.name, inputJson: '' };
-          onEvent({ type: 'tool_call', tool: event.content_block.name });
-        }
-      } else if (event.type === 'content_block_delta') {
-        if (event.delta.type === 'text_delta') {
-          fullText += event.delta.text;
-          onEvent({ type: 'text', text: event.delta.text });
-        } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
-          currentToolUse.inputJson += event.delta.partial_json;
-        }
-      } else if (event.type === 'content_block_stop') {
-        if (currentToolUse) {
-          let input = {};
-          try { input = JSON.parse(currentToolUse.inputJson); } catch {}
-          toolUseBlocks.push({ ...currentToolUse, input });
-          currentToolUse = null;
+      for await (const event of stream) {
+        if (event.type === 'content_block_start') {
+          if (event.content_block.type === 'tool_use') {
+            currentToolUse = { id: event.content_block.id, name: event.content_block.name, inputJson: '' };
+            onEvent({ type: 'tool_call', tool: event.content_block.name });
+          }
+        } else if (event.type === 'content_block_delta') {
+          if (event.delta.type === 'text_delta') {
+            fullText += event.delta.text;
+            onEvent({ type: 'text', text: event.delta.text });
+          } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
+            currentToolUse.inputJson += event.delta.partial_json;
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (currentToolUse) {
+            let input = {};
+            try { input = JSON.parse(currentToolUse.inputJson); } catch {}
+            toolUseBlocks.push({ ...currentToolUse, input });
+            currentToolUse = null;
+          }
         }
       }
+
+      const finalMessage = await stream.finalMessage();
+
+      // If no tool calls or we've hit the limit, we're done
+      if (finalMessage.stop_reason !== 'tool_use' || toolRounds >= MAX_TOOL_ROUNDS) {
+        return fullText;
+      }
+
+      // Execute tools and continue the conversation
+      toolRounds++;
+
+      // Build the assistant message with all content blocks
+      const assistantContent = finalMessage.content.map(block => {
+        if (block.type === 'text') return { type: 'text', text: block.text };
+        if (block.type === 'tool_use') return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
+        return block;
+      });
+
+      claudeMessages.push({ role: 'assistant', content: assistantContent });
+
+      // Execute each tool and build tool results
+      const toolResults = toolUseBlocks.map(tool => {
+        const result = executeTool(tool.name, tool.input);
+        onEvent({ type: 'tool_done', tool: tool.name });
+        return {
+          type: 'tool_result',
+          tool_use_id: tool.id,
+          content: JSON.stringify(result),
+        };
+      });
+
+      claudeMessages.push({ role: 'user', content: toolResults });
+
+      // Reset for next round
+      fullText = '';
+      toolUseBlocks = [];
     }
-
-    const finalMessage = await stream.finalMessage();
-
-    // If no tool calls or we've hit the limit, we're done
-    if (finalMessage.stop_reason !== 'tool_use' || toolRounds >= MAX_TOOL_ROUNDS) {
-      return fullText;
+  } catch (err) {
+    if (err instanceof AuthenticationError) {
+      throw new Error('AI copilot is not configured. Please set ANTHROPIC_API_KEY.');
     }
-
-    // Execute tools and continue the conversation
-    toolRounds++;
-
-    // Build the assistant message with all content blocks
-    const assistantContent = finalMessage.content.map(block => {
-      if (block.type === 'text') return { type: 'text', text: block.text };
-      if (block.type === 'tool_use') return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
-      return block;
-    });
-
-    claudeMessages.push({ role: 'assistant', content: assistantContent });
-
-    // Execute each tool and build tool results
-    const toolResults = toolUseBlocks.map(tool => {
-      const result = executeTool(tool.name, tool.input);
-      onEvent({ type: 'tool_done', tool: tool.name });
-      return {
-        type: 'tool_result',
-        tool_use_id: tool.id,
-        content: JSON.stringify(result),
-      };
-    });
-
-    claudeMessages.push({ role: 'user', content: toolResults });
-
-    // Reset for next round
-    fullText = '';
-    toolUseBlocks = [];
+    if (err instanceof RateLimitError) {
+      throw new Error('AI is temporarily busy. Please wait a moment and try again.');
+    }
+    if (err instanceof APIConnectionError) {
+      throw new Error('Could not connect to AI service. Check your internet connection.');
+    }
+    throw err;
   }
 }
 
-module.exports = { streamChat };
+async function generateTitle(userMessage, assistantResponse) {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 30,
+    messages: [{
+      role: 'user',
+      content: `Generate a short title (max 6 words) for this conversation. Reply with ONLY the title, no quotes or punctuation.\n\nUser: ${userMessage}\n\nAssistant: ${assistantResponse.slice(0, 300)}`
+    }]
+  });
+  return response.content[0]?.text?.trim() || userMessage.slice(0, 50);
+}
+
+module.exports = { streamChat, generateTitle };

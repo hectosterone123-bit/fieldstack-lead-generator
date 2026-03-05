@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { streamChat } = require('../services/claudeService');
+const { streamChat, generateTitle } = require('../services/claudeService');
 
 // GET /api/chat/conversations — list conversations
 router.get('/conversations', (req, res, next) => {
@@ -69,12 +69,6 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
       [context ? JSON.stringify(context) : conversation.context, id]
     );
 
-    // Auto-title from first message
-    if (conversation.title === 'New conversation') {
-      const title = content.length > 50 ? content.slice(0, 47) + '...' : content;
-      db.run('UPDATE conversations SET title = ? WHERE id = ?', [title, id]);
-    }
-
     // Load full history
     const history = db.all(
       'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
@@ -105,6 +99,19 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
+
+    // Auto-title: generate AI title after first exchange (fire-and-forget)
+    if (conversation.title === 'New conversation' && fullResponse) {
+      generateTitle(content, fullResponse)
+        .then(title => {
+          db.run('UPDATE conversations SET title = ? WHERE id = ?', [title, id]);
+        })
+        .catch(err => {
+          console.error('[Chat] Title generation failed:', err.message);
+          const fallback = content.length > 50 ? content.slice(0, 47) + '...' : content;
+          db.run('UPDATE conversations SET title = ? WHERE id = ?', [fallback, id]);
+        });
+    }
   } catch (err) {
     console.error('[Chat] Stream error:', err.message);
     if (!res.headersSent) {

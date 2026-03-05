@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Mail, MessageSquare, PhoneCall, Plus, Pencil, Trash2,
+  Mail, MessageSquare, PhoneCall, Video, Plus, Pencil, Trash2,
   ChevronDown, ChevronRight, Save, X, Info,
 } from 'lucide-react';
 import type { Template, TemplateChannel, LeadStatus } from '../types';
@@ -13,6 +13,7 @@ const CHANNEL_TABS: { key: TemplateChannel; label: string; icon: React.ElementTy
   { key: 'email', label: 'Email', icon: Mail },
   { key: 'sms', label: 'SMS', icon: MessageSquare },
   { key: 'call_script', label: 'Call Script', icon: PhoneCall },
+  { key: 'loom_script', label: 'Loom Script', icon: Video },
 ];
 
 const VARIABLES = [
@@ -134,7 +135,7 @@ export function Templates() {
           </div>
           <button
             onClick={handleStartCreate}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-all shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]"
           >
             <Plus className="w-4 h-4" />
             New Template
@@ -151,7 +152,7 @@ export function Templates() {
                 key={tab.key}
                 onClick={() => { setChannel(tab.key); handleCancel(); }}
                 className={cn(
-                  'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all',
+                  'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
                     ? 'bg-zinc-800 text-white border border-white/[0.08]'
                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
@@ -253,7 +254,7 @@ export function Templates() {
               <button
                 onClick={handleSave}
                 disabled={createTemplate.isPending || updateTemplate.isPending}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors"
               >
                 <Save className="w-4 h-4" />
                 {editing ? 'Save Changes' : 'Create Template'}

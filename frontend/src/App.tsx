@@ -4,6 +4,8 @@ import { Dashboard } from './pages/Dashboard';
 import { Finder } from './pages/Finder';
 import { Leads } from './pages/Leads';
 import { Templates } from './pages/Templates';
+import { Sequences } from './pages/Sequences';
+import { SmsInbox } from './pages/SmsInbox';
 
 function App() {
   return (
@@ -14,6 +16,8 @@ function App() {
           <Route path="/finder" element={<Finder />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/templates" element={<Templates />} />
+          <Route path="/sequences" element={<Sequences />} />
+          <Route path="/sms" element={<SmsInbox />} />
         </Route>
       </Routes>
     </BrowserRouter>

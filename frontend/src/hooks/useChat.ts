@@ -5,6 +5,7 @@ import {
   fetchMessages, streamMessage,
 } from '../lib/api';
 import { useCopilotContext } from '../lib/copilotContext';
+import { useToast } from '../lib/toast';
 import type { CopilotContext } from '../types';
 
 export function useConversations() {
@@ -41,19 +42,25 @@ export function useMessages(conversationId: number | null) {
 export function useSendMessage(conversationId: number | null) {
   const qc = useQueryClient();
   const { context } = useCopilotContext();
+  const { toast } = useToast();
   const [streaming, setStreaming] = useState(false);
   const [streamedText, setStreamedText] = useState('');
   const [toolStatus, setToolStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const lastMessageRef = useRef<string | null>(null);
 
-  const send = useCallback((content: string) => {
-    if (!conversationId) return;
+  const send = useCallback((content: string, overrideConversationId?: number) => {
+    const targetId = overrideConversationId ?? conversationId;
+    if (!targetId) return;
+    lastMessageRef.current = content;
+    setError(null);
     setStreaming(true);
     setStreamedText('');
     setToolStatus(null);
 
     controllerRef.current = streamMessage(
-      conversationId,
+      targetId,
       content,
       context,
       (chunk) => {
@@ -64,16 +71,18 @@ export function useSendMessage(conversationId: number | null) {
       () => {
         setStreaming(false);
         setToolStatus(null);
-        qc.invalidateQueries({ queryKey: ['messages', conversationId] });
+        qc.invalidateQueries({ queryKey: ['messages', targetId] });
         qc.invalidateQueries({ queryKey: ['conversations'] });
       },
       (err) => {
         setStreaming(false);
         setToolStatus(null);
-        console.error('Stream error:', err);
+        const message = err?.message || 'Something went wrong. Please try again.';
+        setError(message);
+        toast(message, 'error');
       },
     );
-  }, [conversationId, context, qc]);
+  }, [conversationId, context, qc, toast]);
 
   const cancel = useCallback(() => {
     controllerRef.current?.abort();
@@ -81,5 +90,12 @@ export function useSendMessage(conversationId: number | null) {
     setToolStatus(null);
   }, []);
 
-  return { send, cancel, streaming, streamedText, toolStatus };
+  const retry = useCallback(() => {
+    if (lastMessageRef.current) {
+      setError(null);
+      send(lastMessageRef.current);
+    }
+  }, [send]);
+
+  return { send, cancel, streaming, streamedText, toolStatus, error, retry };
 }

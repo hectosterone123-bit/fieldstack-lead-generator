@@ -1,8 +1,22 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const { initDb } = require('./db');
 const errorHandler = require('./middleware/errorHandler');
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn('[Warning] ANTHROPIC_API_KEY not set — AI Copilot will be unavailable');
+}
+if (!process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_PLACES_API_KEY === 'YOUR_API_KEY_HERE') {
+  console.warn('[Warning] GOOGLE_PLACES_API_KEY not set — Google Places search will be unavailable');
+}
+if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+  console.warn('[Warning] SMTP not configured — Email sending will be unavailable. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');
+}
+if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
+  console.warn('[Warning] Twilio not configured — SMS sending will be unavailable. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -20,14 +34,37 @@ async function start() {
   const statsRouter = require('./routes/stats');
   const templatesRouter = require('./routes/templates');
   const chatRouter = require('./routes/chat');
+  const sequencesRouter = require('./routes/sequences');
+  const smsRouter = require('./routes/sms');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
   app.use('/api/stats', statsRouter);
   app.use('/api/templates', templatesRouter);
   app.use('/api/chat', chatRouter);
+  app.use('/api/sequences', sequencesRouter);
+  app.use('/api/sms', smsRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+  // DB backup download — lets you grab a copy of the database
+  app.get('/api/backup', (req, res) => {
+    const { saveDb } = require('./db');
+    saveDb();
+    const dbPath = path.join(process.env.DB_DIR || path.join(__dirname, '..', 'data'), 'leads.db');
+    if (!require('fs').existsSync(dbPath)) return res.status(404).json({ success: false, error: 'No database file found' });
+    res.download(dbPath, `fieldstack-backup-${new Date().toISOString().slice(0,10)}.db`);
+  });
+
+  const { startSequenceScheduler } = require('./services/sequenceScheduler');
+  startSequenceScheduler();
+
+  // Serve frontend build
+  const frontendDist = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
 
   app.use(errorHandler);
 

@@ -164,7 +164,7 @@ export function LeadsTable({ onRowClick }: Props) {
               placeholder="Search leads..."
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
-              className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-all"
+              className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-colors"
             />
           </div>
           {/* Service type */}
@@ -172,7 +172,7 @@ export function LeadsTable({ onRowClick }: Props) {
             <select
               value={serviceFilter}
               onChange={e => { setServiceFilter(e.target.value); setPage(1); }}
-              className="appearance-none bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-3 pr-8 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 cursor-pointer transition-all"
+              className="appearance-none bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-3 pr-8 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 cursor-pointer transition-colors"
             >
               <option value="all">All Services</option>
               {Object.entries(SERVICE_LABELS).map(([v, l]) => (
@@ -184,7 +184,7 @@ export function LeadsTable({ onRowClick }: Props) {
           <button
             onClick={() => handleBulkEnrich()}
             disabled={bulkEnrich.isPending}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-300 border border-white/[0.06] hover:border-white/[0.10] rounded-lg disabled:opacity-50 transition-all ml-auto"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-300 border border-white/[0.06] hover:border-white/[0.10] rounded-lg disabled:opacity-50 transition-colors ml-auto"
           >
             {bulkEnrich.isPending
               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -201,7 +201,7 @@ export function LeadsTable({ onRowClick }: Props) {
               key={f.value}
               onClick={() => { setStatusFilter(f.value); setPage(1); }}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all',
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
                 statusFilter === f.value
                   ? 'bg-zinc-800 text-white shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
@@ -219,7 +219,7 @@ export function LeadsTable({ onRowClick }: Props) {
               key={t}
               onClick={() => { setTagFilter(prev => prev === t ? '' : t); setPage(1); }}
               className={cn(
-                'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all',
+                'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors',
                 tagFilter === t
                   ? TAG_COLORS[t] || TAG_COLOR_DEFAULT
                   : 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
@@ -282,7 +282,7 @@ export function LeadsTable({ onRowClick }: Props) {
                     'group cursor-pointer transition-colors duration-100',
                     selected.has(lead.id)
                       ? 'bg-orange-500/[0.04]'
-                      : 'hover:bg-white/[0.02]',
+                      : 'hover:bg-white/[0.04]',
                   )}
                 >
                   <td className="px-4 py-3.5 w-10">

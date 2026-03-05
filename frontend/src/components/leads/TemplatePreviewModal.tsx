@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  X, Mail, MessageSquare, PhoneCall, Copy, Check,
+  X, Mail, MessageSquare, PhoneCall, Video, Copy, Check,
   ChevronRight, Loader2,
 } from 'lucide-react';
 import type { Lead, Template, TemplateChannel, TemplatePreview } from '../../types';
@@ -14,12 +14,14 @@ const CHANNEL_TABS: { key: TemplateChannel; label: string; icon: React.ElementTy
   { key: 'email', label: 'Email', icon: Mail },
   { key: 'sms', label: 'SMS', icon: MessageSquare },
   { key: 'call_script', label: 'Call Script', icon: PhoneCall },
+  { key: 'loom_script', label: 'Loom Script', icon: Video },
 ];
 
 const CHANNEL_COLORS: Record<TemplateChannel, string> = {
   email: 'text-violet-400',
   sms: 'text-green-400',
   call_script: 'text-amber-400',
+  loom_script: 'text-rose-400',
 };
 
 interface Props {
@@ -129,7 +131,7 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
                 key={tab.key}
                 onClick={() => setChannel(tab.key)}
                 className={cn(
-                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                   active
                     ? 'bg-zinc-800 text-white border border-white/[0.08]'
                     : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50',
@@ -171,7 +173,7 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
                         key={t.id}
                         onClick={() => handleSelect(t)}
                         className={cn(
-                          'w-full text-left px-4 py-3 flex items-center gap-3 transition-all group',
+                          'w-full text-left px-4 py-3 flex items-center gap-3 transition-colors group',
                           selectedId === t.id
                             ? 'bg-zinc-800 border-l-2 border-orange-500'
                             : 'hover:bg-zinc-800/50 border-l-2 border-transparent',
@@ -228,7 +230,7 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
                     <button
                       onClick={handleCopy}
                       className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all',
+                        'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
                         copied
                           ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
                           : 'bg-orange-500 hover:bg-orange-400 text-white shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]',

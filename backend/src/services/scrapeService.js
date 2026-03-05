@@ -146,6 +146,16 @@ function detectTechStack($, html) {
   return 'Custom / Unknown';
 }
 
+function detectContactForm($) {
+  return $('form').filter((_, el) => {
+    const action = ($(el).attr('action') || '').toLowerCase();
+    const cls = ($(el).attr('class') || '').toLowerCase();
+    const id = ($(el).attr('id') || '').toLowerCase();
+    if (action.includes('search') || cls.includes('search') || id.includes('search')) return false;
+    return true;
+  }).length > 0;
+}
+
 async function scrapeWebsite(url) {
   if (!url) return { error: 'No website URL provided' };
 
@@ -178,6 +188,7 @@ async function scrapeWebsite(url) {
     team_names: extractTeamNames($),
     services: extractServices($),
     tech_stack: detectTechStack($, html),
+    has_contact_form: detectContactForm($),
     scraped_at: new Date().toISOString(),
   };
 }

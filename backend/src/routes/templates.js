@@ -47,7 +47,7 @@ router.post('/', (req, res, next) => {
       return res.status(400).json({ success: false, error: 'name, channel, status_stage, and body are required' });
     }
 
-    const valid_channels = ['email', 'sms', 'call_script'];
+    const valid_channels = ['email', 'sms', 'call_script', 'loom_script'];
     if (!valid_channels.includes(channel)) {
       return res.status(400).json({ success: false, error: `channel must be one of: ${valid_channels.join(', ')}` });
     }

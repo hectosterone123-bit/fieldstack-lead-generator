@@ -1,11 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Loader2, Bot, Trash2, ChevronLeft, Wrench } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { X, Plus, Loader2, Bot, Trash2, ChevronLeft, Wrench, AlertCircle, RotateCcw } from 'lucide-react';
+import { cn, formatRelativeTime } from '../../lib/utils';
 import { useCopilotContext } from '../../lib/copilotContext';
 import { useConversations, useCreateConversation, useDeleteConversation, useMessages, useSendMessage } from '../../hooks/useChat';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
 import { QuickActions } from './QuickActions';
+
+const TOOL_LABELS: Record<string, string> = {
+  get_lead: 'Looking up lead',
+  search_leads: 'Searching leads',
+  get_followups: 'Checking follow-ups',
+  get_stats: 'Getting stats',
+  get_templates: 'Finding templates',
+  preview_template: 'Rendering template',
+  update_lead_status: 'Updating status',
+  log_activity: 'Logging activity',
+  set_followup: 'Scheduling follow-up',
+  update_heat_score: 'Updating heat score',
+  add_note: 'Adding note',
+};
 
 interface Props {
   open: boolean;
@@ -15,19 +29,38 @@ interface Props {
 export function CopilotSidebar({ open, onClose }: Props) {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { context } = useCopilotContext();
   const { data: conversations } = useConversations();
   const createConversation = useCreateConversation();
   const deleteConversation = useDeleteConversation();
   const { data: messages } = useMessages(activeConversationId);
-  const { send, cancel, streaming, streamedText, toolStatus } = useSendMessage(activeConversationId);
+  const { send, cancel, streaming, streamedText, toolStatus, error, retry } = useSendMessage(activeConversationId);
 
   // Auto-scroll when streaming
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamedText, toolStatus]);
+
+  // Elapsed time counter
+  useEffect(() => {
+    if (streaming) {
+      setElapsedSeconds(0);
+      intervalRef.current = setInterval(() => {
+        setElapsedSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      setElapsedSeconds(0);
+    }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [streaming]);
 
   async function handleNewConversation() {
     const conv = await createConversation.mutateAsync(context);
@@ -39,8 +72,7 @@ export function CopilotSidebar({ open, onClose }: Props) {
     if (!activeConversationId) {
       const conv = await createConversation.mutateAsync(context);
       setActiveConversationId(conv.id);
-      // Small delay to ensure state settles, then send
-      setTimeout(() => send(text), 50);
+      send(text, conv.id);
       return;
     }
     send(text);
@@ -51,6 +83,7 @@ export function CopilotSidebar({ open, onClose }: Props) {
   }
 
   const hasMessages = (messages && messages.length > 0) || streaming;
+  const elapsedLabel = elapsedSeconds > 0 ? ` ${elapsedSeconds}s` : '';
 
   return (
     <div className={cn(
@@ -124,7 +157,7 @@ export function CopilotSidebar({ open, onClose }: Props) {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm text-zinc-300 truncate">{conv.title}</p>
                         <p className="text-xs text-zinc-600 mt-0.5">
-                          {new Date(conv.updated_at).toLocaleDateString()}
+                          {formatRelativeTime(conv.updated_at)}
                         </p>
                       </div>
                       <button
@@ -157,7 +190,7 @@ export function CopilotSidebar({ open, onClose }: Props) {
                   /* Messages */
                   <div className="py-3">
                     {messages?.map(msg => (
-                      <MessageBubble key={msg.id} role={msg.role} content={msg.content} />
+                      <MessageBubble key={msg.id} role={msg.role} content={msg.content} timestamp={msg.created_at} />
                     ))}
 
                     {/* Tool status */}
@@ -165,13 +198,7 @@ export function CopilotSidebar({ open, onClose }: Props) {
                       <div className="flex items-center gap-2 px-4 py-2">
                         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 text-xs text-zinc-400">
                           <Wrench className="w-3 h-3 animate-pulse" />
-                          {toolStatus === 'get_lead' && 'Looking up lead...'}
-                          {toolStatus === 'search_leads' && 'Searching leads...'}
-                          {toolStatus === 'get_followups' && 'Checking follow-ups...'}
-                          {toolStatus === 'get_stats' && 'Getting stats...'}
-                          {toolStatus === 'get_templates' && 'Finding templates...'}
-                          {toolStatus === 'preview_template' && 'Rendering template...'}
-                          {!['get_lead', 'search_leads', 'get_followups', 'get_stats', 'get_templates', 'preview_template'].includes(toolStatus) && `Using ${toolStatus}...`}
+                          {TOOL_LABELS[toolStatus] || `Using ${toolStatus}`}...{elapsedLabel}
                         </div>
                       </div>
                     )}
@@ -185,7 +212,24 @@ export function CopilotSidebar({ open, onClose }: Props) {
                     {streaming && !streamedText && !toolStatus && (
                       <div className="flex items-center gap-2 px-4 py-2">
                         <Loader2 className="w-4 h-4 text-zinc-500 animate-spin" />
-                        <span className="text-xs text-zinc-500">Thinking...</span>
+                        <span className="text-xs text-zinc-500">Thinking...{elapsedLabel}</span>
+                      </div>
+                    )}
+
+                    {/* Error state */}
+                    {error && !streaming && (
+                      <div className="px-4 py-2">
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span className="flex-1 min-w-0">{error}</span>
+                          <button
+                            onClick={retry}
+                            className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 hover:bg-red-500/30 transition-colors"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Retry
+                          </button>
+                        </div>
                       </div>
                     )}
 

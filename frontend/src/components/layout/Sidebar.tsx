@@ -1,12 +1,14 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/finder', icon: Search, label: 'Find Leads' },
   { to: '/leads', icon: Users, label: 'Pipeline' },
+  { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
   { to: '/templates', icon: FileText, label: 'Templates' },
+  { to: '/sequences', icon: Repeat, label: 'Sequences' },
 ];
 
 export function Sidebar() {
@@ -36,7 +38,7 @@ export function Sidebar() {
             end={to === '/'}
             className={({ isActive }) =>
               cn(
-                'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150',
+                'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150',
                 isActive
                   ? 'bg-orange-500/10 text-orange-400 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.15)]'
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03]',
@@ -58,8 +60,8 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-white/[0.04]">
-        <div className="flex items-center gap-2 px-2 py-2 rounded-lg bg-white/[0.02]">
+      <div className="px-2 py-3 border-t border-white/[0.04]">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02]">
           <MapPin className="w-3 h-3 text-zinc-600 flex-shrink-0" />
           <span className="text-[10px] text-zinc-600 leading-tight">Powered by OpenStreetMap</span>
         </div>

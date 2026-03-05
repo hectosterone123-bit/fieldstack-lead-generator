@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Bell, ChevronRight, BotMessageSquare } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -16,6 +16,19 @@ export function AppLayout() {
   const location = useLocation();
   const pageTitle = PAGE_TITLES[location.pathname] ?? 'FieldStack';
   const [copilotOpen, setCopilotOpen] = useState(false);
+
+  // Ctrl+K / Cmd+K to toggle copilot
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      setCopilotOpen(prev => !prev);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   return (
     <CopilotContextProvider>
@@ -38,7 +51,7 @@ export function AppLayout() {
                     ? 'bg-orange-500/10 text-orange-400'
                     : 'hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300'
                 )}
-                title="AI Copilot"
+                title="Toggle AI Copilot (Ctrl+K)"
               >
                 <BotMessageSquare className="w-4 h-4" />
               </button>

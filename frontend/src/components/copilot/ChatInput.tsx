@@ -35,7 +35,7 @@ export function ChatInput({ onSend, onCancel, streaming }: Props) {
 
   return (
     <div className="px-3 pb-3 pt-2">
-      <div className="flex items-end gap-2 bg-zinc-800/60 border border-white/[0.06] rounded-xl px-3 py-2 focus-within:ring-1 focus-within:ring-orange-500/40 focus-within:border-orange-500/30 transition-all">
+      <div className="flex items-end gap-2 bg-zinc-800/60 border border-white/[0.06] rounded-xl px-3 py-2 focus-within:ring-1 focus-within:ring-orange-500/40 focus-within:border-orange-500/30 transition-colors">
         <textarea
           ref={textareaRef}
           value={value}

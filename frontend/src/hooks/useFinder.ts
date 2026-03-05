@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { searchBusinesses, importLeads, type FinderSearch } from '../lib/api';
-import type { FinderResult } from '../types';
+import { searchBusinesses, importLeads, batchSearchBusinesses, type FinderSearch } from '../lib/api';
+import type { FinderResult, ImportOptions, BatchSearchParams } from '../types';
 
 export function useFinderSearch() {
   return useMutation({
@@ -8,13 +8,21 @@ export function useFinderSearch() {
   });
 }
 
+export function useBatchSearch() {
+  return useMutation({
+    mutationFn: (params: BatchSearchParams) => batchSearchBusinesses(params),
+  });
+}
+
 export function useImportLeads() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (leads: FinderResult[]) => importLeads(leads),
+    mutationFn: ({ leads, options }: { leads: FinderResult[]; options?: ImportOptions }) =>
+      importLeads(leads, options),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['leads'] });
       qc.invalidateQueries({ queryKey: ['stats'] });
+      qc.invalidateQueries({ queryKey: ['sequences'] });
     },
   });
 }

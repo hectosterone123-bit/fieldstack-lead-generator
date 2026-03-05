@@ -2,7 +2,10 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'leads.db');
+// On Railway, RAILWAY_VOLUME_MOUNT_PATH is auto-set to the volume mount (e.g. /data)
+// Locally, fall back to backend/data/
+const DB_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DB_DIR, 'leads.db');
 
 let db;
 
@@ -32,6 +35,7 @@ CREATE TABLE IF NOT EXISTS leads (
   osm_id           TEXT UNIQUE,
   osm_type         TEXT,
   contact_count    INTEGER DEFAULT 0,
+  first_contacted_at DATETIME,
   last_contacted_at DATETIME,
   next_followup_at  DATETIME,
   notes            TEXT,
@@ -93,20 +97,75 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
+
+CREATE TABLE IF NOT EXISTS sequences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  steps TEXT NOT NULL,
+  is_active INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS lead_sequences (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id INTEGER NOT NULL,
+  sequence_id INTEGER NOT NULL,
+  current_step INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'active',
+  enrolled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  paused_at DATETIME,
+  completed_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+  FOREIGN KEY (sequence_id) REFERENCES sequences(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_lead_sequences_lead_id ON lead_sequences(lead_id);
+CREATE INDEX IF NOT EXISTS idx_lead_sequences_status ON lead_sequences(status);
+
+CREATE TABLE IF NOT EXISTS sms_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id     INTEGER,
+  direction   TEXT NOT NULL DEFAULT 'outbound',
+  from_number TEXT NOT NULL,
+  to_number   TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  twilio_sid  TEXT UNIQUE,
+  status      TEXT DEFAULT 'queued',
+  error_code  TEXT,
+  error_message TEXT,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_lead_id ON sms_messages(lead_id);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_twilio_sid ON sms_messages(twilio_sid);
+CREATE INDEX IF NOT EXISTS idx_sms_messages_direction ON sms_messages(direction);
+
+CREATE TABLE IF NOT EXISTS sms_opt_outs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone      TEXT NOT NULL UNIQUE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `;
 
 async function initDb() {
   const SQL = await initSqlJs();
 
-  if (!fs.existsSync(path.dirname(DB_PATH))) {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+  if (!fs.existsSync(DB_DIR)) {
+    fs.mkdirSync(DB_DIR, { recursive: true });
   }
 
   if (fs.existsSync(DB_PATH)) {
     const fileBuffer = fs.readFileSync(DB_PATH);
     db = new SQL.Database(fileBuffer);
+    const leadCount = db.exec('SELECT COUNT(*) FROM leads');
+    console.log(`[DB] Loaded existing database from ${DB_PATH} (${leadCount[0]?.values[0][0] || 0} leads)`);
   } else {
     db = new SQL.Database();
+    console.log(`[DB] Created new database at ${DB_PATH}`);
   }
 
   db.run(SCHEMA);
@@ -124,11 +183,29 @@ async function initDb() {
   // Migrations: add tags column
   try { db.run('ALTER TABLE leads ADD COLUMN tags TEXT'); } catch(e) {}
 
+  // Migrations: add first_contacted_at for speed-to-lead tracking
+  try { db.run('ALTER TABLE leads ADD COLUMN first_contacted_at DATETIME'); } catch(e) {}
+
+  // Migration: re-seed templates if they don't have niche variables
+  migrateTemplatesToNiche();
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 
+  // Seed default sequence if table is empty
+  seedDefaultSequence();
+
   saveDb();
   return db;
+}
+
+function migrateTemplatesToNiche() {
+  const sample = get("SELECT body FROM templates WHERE is_default = 1 AND step_order = 1 LIMIT 1");
+  if (!sample) return; // no templates yet, seedDefaultTemplates will handle it
+  if (sample.body && sample.body.includes('{scenario_')) return; // already migrated
+  console.log('[DB] Migrating templates to niche-specific variables...');
+  db.run("DELETE FROM templates WHERE is_default = 1");
+  // seedDefaultTemplates() will re-insert them on the next call
 }
 
 function seedDefaultTemplates() {
@@ -149,14 +226,12 @@ function seedDefaultTemplates() {
       channel: 'email',
       status_stage: 'new',
       step_order: 1,
-      subject: '{service_type} issue at my home — need someone this week',
+      subject: '{scenario_subject}',
       body: `Hi,
 
 I found {business_name} while looking for {service_type} companies in {city} and your reviews looked solid.
 
-Here's what's going on: our system has been running nonstop but the house won't get below 78. Started about three days ago. We've changed the filter and checked the thermostat — still the same.
-
-We're home most days this week. Could someone come take a look? We'd love a free estimate if you offer one.
+Here's what's going on: {scenario_standard}
 
 Thanks,
 Alex Thompson
@@ -169,10 +244,10 @@ Alex Thompson
       channel: 'email',
       status_stage: 'new',
       step_order: 1,
-      subject: 'System completely down — {city} — need help ASAP',
+      subject: 'Urgent {service_type} issue — {city} — need help ASAP',
       body: `Hi {business_name},
 
-Our {service_type} system stopped working this afternoon. No air coming out at all. We have an elderly parent staying with us and need this resolved quickly.
+{scenario_urgent}
 
 We found you on Google and saw you serve the {city} area. Can someone come out today or first thing tomorrow?
 
@@ -194,9 +269,7 @@ Jordan Rivera
       subject: 'Neighbor recommended {business_name}',
       body: `Hi there,
 
-My neighbor on Elm Street had {business_name} out last month and couldn't stop talking about the service. Said you were fast, fair, and actually showed up when you said you would (which apparently is rare).
-
-We've been putting off getting our system looked at — it's probably 12-15 years old and we're not sure if it needs a repair or a full replacement. Would love to get a professional opinion before summer hits.
+My neighbor on Elm Street {scenario_referral}
 
 Are you booking estimates for the {city} area this week?
 
@@ -212,7 +285,7 @@ Sam Mitchell
       status_stage: 'new',
       step_order: 1,
       subject: null,
-      body: `Hi, found {business_name} on Google. Need {service_type} help in {city} — system isn't cooling right. Available for an estimate this week? Thanks - Alex`,
+      body: `Hi, found {business_name} on Google. Need {service_type} help in {city} — {scenario_sms} Thanks - Alex`,
     },
     {
       name: 'Speed Test — SMS Urgent',
@@ -220,7 +293,7 @@ Sam Mitchell
       status_stage: 'new',
       step_order: 1,
       subject: null,
-      body: `{service_type} system just stopped working at our home in {city}. Elderly parent here. Can {business_name} send someone today or tomorrow AM? Please call back ASAP.`,
+      body: `{scenario_sms_urgent} We're in {city}. Can {business_name} send someone today or tomorrow AM? Please call back ASAP.`,
     },
 
     // --- Call Script ---
@@ -236,9 +309,9 @@ OPENING:
 "Hi, I'm looking for {service_type} help. I found {business_name} online — do you guys service the {city} area?"
 
 SCENARIO (pick one):
-A) "Our system has been running but the house won't cool below 78. Started a few days ago."
-B) "We've got an older unit, probably 12-15 years, and want someone to tell us if it's worth repairing or replacing."
-C) "System went out completely. No air at all. We need someone out fast."
+A) "{scenario_call_a}"
+B) "{scenario_call_b}"
+C) "{scenario_call_c}"
 
 WHAT TO TRACK:
 • Did they answer the phone? (or voicemail?)
@@ -324,16 +397,16 @@ Fieldstack`,
       channel: 'email',
       status_stage: 'contacted',
       step_order: 2,
-      subject: '{first_name}, I think {business_name} left $8K+ on the table last month',
+      subject: '{first_name}, I think {business_name} left {lost_revenue_monthly} on the table last month',
       body: `{first_name},
 
 Quick math that might ruin your morning (sorry in advance):
 
-The average {service_type} job in {city} is worth $800-2,000. If {business_name} gets 20 leads a month and your close rate is around 25%, you're booking roughly 5 jobs.
+The average {service_type} job in {city} is worth {avg_job_value}. If {business_name} gets {monthly_leads_single} leads a month and your close rate is around {close_rate_slow}, you're leaving a lot on the table.
 
-But here's the thing — industry data shows contractors who respond in under 5 minutes close at 45-60%. Same leads. Same market. Same prices. Just faster follow-up.
+But here's the thing — industry data shows contractors who respond in under 5 minutes close at {close_rate_fast}. Same leads. Same market. Same prices. Just faster follow-up.
 
-That's the difference between 5 booked jobs and 10-12 booked jobs. From leads you already paid for.
+That's the gap between your current bookings and what you should be closing. From leads you already paid for.
 
 I tested {business_name}'s actual response time last week. Submitted a real-looking service request and timed it. Then I compared it to other {service_type} companies near {city}.
 
@@ -589,13 +662,13 @@ And if you have watched it — what did you think? Anything surprise you?
       subject: '{city} {service_type} searches are spiking — is {business_name} ready?',
       body: `{first_name},
 
-Heads up: search volume for "{service_type} near me" in the {city} area is climbing. Every year it follows the same pattern — slow build, then a flood right when temperatures shift.
+Heads up: search volume for "{service_type} near me" in the {city} area is climbing. Every year it follows the same pattern — slow build, then a flood right when {seasonal_trigger}.
 
 The contractors who win that surge aren't the ones with the biggest ad budgets. They're the ones who respond in under 5 minutes while everyone else is taking 2-4 hours.
 
 I showed this in the Loom video I sent: [INSERT LOOM LINK]
 
-Right now, {business_name} has a window to fix the response gap before your busiest season. Once the rush hits, you'll be too busy putting out fires (figuratively) to change anything.
+Right now, {business_name} has a window to fix the response gap before {busy_season}. Once the rush hits, you'll be too busy to change anything.
 
 15-minute call this week? I'll show you exactly what to set up.
 
@@ -752,7 +825,7 @@ And if the answer is "I've been meaning to reply" — here's the video one more 
 
 Either way, one number to remember:
 
-Every hour you wait to respond to a new lead, your chance of booking that job drops by 80%. That's the difference between a $2,000 job booked and a $2,000 job lost.
+Every hour you wait to respond to a new lead, your chance of booking that job drops by 80%. That's the difference between a {avg_job_single} job booked and a {avg_job_single} job lost.
 
 Your call, {first_name}.
 
@@ -779,6 +852,8 @@ This is my last email about the speed test. But I don't want to leave empty-hand
 
 3. Check your voicemail. Seriously. Call your own number. Is the voicemail full? Does it sound professional? Does it give them a reason to leave a message? 40% of {service_type} companies have a full or generic voicemail box.
 
+The biggest thing: {pain_point}. If you're not responding fast, someone else is.
+
 These are all in the video I made: [INSERT LOOM LINK]
 
 If you ever want to automate this stuff properly, you know where to find me.
@@ -798,12 +873,12 @@ Fieldstack`,
 
 Last email. Just want to leave you with the math.
 
-If {business_name} gets 20 leads per month (pretty standard for {service_type} in {city}):
-• At a 25% close rate = 5 booked jobs
-• At a 55% close rate = 11 booked jobs
-• Average job value in your area: ~$1,200
+If {business_name} gets {monthly_leads_single} leads per month (pretty standard for {service_type} in {city}):
+• At a {close_rate_slow} close rate — you're leaving jobs on the table
+• At a {close_rate_fast} close rate — that's what speed-to-lead gets you
+• Average job value in your area: ~{avg_job_single}
 
-That's the difference between $6,000/mo and $13,200/mo. Same leads. Same ads. Same team.
+That gap is {lost_revenue_monthly} per month. Same leads. Same ads. Same team.
 
 The only variable? How fast you respond.
 
@@ -869,10 +944,10 @@ Fieldstack`,
       channel: 'email',
       status_stage: 'lost',
       step_order: 7,
-      subject: '{service_type} season is about to hit {city} — is {business_name} ready?',
+      subject: '{busy_season} is about to hit {city} — is {business_name} ready?',
       body: `{first_name},
 
-Every year it's the same cycle: temperatures shift, phones start ringing, and {service_type} companies scramble to keep up.
+Every year it's the same cycle: {seasonal_trigger}, phones start ringing, and {service_type} companies scramble to keep up.
 
 Last time we talked, {business_name} was leaving some response time on the table. The leads were there — they just weren't getting caught fast enough.
 
@@ -934,7 +1009,115 @@ Fieldstack`,
       status_stage: 'lost',
       step_order: 7,
       subject: null,
-      body: `{first_name}, {service_type} season is ramping up in {city}. The speed test data I pulled for {business_name} is still relevant. Want a fresh look before things get crazy?`,
+      body: `{first_name}, {busy_season} is ramping up in {city}. The speed test data I pulled for {business_name} is still relevant. Want a fresh look before things get crazy?`,
+    },
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LOOM SCRIPTS — Video walkthroughs for personalized outreach
+    // Purpose: Under-90-second scripts showing prospects how much money
+    // they're losing. Not about how the code works — about the cost of inaction.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // --- Script 1: The "Anti-Ghosting" Loom ---
+    {
+      name: 'Loom — Anti-Ghosting Script',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `THE "ANTI-GHOSTING" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Their website contact form.
+Tab 2 (Open): Your "Sam AI" dashboard (with their logo).
+
+0:00 - 0:15: THE HOOK (The Ghost Test)
+"Hey {first_name}, this is [Your Name] from Fieldstack. I'm looking at your website right now. I actually filled out your 'Request a Quote' form about 20 minutes ago, and I noticed I haven't received a text or a call back yet."
+
+0:15 - 0:35: THE PAIN (The Leaky Bucket)
+"I'm sure you're busy on a job site, but here's the problem: Most homeowners call the first 3 guys on Google. If you don't reply in under 5 minutes, you usually lose that lead to the guy who did pick up the phone. {loom_pain}"
+
+0:35 - 1:00: THE REVEAL (Switch to Tab 2)
+"That's why I built this for you. I've prepped a custom AI Sales Assistant named Sam. Look at my screen — {loom_reveal} It uses a local {city} number so it feels like a real neighbor is helping them out."
+
+1:00 - 1:20: THE "NO-BRAINER" ASK
+"I'm looking for just one partner in {city} to run this for. I'll do the full setup in 72 hours, and if Sam doesn't book you at least 5 qualified quotes this month, you don't pay me a cent. I take all the risk."
+
+1:20 - 1:30: THE CLOSER
+"If you want to stop those website leads from 'ghosting' you, just reply to this email or message me back. Worth a 5-minute chat? Thanks!"
+
+TIPS:
+• Smile at the start — Loom shows a tiny circle of your face
+• Point your mouse at their logo on Tab 2 to prove it's custom
+• Keep energy conversational, not salesy`,
+    },
+
+    // --- Script 2: The "Money Left on the Table" Loom ---
+    {
+      name: 'Loom — Money Left on the Table',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `THE "MONEY LEFT ON THE TABLE" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Google search results for "{service_type} near me {city}"
+Tab 2 (Open): A simple calculator or notepad with their revenue math
+Tab 3 (Open): Your "Sam AI" dashboard (with their logo)
+
+0:00 - 0:15: THE HOOK (The Math Problem)
+"Hey {first_name}, this is [Your Name] from Fieldstack. I did some quick math on {business_name} and I think you're leaving {lost_revenue_monthly} on the table every single month. Let me show you why."
+
+0:15 - 0:40: THE PAIN (Switch to Tab 2 — The Calculator)
+"Here's the math. {loom_math_intro} If {business_name} gets {monthly_leads_single} leads a month — which is pretty standard for your area — and you're closing around {close_rate_slow}, you're leaving a lot of jobs on the table. But here's what the data says: contractors who respond in under 5 minutes close at {close_rate_fast}. Same leads, same pricing. That gap is the money nobody sees walking out the door."
+
+0:40 - 1:05: THE REVEAL (Switch to Tab 3)
+"So I set this up for {business_name}. When a lead hits your website, your Google listing, or even calls and nobody picks up — {loom_reveal} You don't have to stop what you're doing on the job site."
+
+1:05 - 1:20: THE ASK
+"I'm rolling this out to one {service_type} company per market. {city} is open right now. If Sam doesn't add at least 5 extra bookings this month, you pay nothing. Zero risk on your end."
+
+1:20 - 1:30: THE CLOSER
+"Reply to this and I'll get {business_name} set up in 72 hours. Talk soon, {first_name}."
+
+TIPS:
+• Show the actual math on screen — visual proof > verbal claims
+• Pause on the revenue gap number — let it sink in
+• Keep your tone like you're sharing a discovery, not selling`,
+    },
+
+    // --- Script 3: The "Competitor Speed Test" Loom ---
+    {
+      name: 'Loom — Competitor Speed Test',
+      channel: 'loom_script',
+      status_stage: 'qualified',
+      step_order: 3,
+      subject: null,
+      body: `THE "COMPETITOR SPEED TEST" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): A stopwatch or timer app
+Tab 2 (Open): Screenshots or notes showing competitor response times
+Tab 3 (Open): Your "Sam AI" dashboard (with their logo)
+
+0:00 - 0:15: THE HOOK (The Race They Don't Know They're In)
+"Hey {first_name}, this is [Your Name] from Fieldstack. Last week I submitted service requests to {business_name} and three of your competitors in {city} — the exact same way a homeowner would. I timed every single response. The results are brutal, and I think you need to see this."
+
+0:15 - 0:40: THE DATA (Switch between Tab 1 and Tab 2)
+"Here's what happened. Competitor A — responded in 47 seconds. Text message, asked about the job, offered to schedule. Competitor B — 4 minutes, phone call, friendly, tried to book on the spot. Competitor C — 22 minutes, sent an email. And {business_name}? I'm going to be honest with you — [X hours/no response]. By the time your team got back to me, I'd already heard from two other companies and one had offered to come out the next morning. That's exactly what your real customers are experiencing right now."
+
+0:40 - 1:05: THE REVEAL (Switch to Tab 3)
+"Here's what I built for you. This is Sam — an AI assistant that responds to every single lead in under 20 seconds. Texts them from a local {city} number, qualifies the job, and books the estimate. Your competitors are winning right now because they're faster — not because they're better. This closes that gap overnight."
+
+1:05 - 1:20: THE ASK
+"I'm only setting this up for one {service_type} company per zip code so there's no conflict. If Sam doesn't book you 5 qualified estimates this month, you don't pay a dime. For {service_type} jobs averaging {avg_job_single}, that's real money."
+
+1:20 - 1:30: THE CLOSER
+"Reply back and I'll have {business_name} live in 72 hours. Your competitors are already fast — let's make you faster. Talk soon."
+
+TIPS:
+• Show real timestamps — specificity builds trust
+• Don't trash competitors, just state the facts neutrally
+• Reference their specific trade ({service_type}) — makes it feel personalized
+• Let the gap speak for itself — the silence after their response time is powerful`,
     },
   ];
 
@@ -944,9 +1127,59 @@ Fieldstack`,
   });
 }
 
+function seedDefaultSequence() {
+  const count = get('SELECT COUNT(*) as c FROM sequences');
+  if (count && count.c > 0) return;
+
+  // Find the first email template for each step_order (1-7) to build the default sequence
+  const steps = [];
+  const delayDays = [0, 3, 5, 8, 12, 17, 45];
+  const stepLabels = [
+    'Mystery Shopper Test',
+    'Problem Reveal — Loom Tease',
+    'Loom Video Delivery',
+    'Follow-Up #1',
+    'Follow-Up #2 — Social Proof',
+    'Breakup Email',
+    'Re-engagement',
+  ];
+
+  for (let i = 1; i <= 7; i++) {
+    const tpl = get(
+      "SELECT id, name FROM templates WHERE step_order = ? AND channel = 'email' AND is_default = 1 ORDER BY id ASC",
+      [i]
+    );
+    if (tpl) {
+      steps.push({
+        order: i,
+        delay_days: delayDays[i - 1],
+        channel: 'email',
+        template_id: tpl.id,
+        label: stepLabels[i - 1],
+      });
+    }
+  }
+
+  if (steps.length > 0) {
+    db.run(
+      "INSERT INTO sequences (name, description, steps, is_active) VALUES (?, ?, ?, 1)",
+      [
+        '7-Step Outreach',
+        'Default outreach sequence: mystery shopper test → reveal → video delivery → follow-ups → breakup → re-engagement.',
+        JSON.stringify(steps),
+      ]
+    );
+  }
+}
+
 function saveDb() {
   const data = db.export();
   const buffer = Buffer.from(data);
+  // Keep a rolling backup to prevent data loss from sql.js in-memory overwrites
+  if (fs.existsSync(DB_PATH)) {
+    const backupPath = DB_PATH + '.bak';
+    try { fs.copyFileSync(DB_PATH, backupPath); } catch {}
+  }
   fs.writeFileSync(DB_PATH, buffer);
 }
 

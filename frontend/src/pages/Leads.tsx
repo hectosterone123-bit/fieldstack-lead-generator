@@ -1,14 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { Download, Upload } from 'lucide-react';
+import { Download, Upload, List, Columns3 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Lead } from '../types';
 import { LeadsTable } from '../components/leads/LeadsTable';
+import { KanbanBoard } from '../components/leads/KanbanBoard';
 import { LeadDrawer } from '../components/leads/LeadDrawer';
 import { importCsv } from '../lib/api';
 import { useCopilotContext } from '../lib/copilotContext';
+import { cn } from '../lib/utils';
 
 export function Leads() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [view, setView] = useState<'table' | 'kanban'>('table');
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,11 +57,33 @@ export function Leads() {
     <div className="flex flex-col h-[calc(100vh-3rem)]">
       {/* Page header */}
       <div className="px-5 py-4 border-b border-white/[0.04] flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-zinc-100 font-semibold text-lg tracking-tight">Lead Pipeline</h1>
-          <p className="text-zinc-500 text-sm mt-0.5">Track and manage your discovered leads</p>
-        </div>
+        <h1 className="text-zinc-100 font-semibold text-sm tracking-tight">Lead Pipeline</h1>
         <div className="flex items-center gap-2.5">
+          {/* View toggle */}
+          <div className="flex items-center bg-zinc-800/60 border border-white/[0.06] rounded-lg p-0.5">
+            <button
+              onClick={() => setView('table')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                view === 'table'
+                  ? 'bg-zinc-700 text-zinc-200 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              <List className="w-3.5 h-3.5" /> Table
+            </button>
+            <button
+              onClick={() => setView('kanban')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                view === 'kanban'
+                  ? 'bg-zinc-700 text-zinc-200 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              <Columns3 className="w-3.5 h-3.5" /> Board
+            </button>
+          </div>
           {importStatus && (
             <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
               importStatus.startsWith('Error')
@@ -92,7 +117,11 @@ export function Leads() {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        <LeadsTable onRowClick={setSelectedLead} />
+        {view === 'table' ? (
+          <LeadsTable onRowClick={setSelectedLead} />
+        ) : (
+          <KanbanBoard onLeadClick={setSelectedLead} />
+        )}
       </div>
 
       <LeadDrawer

@@ -10,7 +10,7 @@ export type ActivityType =
   | 'status_change' | 'note' | 'call_attempt'
   | 'email_sent' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
 
-export type TemplateChannel = 'email' | 'sms' | 'call_script';
+export type TemplateChannel = 'email' | 'sms' | 'call_script' | 'loom_script';
 
 export interface Template {
   id: number;
@@ -113,10 +113,30 @@ export interface FinderResult {
   website_live: boolean;
   google_maps_url: string | null;
   heat_score: number;
+  prospect_score: number;
   already_imported: boolean;
   rating: number | null;
   review_count: number | null;
   source: string;
+}
+
+export interface ImportOptions {
+  auto_enrich?: boolean;
+  auto_enroll?: boolean;
+  sequence_id?: number;
+}
+
+export interface BatchSearchParams {
+  service_type: string;
+  cities: Array<{ city: string; state: string }>;
+  radius_km?: number;
+  source?: 'google' | 'osm' | 'both';
+}
+
+export interface BatchSearchMeta {
+  city_log: Array<{ city: string; state: string; found: number; error?: string }>;
+  total: number;
+  new: number;
 }
 
 export interface Stats {
@@ -129,6 +149,13 @@ export interface Stats {
   conversion_rate: number;
   contacted_this_week: number;
   recent_activities: (Activity & { business_name: string })[];
+  leads_found_this_week: number;
+  enrichment_rate: number;
+  outreach_coverage: number;
+  avg_untouched_age_days: number | null;
+  avg_speed_to_lead_minutes: number | null;
+  best_speed_to_lead_minutes: number | null;
+  speed_to_lead_sample: number;
 }
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -206,4 +233,118 @@ export interface CopilotContext {
   page: string;
   lead_id?: number;
   lead_name?: string;
+}
+
+// ─── Sequences ───────────────────────────────────────────────────────────────
+
+export interface SequenceStep {
+  order: number;
+  delay_days: number;
+  channel: TemplateChannel;
+  template_id: number;
+  label: string;
+}
+
+export interface Sequence {
+  id: number;
+  name: string;
+  description: string | null;
+  steps: SequenceStep[];
+  is_active: number;
+  active_enrollments?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EnrollmentStatus = 'active' | 'paused' | 'completed' | 'cancelled';
+
+export interface LeadSequenceEnrollment {
+  id: number;
+  lead_id: number;
+  sequence_id: number;
+  current_step: number;
+  status: EnrollmentStatus;
+  enrolled_at: string;
+  paused_at: string | null;
+  completed_at: string | null;
+  sequence_name: string;
+  steps: SequenceStep[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutreachQueueItem {
+  enrollment_id: number;
+  lead_id: number;
+  sequence_id: number;
+  sequence_name: string;
+  business_name: string;
+  first_name: string | null;
+  lead_email: string | null;
+  lead_phone: string | null;
+  current_step: number;
+  total_steps: number;
+  step_label: string;
+  channel: TemplateChannel;
+  template_id: number;
+  template_name: string;
+  rendered_subject: string;
+  rendered_body: string;
+  due_date: string;
+  is_overdue: boolean;
+  enrolled_at: string;
+}
+
+export interface QueueStats {
+  overdue: number;
+  due_today: number;
+  upcoming: number;
+}
+
+// ─── SMS ─────────────────────────────────────────────────────────────────────
+
+export interface SmsMessage {
+  id: number;
+  lead_id: number | null;
+  direction: 'inbound' | 'outbound';
+  from_number: string;
+  to_number: string;
+  body: string;
+  twilio_sid: string | null;
+  status: string;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  business_name?: string;
+  first_name?: string | null;
+  lead_status?: string;
+}
+
+export interface SmsThread {
+  lead_id: number;
+  business_name: string | null;
+  first_name: string | null;
+  phone: string | null;
+  lead_status: string | null;
+  service_type: string | null;
+  message_count: number;
+  inbound_count: number;
+  outbound_count: number;
+  last_message_at: string;
+  last_message: string;
+  last_direction: 'inbound' | 'outbound';
+}
+
+export interface MissedCallSettings {
+  enabled: boolean;
+  message: string;
+  twilio_configured: boolean;
+}
+
+export interface ReviewRequestSettings {
+  enabled: boolean;
+  message: string;
+  google_review_link: string;
+  twilio_configured: boolean;
 }

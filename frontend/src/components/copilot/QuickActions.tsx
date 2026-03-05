@@ -44,7 +44,7 @@ export function QuickActions({ onSelect }: Props) {
         <button
           key={text}
           onClick={() => onSelect(text)}
-          className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-800/60 hover:bg-zinc-700/60 border border-white/[0.06] hover:border-white/[0.10] rounded-lg transition-all truncate max-w-[200px]"
+          className="px-2.5 py-1.5 text-xs text-zinc-400 bg-zinc-800/60 hover:bg-zinc-700/60 border border-white/[0.06] hover:border-white/[0.10] rounded-lg transition-colors truncate max-w-[200px]"
         >
           {text}
         </button>

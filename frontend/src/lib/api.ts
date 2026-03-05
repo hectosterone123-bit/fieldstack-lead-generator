@@ -1,4 +1,4 @@
-import type { Lead, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext } from '../types';
+import type { Lead, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
 
 const BASE = '/api';
 
@@ -117,8 +117,24 @@ export async function searchBusinesses(params: FinderSearch): Promise<FinderSear
   return { results: json.data, meta: json.meta };
 }
 
-export async function importLeads(leads: FinderResult[]): Promise<{ imported: number; skipped: number }> {
-  return request('/finder/import', { method: 'POST', body: JSON.stringify({ leads }) });
+export async function importLeads(leads: FinderResult[], options?: ImportOptions): Promise<{ imported: number; skipped: number }> {
+  return request('/finder/import', { method: 'POST', body: JSON.stringify({ leads, ...options }) });
+}
+
+export interface BatchSearchResult {
+  results: FinderResult[];
+  meta: BatchSearchMeta;
+}
+
+export async function batchSearchBusinesses(params: BatchSearchParams): Promise<BatchSearchResult> {
+  const res = await fetch(`${BASE}/finder/batch-search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error);
+  return { results: json.data, meta: json.meta };
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -208,6 +224,11 @@ export function streamMessage(
     body: JSON.stringify({ content, context }),
     signal: controller.signal,
   }).then(async (res) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: 'Unknown error' }));
+      onError(new Error(body.error || `Server error (${res.status})`));
+      return;
+    }
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -237,4 +258,117 @@ export function streamMessage(
   });
 
   return controller;
+}
+
+// ─── Sequences ───────────────────────────────────────────────────────────────
+
+export async function fetchSequences(): Promise<Sequence[]> {
+  return request('/sequences');
+}
+
+export async function fetchSequence(id: number): Promise<Sequence> {
+  return request(`/sequences/${id}`);
+}
+
+export async function createSequence(data: { name: string; description?: string; steps: any[] }): Promise<Sequence> {
+  return request('/sequences', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateSequence(id: number, data: { name?: string; description?: string; steps?: any[] }): Promise<Sequence> {
+  return request(`/sequences/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteSequence(id: number): Promise<void> {
+  return request(`/sequences/${id}`, { method: 'DELETE' });
+}
+
+export async function toggleSequence(id: number): Promise<{ id: number; is_active: number }> {
+  return request(`/sequences/${id}/toggle`, { method: 'PATCH' });
+}
+
+export async function enrollLeads(lead_ids: number[], sequence_id: number): Promise<{ enrolled: number; skipped: number }> {
+  return request('/sequences/enroll', { method: 'POST', body: JSON.stringify({ lead_ids, sequence_id }) });
+}
+
+export async function fetchEnrollments(leadId: number): Promise<LeadSequenceEnrollment[]> {
+  return request(`/sequences/enrollments/${leadId}`);
+}
+
+export async function pauseEnrollment(enrollmentId: number): Promise<void> {
+  return request(`/sequences/enrollments/${enrollmentId}/pause`, { method: 'PATCH' });
+}
+
+export async function resumeEnrollment(enrollmentId: number): Promise<void> {
+  return request(`/sequences/enrollments/${enrollmentId}/resume`, { method: 'PATCH' });
+}
+
+export async function cancelEnrollment(enrollmentId: number): Promise<void> {
+  return request(`/sequences/enrollments/${enrollmentId}/cancel`, { method: 'PATCH' });
+}
+
+export async function skipEnrollmentStep(enrollmentId: number): Promise<void> {
+  return request(`/sequences/enrollments/${enrollmentId}/skip`, { method: 'PATCH' });
+}
+
+export async function fetchOutreachQueue(): Promise<OutreachQueueItem[]> {
+  return request('/sequences/queue');
+}
+
+export async function fetchQueueStats(): Promise<QueueStats> {
+  return request('/sequences/queue/stats');
+}
+
+export async function markQueueItemSent(enrollmentId: number): Promise<void> {
+  return request(`/sequences/queue/${enrollmentId}/mark-sent`, { method: 'POST' });
+}
+
+export async function dismissQueueItem(enrollmentId: number): Promise<void> {
+  return request(`/sequences/queue/${enrollmentId}/dismiss`, { method: 'POST' });
+}
+
+export async function sendQueueEmail(enrollmentId: number): Promise<{ message_id: string; advanced_to: number | string }> {
+  return request(`/sequences/queue/${enrollmentId}/send`, { method: 'POST' });
+}
+
+export async function fetchEmailStatus(): Promise<{ configured: boolean }> {
+  return request('/sequences/email-status');
+}
+
+// ─── SMS ─────────────────────────────────────────────────────────────────────
+
+export async function fetchSmsStatus(): Promise<{ configured: boolean }> {
+  return request('/sms/status');
+}
+
+export async function sendSms(lead_id: number, body?: string, template_id?: number): Promise<{ sid: string; status: string }> {
+  return request('/sms/send', { method: 'POST', body: JSON.stringify({ lead_id, body, template_id }) });
+}
+
+export async function fetchSmsConversation(leadId: number): Promise<SmsMessage[]> {
+  return request(`/sms/conversation/${leadId}`);
+}
+
+export async function fetchSmsInbox(limit?: number): Promise<SmsMessage[]> {
+  const params = limit ? `?limit=${limit}` : '';
+  return request(`/sms/inbox${params}`);
+}
+
+export async function sendQueueSms(enrollmentId: number): Promise<{ sid: string; advanced_to: number | string }> {
+  return request(`/sequences/queue/${enrollmentId}/send-sms`, { method: 'POST' });
+}
+
+export async function fetchSmsChannelStatus(): Promise<{ configured: boolean }> {
+  return request('/sequences/sms-status');
+}
+
+export async function fetchSmsThreads(): Promise<SmsThread[]> {
+  return request('/sms/threads');
+}
+
+export async function fetchMissedCallSettings(): Promise<MissedCallSettings> {
+  return request('/sms/missed-call-settings');
+}
+
+export async function fetchReviewSettings(): Promise<ReviewRequestSettings> {
+  return request('/sms/review-settings');
 }

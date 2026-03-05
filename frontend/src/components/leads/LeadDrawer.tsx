@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
-  ChevronDown, Star, Loader2, Search, Mail, Users, Wrench, Code,
+  Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
   FileText, Thermometer, Download, Sparkles, Send,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
+import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
 import type { Lead, LeadStatus, EnrichmentData, ActivityType } from '../../types';
 import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -33,6 +34,7 @@ const ACTIVITY_ICONS: Record<string, React.ElementType> = {
   note: FileText,
   call_attempt: Phone,
   email_sent: Mail,
+  sms_sent: MessageSquare,
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
@@ -43,6 +45,7 @@ const ACTIVITY_COLORS: Record<string, string> = {
   note: 'text-zinc-400',
   call_attempt: 'text-green-400',
   email_sent: 'text-violet-400',
+  sms_sent: 'text-emerald-400',
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
@@ -169,7 +172,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-[2px] z-40 transition-opacity"
+        className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-40 transition-opacity"
         onClick={onClose}
       />
 
@@ -209,8 +212,32 @@ export function LeadDrawer({ leadId, onClose }: Props) {
         </div>
 
         {isLoading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-zinc-500 text-sm">Loading...</div>
+          <div className="flex-1 overflow-hidden">
+            <div className="grid grid-cols-3 divide-x divide-white/[0.04] border-b border-white/[0.04] bg-zinc-950/40">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="px-4 py-3 flex flex-col items-center gap-2">
+                  <div className="h-4 w-12 bg-zinc-800 rounded animate-pulse" />
+                  <div className="h-2.5 w-16 bg-zinc-800/60 rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-4 space-y-3 border-b border-white/[0.04]">
+              <div className="h-2.5 w-16 bg-zinc-800/60 rounded animate-pulse" />
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-md bg-zinc-800 animate-pulse" />
+                  <div className="h-3.5 flex-1 bg-zinc-800/60 rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="h-2.5 w-24 bg-zinc-800/60 rounded animate-pulse" />
+              <div className="grid grid-cols-2 gap-2">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="h-10 bg-zinc-800/40 rounded-lg animate-pulse" />
+                ))}
+              </div>
+            </div>
           </div>
         ) : lead ? (
           <>
@@ -315,7 +342,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                       key={s}
                       onClick={() => handleStatusChange(s)}
                       className={cn(
-                        'flex items-center gap-2 px-3 py-2.5 rounded-lg text-left border text-xs font-medium transition-all',
+                        'flex items-center gap-2 px-3 py-2.5 rounded-lg text-left border text-xs font-medium transition-colors',
                         lead.status === s ? STATUS_BTN[s] : STATUS_BTN_INACTIVE,
                       )}
                     >
@@ -339,7 +366,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               <div className="px-5 py-4 border-b border-white/[0.04] space-y-4">
                 {/* Heat score */}
                 <div>
-                  <p className="text-overline text-zinc-600 mb-2">Heat Score</p>
+                  <p className="text-overline text-zinc-600 mb-3">Heat Score</p>
                   <div className="flex items-center gap-3">
                     <HeatScore score={lead.heat_score} className="flex-1" />
                     <input
@@ -359,7 +386,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
 
                 {/* Follow-up date */}
                 <div>
-                  <p className="text-overline text-zinc-600 mb-2">Follow-up Date</p>
+                  <p className="text-overline text-zinc-600 mb-3">Follow-up Date</p>
                   <div className="flex items-center gap-2">
                     <div className="relative flex-1">
                       <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
@@ -367,7 +394,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                         type="date"
                         value={lead.next_followup_at ? lead.next_followup_at.slice(0, 10) : ''}
                         onChange={e => updateLead.mutate({ id: lead.id, data: { next_followup_at: e.target.value || null } })}
-                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 [color-scheme:dark] transition-all"
+                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 [color-scheme:dark] transition-colors"
                       />
                     </div>
                     {lead.next_followup_at && (
@@ -427,7 +454,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                     onChange={e => setCustomTag(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { addTag(customTag); setCustomTag(''); } }}
                     placeholder="Custom tag..."
-                    className="flex-1 bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-all"
+                    className="flex-1 bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-colors"
                   />
                   <button
                     onClick={() => { addTag(customTag); setCustomTag(''); }}
@@ -437,6 +464,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                   </button>
                 </div>
               </div>
+
+              {/* Sequences */}
+              <EnrollmentPanel leadId={lead.id} />
 
               {/* Website Intel */}
               <div className="px-5 py-4 border-b border-white/[0.04]">
@@ -553,7 +583,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               <div className="px-5 py-4 border-b border-white/[0.04]">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-overline text-zinc-600">Notes</p>
-                  {!editingNotes && (
+                  {!editingNotes && lead.notes && (
                     <button
                       onClick={() => { setEditNotes(lead.notes || ''); setEditingNotes(true); }}
                       className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -568,7 +598,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                       value={editNotes}
                       onChange={e => setEditNotes(e.target.value)}
                       rows={3}
-                      className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 resize-none transition-all"
+                      className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-2.5 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 resize-none transition-colors"
                     />
                     <div className="flex gap-2">
                       <button
@@ -586,37 +616,34 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-zinc-400 leading-relaxed">
-                    {lead.notes || <span className="text-zinc-600 italic">No notes yet. Click Edit to add.</span>}
-                  </p>
+                  <>
+                    {lead.notes && (
+                      <p className="text-sm text-zinc-400 leading-relaxed mb-3">{lead.notes}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={noteText}
+                        onChange={e => setNoteText(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleNote()}
+                        placeholder="Add a note..."
+                        className="flex-1 bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-colors"
+                      />
+                      <button
+                        onClick={handleNote}
+                        className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-white/[0.06] text-zinc-300 rounded-lg transition-colors"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </>
                 )}
-              </div>
-
-              {/* Add note */}
-              <div className="px-5 py-4 border-b border-white/[0.04]">
-                <p className="text-overline text-zinc-600 mb-3">Add Note</p>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={noteText}
-                    onChange={e => setNoteText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleNote()}
-                    placeholder="Quick note..."
-                    className="flex-1 bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-all"
-                  />
-                  <button
-                    onClick={handleNote}
-                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 border border-white/[0.06] text-zinc-300 rounded-lg transition-colors"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                  </button>
-                </div>
               </div>
 
               {/* Activity timeline */}
               {lead.activities && lead.activities.length > 0 && (
                 <div className="px-5 py-4">
-                  <p className="text-overline text-zinc-600 mb-4">Activity Log</p>
+                  <p className="text-overline text-zinc-600 mb-3">Activity Log</p>
                   <div className="relative">
                     <div className="absolute left-[15px] top-4 bottom-0 w-px bg-gradient-to-b from-zinc-700 via-zinc-800 to-transparent" />
                     <div className="space-y-4">
@@ -653,7 +680,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
             <div className="flex items-center gap-2 px-5 py-4 border-t border-white/[0.04] bg-zinc-950/60 backdrop-blur-sm flex-shrink-0">
               <button
                 onClick={() => setShowTemplates(true)}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-all shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)] hover:shadow-[0_0_20px_-4px_rgba(249,115,22,0.7)]"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]"
               >
                 <Send className="w-4 h-4" />
                 Outreach

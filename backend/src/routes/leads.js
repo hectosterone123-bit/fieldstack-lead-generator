@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { scrapeWebsite } = require('../services/scrapeService');
 const { recomputeHeatScore, computeInitialHeatScore } = require('../services/heatScoreService');
+const smsService = require('../services/smsService');
 
 function autoUpdateHeatScore(id) {
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
@@ -237,8 +238,9 @@ router.get('/followups/today', (req, res, next) => {
       `SELECT * FROM leads WHERE next_followup_at IS NOT NULL AND date(next_followup_at) <= date('now') AND status NOT IN ('lost', 'closed_won') ORDER BY next_followup_at ASC`,
       []
     );
-    const overdue = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) < new Date().toISOString().slice(0, 10));
-    const due_today = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) >= new Date().toISOString().slice(0, 10));
+    const today = new Date().toISOString().slice(0, 10);
+    const overdue = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) < today);
+    const due_today = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) === today);
     res.json({ success: true, data: { overdue, due_today } });
   } catch (err) { next(err); }
 });
@@ -403,7 +405,7 @@ router.post('/', (req, res, next) => {
     const result = db.run(
       `INSERT INTO leads (business_name, first_name, last_name, email, phone, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, website, has_website, website_live, google_maps_url, source, osm_id, osm_type, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [business_name, first_name, last_name, email, phone, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, website, has_website ? 1 : 0, website_live ? 1 : 0, google_maps_url, source, osm_id, osm_type, notes]
+      [business_name, first_name || null, last_name || null, email || null, phone || null, address || null, city || null, state || null, zip || null, latitude || null, longitude || null, service_type, status, heat_score, estimated_value, website || null, has_website ? 1 : 0, website_live ? 1 : 0, google_maps_url || null, source, osm_id || null, osm_type || null, notes || null]
     );
 
     const lead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
@@ -454,7 +456,7 @@ router.patch('/:id/status', (req, res, next) => {
 
     // Log activity
     if (status === 'contacted') {
-      db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+      db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END WHERE id = ?', [req.params.id]);
     }
     db.run(
       `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'status_change', ?, ?)`,
@@ -467,8 +469,8 @@ router.patch('/:id/status', (req, res, next) => {
     const followupDays = FOLLOWUP_DAYS[status];
     if (followupDays) {
       db.run(
-        `UPDATE leads SET next_followup_at = datetime('now', '+${followupDays} days') WHERE id = ?`,
-        [req.params.id]
+        `UPDATE leads SET next_followup_at = datetime('now', '+' || ? || ' days') WHERE id = ?`,
+        [followupDays, req.params.id]
       );
       db.run(
         `INSERT INTO activities (lead_id, type, title) VALUES (?, 'note', ?)`,
@@ -477,6 +479,32 @@ router.patch('/:id/status', (req, res, next) => {
     } else {
       // Terminal statuses (lost, closed_won): clear any scheduled follow-up
       db.run('UPDATE leads SET next_followup_at = NULL WHERE id = ?', [req.params.id]);
+    }
+
+    // Google Review Request: auto-send SMS when lead reaches closed_won
+    if (status === 'closed_won' && oldStatus !== 'closed_won') {
+      const reviewLink = process.env.GOOGLE_REVIEW_LINK;
+      const reviewEnabled = process.env.REVIEW_REQUEST_ENABLED !== 'false';
+
+      if (reviewEnabled && reviewLink && smsService.isConfigured() && lead.phone) {
+        const defaultMsg = `Thanks for choosing us! If you had a great experience, a quick Google review means the world: ${reviewLink}. Reply STOP to opt out.`;
+        const reviewMessage = (process.env.REVIEW_REQUEST_MESSAGE || defaultMsg).replace('{review_link}', reviewLink);
+
+        // Fire-and-forget: don't block status change on SMS result
+        smsService.sendSms(lead.phone, reviewMessage).then(result => {
+          if (result.success) {
+            db.run(
+              `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+               VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
+              [req.params.id, process.env.TWILIO_PHONE_NUMBER, smsService.normalizePhone(lead.phone), reviewMessage, result.sid, result.status]
+            );
+            db.run(
+              'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+              [req.params.id, 'sms_sent', 'Review request sent', reviewMessage.substring(0, 100), JSON.stringify({ twilio_sid: result.sid, trigger: 'review_request' })]
+            );
+          }
+        }).catch(() => {});
+      }
     }
 
     const updated = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
@@ -552,8 +580,8 @@ router.patch('/:id/snooze', (req, res, next) => {
 
     const days = Math.max(1, parseInt(req.body.days) || 1);
     db.run(
-      `UPDATE leads SET next_followup_at = datetime('now', '+${days} days'), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-      [req.params.id]
+      `UPDATE leads SET next_followup_at = datetime('now', '+' || ? || ' days'), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [days, req.params.id]
     );
     db.run(
       `INSERT INTO activities (lead_id, type, title) VALUES (?, 'note', ?)`,
@@ -585,7 +613,7 @@ router.post('/:id/activities', (req, res, next) => {
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
     if (type === 'call_attempt') {
-      db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+      db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
       autoUpdateHeatScore(req.params.id);
     }
 
