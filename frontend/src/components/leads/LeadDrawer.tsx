@@ -3,7 +3,7 @@ import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
-  FileText, Thermometer, Download, Sparkles, Send,
+  FileText, Thermometer, Download, Sparkles, Send, Video, Clock,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
@@ -361,6 +361,105 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                   ))}
                 </div>
               </div>
+
+              {/* Outreach Tracking */}
+              <div className="px-5 py-4 border-b border-white/[0.04] space-y-3">
+                <p className="text-overline text-zinc-600">Outreach Tracking</p>
+                <div>
+                  <label className="text-[10px] text-zinc-600 block mb-1">Loom Link</label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Video className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="url"
+                        defaultValue={lead.loom_url || ''}
+                        onBlur={e => { if (e.target.value !== (lead.loom_url || '')) updateLead.mutate({ id: lead.id, data: { loom_url: e.target.value || null } as any }); }}
+                        placeholder="https://loom.com/share/..."
+                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark] transition-colors"
+                      />
+                    </div>
+                    {lead.loom_url && (
+                      <a href={lead.loom_url} target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-white/[0.06] rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-600 block mb-1">Ghost Time</label>
+                  <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      defaultValue={lead.ghost_time || ''}
+                      onBlur={e => { if (e.target.value !== (lead.ghost_time || '')) updateLead.mutate({ id: lead.id, data: { ghost_time: e.target.value || null } as any }); }}
+                      placeholder="e.g. 47 min, 3h, never replied..."
+                      className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Deal Tracking */}
+              {(['proposal_sent', 'booked', 'lost', 'closed_won'] as LeadStatus[]).includes(lead.status) && (
+                <div className="px-5 py-4 border-b border-white/[0.04] space-y-3">
+                  <p className="text-overline text-zinc-600 mb-3">Deal Info</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-zinc-600 block mb-1">Proposal Amount</label>
+                      <input
+                        type="number" min="0" step="100"
+                        value={lead.proposal_amount ?? ''}
+                        onChange={e => updateLead.mutate({ id: lead.id, data: { proposal_amount: e.target.value ? parseFloat(e.target.value) : null } as any })}
+                        placeholder="$0"
+                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark] font-data"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-600 block mb-1">Proposal Date</label>
+                      <input
+                        type="date"
+                        value={lead.proposal_date || ''}
+                        onChange={e => updateLead.mutate({ id: lead.id, data: { proposal_date: e.target.value || null } as any })}
+                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-zinc-600 block mb-1">Close Date</label>
+                      <input
+                        type="date"
+                        value={lead.close_date || ''}
+                        onChange={e => updateLead.mutate({ id: lead.id, data: { close_date: e.target.value || null } as any })}
+                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
+                      />
+                    </div>
+                    {lead.status === 'closed_won' && (
+                      <div>
+                        <label className="text-[10px] text-zinc-600 block mb-1">Won Amount</label>
+                        <input
+                          type="number" min="0" step="100"
+                          value={lead.won_amount ?? ''}
+                          onChange={e => updateLead.mutate({ id: lead.id, data: { won_amount: e.target.value ? parseFloat(e.target.value) : null } as any })}
+                          placeholder="$0"
+                          className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 [color-scheme:dark] font-data"
+                        />
+                      </div>
+                    )}
+                    {lead.status === 'lost' && (
+                      <div className="col-span-2">
+                        <label className="text-[10px] text-zinc-600 block mb-1">Lost Reason</label>
+                        <input
+                          type="text"
+                          value={lead.lost_reason || ''}
+                          onChange={e => updateLead.mutate({ id: lead.id, data: { lost_reason: e.target.value || null } as any })}
+                          placeholder="Why was this deal lost?"
+                          className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-red-500/40 [color-scheme:dark]"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Heat score + follow-up */}
               <div className="px-5 py-4 border-b border-white/[0.04] space-y-4">

@@ -1,3 +1,5 @@
+const db = require('../db');
+
 const VARIABLE_MAP = {
   business_name: { field: 'business_name', fallback: 'your company' },
   first_name:    { field: 'first_name',    fallback: 'there' },
@@ -202,6 +204,13 @@ We've been putting off some work around the house and would love to get a profes
   },
 };
 
+function getSettingValue(key) {
+  try {
+    const row = db.get('SELECT value FROM settings WHERE key = ?', [key]);
+    return row?.value || '';
+  } catch { return ''; }
+}
+
 function renderTemplate(text, lead) {
   if (!text) return '';
   const nicheData = NICHE_DATA[lead.service_type] || NICHE_DATA.general;
@@ -213,6 +222,9 @@ function renderTemplate(text, lead) {
       if (key === 'service_type') return formatServiceType(value);
       if (key === 'estimated_value') return `$${Number(value).toLocaleString()}`;
       return String(value);
+    }
+    if (key === 'booking_link') {
+      return getSettingValue('booking_link') || '[Set booking link in Settings]';
     }
     if (nicheData[key] !== undefined) {
       return nicheData[key];
@@ -240,6 +252,11 @@ function getAvailableVariables() {
     description: key.replace(/_/g, ' '),
     fallback,
   }));
+  standard.push({
+    variable: '{booking_link}',
+    description: 'booking link',
+    fallback: '[Set booking link in Settings]',
+  });
   const nicheVars = Object.keys(NICHE_DATA.general)
     .filter(k => !k.startsWith('scenario_') && !k.startsWith('loom_'))
     .map(key => ({

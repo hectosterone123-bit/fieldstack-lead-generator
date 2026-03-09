@@ -19,6 +19,7 @@ const CHANNEL_TABS: { key: TemplateChannel; label: string; icon: React.ElementTy
 const VARIABLES = [
   '{business_name}', '{first_name}', '{last_name}', '{email}',
   '{phone}', '{city}', '{state}', '{service_type}', '{estimated_value}',
+  '{booking_link}',
 ];
 
 const EMPTY_FORM = {

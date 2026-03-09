@@ -37,7 +37,7 @@ export function useUpdateSequence() {
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; name?: string; description?: string; steps?: any[] }) =>
+    mutationFn: ({ id, ...data }: { id: number; name?: string; description?: string; steps?: any[]; auto_send?: boolean }) =>
       updateSequence(id, data),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['sequences'] });

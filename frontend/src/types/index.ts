@@ -70,6 +70,13 @@ export interface Lead {
   notes: string | null;
   enrichment_data: string | null;
   enriched_at: string | null;
+  proposal_amount: number | null;
+  proposal_date: string | null;
+  close_date: string | null;
+  won_amount: number | null;
+  lost_reason: string | null;
+  loom_url: string | null;
+  ghost_time: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -156,6 +163,12 @@ export interface Stats {
   avg_speed_to_lead_minutes: number | null;
   best_speed_to_lead_minutes: number | null;
   speed_to_lead_sample: number;
+  total_won_revenue: number;
+  avg_deal_size: number;
+  deals_closed_this_month: number;
+  revenue_this_month: number;
+  proposals_open_count: number;
+  proposals_open_value: number;
 }
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -251,6 +264,7 @@ export interface Sequence {
   description: string | null;
   steps: SequenceStep[];
   is_active: number;
+  auto_send: number;
   active_enrollments?: number;
   created_at: string;
   updated_at: string;

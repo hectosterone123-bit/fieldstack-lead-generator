@@ -233,6 +233,60 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* KPI Cards — Row 3: Revenue */}
+      <p className="text-overline text-zinc-700 mb-3">Revenue</p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/15 text-emerald-400">
+              <DollarSign className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-gradient-orange">
+            {formatCurrency(stats?.revenue_this_month ?? 0)}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Revenue This Month</p>
+        </div>
+
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-zinc-800 text-zinc-400">
+              <TrendingUp className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {stats?.deals_closed_this_month ?? 0}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Deals Closed This Month</p>
+        </div>
+
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-amber-500/10 text-amber-400">
+              <DollarSign className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {formatCurrency(stats?.avg_deal_size ?? 0)}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Avg Deal Size</p>
+        </div>
+
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-violet-500/10 text-violet-400">
+              <DollarSign className="w-4 h-4" />
+            </div>
+          </div>
+          <p className="text-2xl font-bold tracking-tight font-data text-white">
+            {formatCurrency(stats?.proposals_open_value ?? 0)}
+          </p>
+          <p className="text-overline text-zinc-500 mt-1">Open Proposals</p>
+          <p className="text-[10px] text-zinc-600 mt-1.5">{stats?.proposals_open_count ?? 0} proposals pending</p>
+        </div>
+      </div>
+
       {/* Today's Follow-ups */}
       {followups && (
         <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">

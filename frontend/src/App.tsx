@@ -6,6 +6,7 @@ import { Leads } from './pages/Leads';
 import { Templates } from './pages/Templates';
 import { Sequences } from './pages/Sequences';
 import { SmsInbox } from './pages/SmsInbox';
+import { Settings } from './pages/Settings';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/templates" element={<Templates />} />
           <Route path="/sequences" element={<Sequences />} />
           <Route path="/sms" element={<SmsInbox />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>

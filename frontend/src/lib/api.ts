@@ -270,11 +270,11 @@ export async function fetchSequence(id: number): Promise<Sequence> {
   return request(`/sequences/${id}`);
 }
 
-export async function createSequence(data: { name: string; description?: string; steps: any[] }): Promise<Sequence> {
+export async function createSequence(data: { name: string; description?: string; steps: any[]; auto_send?: boolean }): Promise<Sequence> {
   return request('/sequences', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function updateSequence(id: number, data: { name?: string; description?: string; steps?: any[] }): Promise<Sequence> {
+export async function updateSequence(id: number, data: { name?: string; description?: string; steps?: any[]; auto_send?: boolean }): Promise<Sequence> {
   return request(`/sequences/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -371,4 +371,14 @@ export async function fetchMissedCallSettings(): Promise<MissedCallSettings> {
 
 export async function fetchReviewSettings(): Promise<ReviewRequestSettings> {
   return request('/sms/review-settings');
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+export async function fetchSettings(): Promise<Record<string, string>> {
+  return request('/settings');
+}
+
+export async function updateSetting(key: string, value: string): Promise<{ key: string; value: string }> {
+  return request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) });
 }

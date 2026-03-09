@@ -1,51 +1,46 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-let transporter = null;
-let verified = false;
+let resend = null;
 
 function isConfigured() {
-  return !!(process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return !!process.env.RESEND_API_KEY;
 }
 
-function createTransporter() {
-  if (transporter) return transporter;
+function getClient() {
+  if (resend) return resend;
   if (!isConfigured()) return null;
+  resend = new Resend(process.env.RESEND_API_KEY);
+  return resend;
+}
 
-  transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10),
-    secure: parseInt(process.env.SMTP_PORT, 10) === 465,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
-
-  return transporter;
+function getFromAddress() {
+  if (process.env.RESEND_FROM) return process.env.RESEND_FROM;
+  try {
+    const db = require('../db');
+    const row = db.get('SELECT value FROM settings WHERE key = ?', ['resend_from']);
+    if (row?.value) return row.value;
+  } catch {}
+  return 'onboarding@resend.dev';
 }
 
 async function sendEmail(to, subject, htmlBody) {
-  const t = createTransporter();
-  if (!t) return { success: false, error: 'SMTP not configured' };
-
-  if (!verified) {
-    try {
-      await t.verify();
-      verified = true;
-    } catch (err) {
-      return { success: false, error: `SMTP verification failed: ${err.message}` };
-    }
-  }
+  const client = getClient();
+  if (!client) return { success: false, error: 'Resend API key not configured' };
 
   try {
-    const info = await t.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to,
+    const { data, error } = await client.emails.send({
+      from: getFromAddress(),
+      to: Array.isArray(to) ? to : [to],
       subject,
       html: htmlBody,
       text: htmlBody.replace(/<[^>]*>/g, ''),
     });
-    return { success: true, messageId: info.messageId };
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, messageId: data.id };
   } catch (err) {
     return { success: false, error: err.message };
   }

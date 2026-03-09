@@ -419,7 +419,7 @@ router.put('/:id', (req, res, next) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [req.params.id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags'];
+    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time'];
     const updates = [];
     const params = [];
 
@@ -453,6 +453,14 @@ router.patch('/:id/status', (req, res, next) => {
 
     const oldStatus = lead.status;
     db.run('UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [status, req.params.id]);
+
+    // Auto-fill deal fields on status change
+    if (status === 'proposal_sent' && !lead.proposal_date) {
+      db.run('UPDATE leads SET proposal_date = date(\'now\') WHERE id = ?', [req.params.id]);
+    }
+    if (status === 'closed_won' && !lead.won_amount && lead.proposal_amount) {
+      db.run('UPDATE leads SET won_amount = ? WHERE id = ?', [lead.proposal_amount, req.params.id]);
+    }
 
     // Log activity
     if (status === 'contacted') {

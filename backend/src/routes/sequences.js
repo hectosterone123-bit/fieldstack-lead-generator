@@ -512,14 +512,14 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, description, steps } = req.body;
+  const { name, description, steps, auto_send } = req.body;
   if (!name || !steps?.length) {
     return res.status(400).json({ success: false, error: 'name and steps are required' });
   }
 
   const { lastInsertRowid } = db.run(
-    'INSERT INTO sequences (name, description, steps) VALUES (?, ?, ?)',
-    [name, description || null, JSON.stringify(steps)]
+    'INSERT INTO sequences (name, description, steps, auto_send) VALUES (?, ?, ?, ?)',
+    [name, description || null, JSON.stringify(steps), auto_send ? 1 : 0]
   );
 
   const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [lastInsertRowid]);
@@ -546,13 +546,13 @@ router.get('/:id', (req, res) => {
 });
 
 router.put('/:id', (req, res) => {
-  const { name, description, steps } = req.body;
+  const { name, description, steps, auto_send } = req.body;
   const existing = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ success: false, error: 'Sequence not found' });
 
   db.run(
-    'UPDATE sequences SET name = ?, description = ?, steps = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, req.params.id]
+    'UPDATE sequences SET name = ?, description = ?, steps = ?, auto_send = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, auto_send !== undefined ? (auto_send ? 1 : 0) : existing.auto_send, req.params.id]
   );
 
   const updated = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);

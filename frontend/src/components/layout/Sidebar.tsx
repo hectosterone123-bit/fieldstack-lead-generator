@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 const navItems = [
@@ -9,6 +9,7 @@ const navItems = [
   { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
   { to: '/templates', icon: FileText, label: 'Templates' },
   { to: '/sequences', icon: Repeat, label: 'Sequences' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export function Sidebar() {

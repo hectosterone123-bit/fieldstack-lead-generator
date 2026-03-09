@@ -3,8 +3,11 @@ const fs = require('fs');
 const path = require('path');
 
 // On Railway, RAILWAY_VOLUME_MOUNT_PATH is auto-set to the volume mount (e.g. /data)
-// Locally, fall back to backend/data/
-const DB_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, '..', 'data');
+// Locally, store DB in user's home directory (outside OneDrive) to prevent sync corruption
+const os = require('os');
+const DB_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH
+  || process.env.FIELDSTACK_DB_DIR
+  || path.join(os.homedir(), '.fieldstack');
 const DB_PATH = path.join(DB_DIR, 'leads.db');
 
 let db;
@@ -149,6 +152,11 @@ CREATE TABLE IF NOT EXISTS sms_opt_outs (
   phone      TEXT NOT NULL UNIQUE,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
 `;
 
 async function initDb() {
@@ -186,8 +194,28 @@ async function initDb() {
   // Migrations: add first_contacted_at for speed-to-lead tracking
   try { db.run('ALTER TABLE leads ADD COLUMN first_contacted_at DATETIME'); } catch(e) {}
 
+  // Migrations: deal tracking columns
+  try { db.run('ALTER TABLE leads ADD COLUMN proposal_amount REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN proposal_date TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN close_date TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN won_amount REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN lost_reason TEXT'); } catch(e) {}
+
+  // Migration: auto_send toggle for sequences
+  try { db.run('ALTER TABLE sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
+
+  // Migration: outreach tracking fields
+  try { db.run('ALTER TABLE leads ADD COLUMN loom_url TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN ghost_time TEXT'); } catch(e) {}
+
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();
+
+  // Migration: re-seed loom scripts if they still use placeholder variables
+  migrateLoomScripts();
+
+  // Migration: add direct loom delivery email templates if missing
+  migrateDirectLoomEmails();
 
   // Seed default templates if table is empty
   seedDefaultTemplates();
@@ -206,6 +234,163 @@ function migrateTemplatesToNiche() {
   console.log('[DB] Migrating templates to niche-specific variables...');
   db.run("DELETE FROM templates WHERE is_default = 1");
   // seedDefaultTemplates() will re-insert them on the next call
+}
+
+function getLoomScriptTemplates() {
+  return [
+    // --- Script 1: The "Live Demo" Loom ---
+    {
+      name: 'Loom — The Live Demo',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `THE "LIVE DEMO" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Their website contact form — you submitted it 20 minutes ago.
+Tab 2 (Open): The Sam AI dashboard with their logo and the live SMS thread.
+
+0:00 - 0:15: THE HOOK
+"Hey {first_name}, this is [Your Name] from Fieldstack. I'm on your website right now — I submitted a quote request about 20 minutes ago. No callback yet. I want to show you what that looks like from a homeowner's perspective, and then what happens when Sam is running."
+
+0:15 - 0:40: THE PAIN
+"Homeowners searching for {service_type} in {city} are calling the first three companies on Google. If they don't hear back in under 5 minutes, most move on. They don't leave a second voicemail. They just call the next number. Every unanswered lead is a direct donation to your competitor."
+
+0:40 - 1:05: THE REVEAL (Switch to Tab 2 — Sam dashboard, live SMS thread)
+"This is Sam. Watch what happened when I submitted that same form last week — with Sam running. Within 18 seconds, Sam texted the homeowner from a local 512 Austin number. Asked what the issue was, what kind of roof, their timeline. When they described storm damage, Sam asked them to send photos of the damage. The homeowner sent two MMS photos. Sam acknowledged them, checked the Google Calendar, and offered two inspection slots — all in the same SMS thread. The homeowner booked their own appointment. I never touched anything."
+
+1:05 - 1:20: THE ASK
+"I'm setting this up for one {service_type} company per city. {city} is still open. If Sam doesn't book you 5 qualified estimates this month, you don't pay. I take all the risk."
+
+1:20 - 1:30: THE CLOSER
+"Reply to this and I'll have {business_name} live in 72 hours. Worth a 5-minute chat?"
+
+TIPS:
+• Zoom in on the 18-second timestamp on Sam's first reply — that number lands hard
+• Point your mouse at the MMS photo thumbnails in the thread — visuals sell faster than words
+• Let the homeowner "Tuesday works" reply sit on screen for a beat before moving on — silence is powerful
+• Smile at the start — Loom shows a tiny circle of your face`,
+    },
+
+    // --- Script 2: The "Voice + Text" Loom ---
+    {
+      name: 'Loom — Voice + Text',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `THE "VOICE + TEXT" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Sam AI dashboard — Vapi call transcript view for a qualified lead.
+Tab 2 (Open): Same dashboard — SMS conversation view for that same lead.
+
+0:00 - 0:15: THE HOOK
+"Hey {first_name}, this is [Your Name] from Fieldstack. Most {service_type} leads in {city} don't text first — they call. I want to show you what Sam does when a homeowner calls your number and nobody picks up."
+
+0:15 - 0:40: THE DATA (Tab 1 — call transcript)
+"This is a real call transcript from Sam. A homeowner called outside business hours. Sam picked up in a real voice — ElevenLabs voice synthesis, local 512 area code — and handled the full qualification on the phone. Asked about the issue type, the roof material, the timeline, got the address. You can see right here: by the end of the 4-minute call, the lead was fully qualified. Storm damage, shingle roof, urgent timeline, address logged."
+
+0:40 - 1:05: THE REVEAL (Switch to Tab 2 — SMS, same lead)
+"The moment that call ended, Sam automatically sent a follow-up SMS with two inspection time slots. The homeowner replied 'Tuesday works.' Sam confirmed, created the Google Calendar event, and sent them a calendar invite — without any human involvement. The owner got an SMS notification the second the appointment was booked. That's it."
+
+1:05 - 1:20: THE ASK
+"SMS plus voice, working together, 24/7. One {service_type} company per market. {city} is open. Five booked quotes this month or you don't pay a cent."
+
+1:20 - 1:30: THE CLOSER
+"Reply and I'll have {business_name} running both channels in 72 hours. Talk soon, {first_name}."
+
+TIPS:
+• Zoom in on the call transcript timestamps — show the qualification happened in one call
+• Zoom in on the SMS thread — show it continued from where the call left off
+• Highlight the calendar invite confirmation — that's the moment people lean forward
+• Keep narration calm — the product sells itself once they see the thread`,
+    },
+
+    // --- Script 3: The "No-Lead-Left-Behind" Loom ---
+    {
+      name: 'Loom — No-Lead-Left-Behind',
+      channel: 'loom_script',
+      status_stage: 'qualified',
+      step_order: 3,
+      subject: null,
+      body: `THE "NO-LEAD-LEFT-BEHIND" LOOM SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Sam AI dashboard — a lead with the full follow-up event timeline visible.
+
+0:00 - 0:15: THE HOOK
+"Hey {first_name}, this is [Your Name] from Fieldstack. Most {service_type} companies lose leads not because they miss the first call — but because they give up after one unanswered text. I want to show you the follow-up engine inside Sam."
+
+0:15 - 0:40: THE TIMELINE (Show the event log, scroll through it slowly)
+"Here's a real lead timeline. Homeowner submitted a form at 9:17 AM. Sam texted them from a local 512 number at 9:17 AM — 18 seconds later. No reply. Most systems stop there. Not Sam. At 1:17 PM — exactly 4 hours later — Sam sent a follow-up SMS nudge. Still no reply. At 9:17 AM two days later — 48 hours in — Sam placed an outbound voice call using ElevenLabs voice, picked up exactly where the SMS conversation left off, and asked about scheduling. The homeowner picked up, said Tuesday worked, and booked on the spot."
+
+0:40 - 1:05: THE REVEAL
+"Sam runs 3 touches over 72 hours — SMS at 18 seconds, SMS nudge at 4 hours, voice call at 48 hours. It only calls during business hours, 8 AM to 8 PM in the homeowner's local timezone. After 72 hours with no response it marks the lead as no-response and stops. The owner gets an SMS alert when the lead qualifies and another when they book. Zero leads lost to ghosting."
+
+1:05 - 1:20: THE ASK
+"Your competitors send one text and move on. Sam runs three touches across two channels, timed to match how homeowners actually respond. One {service_type} company per market. {city} is still open."
+
+1:20 - 1:30: THE CLOSER
+"If Sam doesn't book you 5 qualified estimates this month, you don't pay. Reply back and I'll have {business_name} live in 72 hours."
+
+TIPS:
+• Zoom in on the timestamp gaps in the log — 9:17, 1:17, next-day 9:17 — the visual tells the story
+• Pause on the "48h voice call" entry — that's the differentiator most competitors don't have
+• Show the lead status flip to "booked" at the end — that's the payoff moment
+• Keep a calm, matter-of-fact tone — you're not selling, you're showing math`,
+    },
+  ];
+}
+
+function migrateDirectLoomEmails() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Reveal — Direct Loom (Speed Test)' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding direct loom delivery email templates...');
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)";
+  db.run(stmt, [
+    'Reveal — Direct Loom (Speed Test)', 'email', 'contacted', 2,
+    "I tested {business_name}'s response time — made you a 90-second video",
+    `{first_name},
+
+I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
+
+Here it is: [INSERT LOOM LINK HERE]
+
+The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
+
+Worth a watch. If anything lands, reply and we can talk through it.
+
+[Your Name]
+Fieldstack`
+  ]);
+  db.run(stmt, [
+    'Reveal — Direct Loom (Competitor)', 'email', 'contacted', 2,
+    'Built this for {business_name} — 90 seconds',
+    `{first_name},
+
+I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
+
+Made a short video showing the results side by side: [INSERT LOOM LINK HERE]
+
+Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
+
+Watch the part at the 0:45 mark. That's where it gets expensive.
+
+[Your Name]
+Fieldstack`
+  ]);
+}
+
+function migrateLoomScripts() {
+  const sample = get("SELECT body FROM templates WHERE channel = 'loom_script' AND is_default = 1 LIMIT 1");
+  if (!sample) return; // no loom scripts yet, seedDefaultTemplates will handle it
+  // Markers of the updated scripts (real Sam capabilities)
+  if (sample.body && (sample.body.includes('ElevenLabs') || sample.body.includes('photos of the damage'))) return;
+  console.log('[DB] Migrating loom scripts to reflect real Sam AI capabilities...');
+  db.run("DELETE FROM templates WHERE channel = 'loom_script' AND is_default = 1");
+  // Insert updated scripts directly since seedDefaultTemplates() won't run (other templates exist)
+  const scripts = getLoomScriptTemplates();
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)";
+  scripts.forEach(t => db.run(stmt, [t.name, t.channel, t.status_stage, t.step_order, t.subject, t.body]));
 }
 
 function seedDefaultTemplates() {
@@ -336,6 +521,48 @@ This data becomes the centerpiece of Step 2.`,
     // Purpose: Reveal the test. Create curiosity about results.
     // Get permission to send the Loom video. Build trust through honesty.
     // ═══════════════════════════════════════════════════════════════════════
+
+    // --- Direct Loom Delivery A: Mystery Shopper ---
+    {
+      name: 'Reveal — Direct Loom (Speed Test)',
+      channel: 'email',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: 'I tested {business_name}\'s response time — made you a 90-second video',
+      body: `{first_name},
+
+I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
+
+Here it is: [INSERT LOOM LINK HERE]
+
+The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
+
+Worth a watch. If anything lands, reply and we can talk through it.
+
+[Your Name]
+Fieldstack`,
+    },
+
+    // --- Direct Loom Delivery B: Competitor Angle ---
+    {
+      name: 'Reveal — Direct Loom (Competitor)',
+      channel: 'email',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: 'Built this for {business_name} — 90 seconds',
+      body: `{first_name},
+
+I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
+
+Made a short video showing the results side by side: [INSERT LOOM LINK HERE]
+
+Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
+
+Watch the part at the 0:45 mark. That's where it gets expensive.
+
+[Your Name]
+Fieldstack`,
+    },
 
     // --- Angle A: Curiosity + Data ---
     {
@@ -715,7 +942,7 @@ We started working with a {service_type} contractor in {state} about four months
 
 Turned out their average response time was 3 hours and 47 minutes. By the time they called back, homeowners had already booked someone else.
 
-We set up automated speed-to-lead response. Under 60 seconds, every time — nights, weekends, holidays.
+We set up automated speed-to-lead response. Under 20 seconds, every time — nights, weekends, holidays.
 
 Within 60 days:
 • Close rate: 23% → 58%
@@ -978,9 +1205,11 @@ Fieldstack`,
 Quick update — we've added some things at Fieldstack since we last talked, and {business_name} was one of the first companies I thought of.
 
 What's new:
-• AI-powered instant response that sounds like a real person (not a robot)
-• Automatic follow-up sequences — if a lead doesn't book, the system follows up 3x over 7 days
-• Real-time competitor speed tracking for {service_type} companies in {city}
+• AI that responds in under 20 seconds and sounds like a real local person — not a bot
+• Voice calls via a local area code number, plus SMS in the same conversation thread
+• Asks homeowners to send damage photos via text, qualifies the job, and books your Google Calendar automatically
+• Follow-up engine: SMS nudge at 4 hours, outbound voice call at 48 hours, 3 touches total before marking a lead dead
+• Contractor SMS alerts the moment a lead qualifies and again when they book
 
 Why I thought of you: when I tested {business_name}'s response time, the gap wasn't about effort — your team was just busy doing actual work. These tools fix the gap without adding anything to your plate.
 
@@ -1012,113 +1241,7 @@ Fieldstack`,
       body: `{first_name}, {busy_season} is ramping up in {city}. The speed test data I pulled for {business_name} is still relevant. Want a fresh look before things get crazy?`,
     },
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // LOOM SCRIPTS — Video walkthroughs for personalized outreach
-    // Purpose: Under-90-second scripts showing prospects how much money
-    // they're losing. Not about how the code works — about the cost of inaction.
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // --- Script 1: The "Anti-Ghosting" Loom ---
-    {
-      name: 'Loom — Anti-Ghosting Script',
-      channel: 'loom_script',
-      status_stage: 'contacted',
-      step_order: 2,
-      subject: null,
-      body: `THE "ANTI-GHOSTING" LOOM SCRIPT
-Runtime: Under 90 seconds
-Tab 1 (Open): Their website contact form.
-Tab 2 (Open): Your "Sam AI" dashboard (with their logo).
-
-0:00 - 0:15: THE HOOK (The Ghost Test)
-"Hey {first_name}, this is [Your Name] from Fieldstack. I'm looking at your website right now. I actually filled out your 'Request a Quote' form about 20 minutes ago, and I noticed I haven't received a text or a call back yet."
-
-0:15 - 0:35: THE PAIN (The Leaky Bucket)
-"I'm sure you're busy on a job site, but here's the problem: Most homeowners call the first 3 guys on Google. If you don't reply in under 5 minutes, you usually lose that lead to the guy who did pick up the phone. {loom_pain}"
-
-0:35 - 1:00: THE REVEAL (Switch to Tab 2)
-"That's why I built this for you. I've prepped a custom AI Sales Assistant named Sam. Look at my screen — {loom_reveal} It uses a local {city} number so it feels like a real neighbor is helping them out."
-
-1:00 - 1:20: THE "NO-BRAINER" ASK
-"I'm looking for just one partner in {city} to run this for. I'll do the full setup in 72 hours, and if Sam doesn't book you at least 5 qualified quotes this month, you don't pay me a cent. I take all the risk."
-
-1:20 - 1:30: THE CLOSER
-"If you want to stop those website leads from 'ghosting' you, just reply to this email or message me back. Worth a 5-minute chat? Thanks!"
-
-TIPS:
-• Smile at the start — Loom shows a tiny circle of your face
-• Point your mouse at their logo on Tab 2 to prove it's custom
-• Keep energy conversational, not salesy`,
-    },
-
-    // --- Script 2: The "Money Left on the Table" Loom ---
-    {
-      name: 'Loom — Money Left on the Table',
-      channel: 'loom_script',
-      status_stage: 'contacted',
-      step_order: 2,
-      subject: null,
-      body: `THE "MONEY LEFT ON THE TABLE" LOOM SCRIPT
-Runtime: Under 90 seconds
-Tab 1 (Open): Google search results for "{service_type} near me {city}"
-Tab 2 (Open): A simple calculator or notepad with their revenue math
-Tab 3 (Open): Your "Sam AI" dashboard (with their logo)
-
-0:00 - 0:15: THE HOOK (The Math Problem)
-"Hey {first_name}, this is [Your Name] from Fieldstack. I did some quick math on {business_name} and I think you're leaving {lost_revenue_monthly} on the table every single month. Let me show you why."
-
-0:15 - 0:40: THE PAIN (Switch to Tab 2 — The Calculator)
-"Here's the math. {loom_math_intro} If {business_name} gets {monthly_leads_single} leads a month — which is pretty standard for your area — and you're closing around {close_rate_slow}, you're leaving a lot of jobs on the table. But here's what the data says: contractors who respond in under 5 minutes close at {close_rate_fast}. Same leads, same pricing. That gap is the money nobody sees walking out the door."
-
-0:40 - 1:05: THE REVEAL (Switch to Tab 3)
-"So I set this up for {business_name}. When a lead hits your website, your Google listing, or even calls and nobody picks up — {loom_reveal} You don't have to stop what you're doing on the job site."
-
-1:05 - 1:20: THE ASK
-"I'm rolling this out to one {service_type} company per market. {city} is open right now. If Sam doesn't add at least 5 extra bookings this month, you pay nothing. Zero risk on your end."
-
-1:20 - 1:30: THE CLOSER
-"Reply to this and I'll get {business_name} set up in 72 hours. Talk soon, {first_name}."
-
-TIPS:
-• Show the actual math on screen — visual proof > verbal claims
-• Pause on the revenue gap number — let it sink in
-• Keep your tone like you're sharing a discovery, not selling`,
-    },
-
-    // --- Script 3: The "Competitor Speed Test" Loom ---
-    {
-      name: 'Loom — Competitor Speed Test',
-      channel: 'loom_script',
-      status_stage: 'qualified',
-      step_order: 3,
-      subject: null,
-      body: `THE "COMPETITOR SPEED TEST" LOOM SCRIPT
-Runtime: Under 90 seconds
-Tab 1 (Open): A stopwatch or timer app
-Tab 2 (Open): Screenshots or notes showing competitor response times
-Tab 3 (Open): Your "Sam AI" dashboard (with their logo)
-
-0:00 - 0:15: THE HOOK (The Race They Don't Know They're In)
-"Hey {first_name}, this is [Your Name] from Fieldstack. Last week I submitted service requests to {business_name} and three of your competitors in {city} — the exact same way a homeowner would. I timed every single response. The results are brutal, and I think you need to see this."
-
-0:15 - 0:40: THE DATA (Switch between Tab 1 and Tab 2)
-"Here's what happened. Competitor A — responded in 47 seconds. Text message, asked about the job, offered to schedule. Competitor B — 4 minutes, phone call, friendly, tried to book on the spot. Competitor C — 22 minutes, sent an email. And {business_name}? I'm going to be honest with you — [X hours/no response]. By the time your team got back to me, I'd already heard from two other companies and one had offered to come out the next morning. That's exactly what your real customers are experiencing right now."
-
-0:40 - 1:05: THE REVEAL (Switch to Tab 3)
-"Here's what I built for you. This is Sam — an AI assistant that responds to every single lead in under 20 seconds. Texts them from a local {city} number, qualifies the job, and books the estimate. Your competitors are winning right now because they're faster — not because they're better. This closes that gap overnight."
-
-1:05 - 1:20: THE ASK
-"I'm only setting this up for one {service_type} company per zip code so there's no conflict. If Sam doesn't book you 5 qualified estimates this month, you don't pay a dime. For {service_type} jobs averaging {avg_job_single}, that's real money."
-
-1:20 - 1:30: THE CLOSER
-"Reply back and I'll have {business_name} live in 72 hours. Your competitors are already fast — let's make you faster. Talk soon."
-
-TIPS:
-• Show real timestamps — specificity builds trust
-• Don't trash competitors, just state the facts neutrally
-• Reference their specific trade ({service_type}) — makes it feel personalized
-• Let the gap speak for itself — the silence after their response time is powerful`,
-    },
+    ...getLoomScriptTemplates(),
   ];
 
   const stmt = `INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)`;

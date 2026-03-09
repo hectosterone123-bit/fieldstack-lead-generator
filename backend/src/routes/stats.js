@@ -90,6 +90,27 @@ router.get('/', (req, res, next) => {
       : null;
     const speed_to_lead_sample = speed_row?.sample_size || 0;
 
+    // Deal tracking stats
+    const total_won_revenue = db.get(
+      `SELECT COALESCE(SUM(won_amount), 0) as total FROM leads WHERE status = 'closed_won' AND won_amount IS NOT NULL`
+    )?.total || 0;
+
+    const avg_deal_size = db.get(
+      `SELECT AVG(won_amount) as avg FROM leads WHERE status = 'closed_won' AND won_amount IS NOT NULL`
+    )?.avg || 0;
+
+    const deals_closed_this_month = db.get(
+      `SELECT COUNT(*) as count FROM leads WHERE status = 'closed_won' AND updated_at >= date('now', 'start of month')`
+    )?.count || 0;
+
+    const revenue_this_month = db.get(
+      `SELECT COALESCE(SUM(won_amount), 0) as total FROM leads WHERE status = 'closed_won' AND won_amount IS NOT NULL AND updated_at >= date('now', 'start of month')`
+    )?.total || 0;
+
+    const proposals_open = db.get(
+      `SELECT COUNT(*) as count, COALESCE(SUM(proposal_amount), 0) as total FROM leads WHERE status = 'proposal_sent' AND proposal_amount IS NOT NULL`
+    );
+
     res.json({
       success: true,
       data: {
@@ -109,6 +130,12 @@ router.get('/', (req, res, next) => {
         avg_speed_to_lead_minutes,
         best_speed_to_lead_minutes,
         speed_to_lead_sample,
+        total_won_revenue,
+        avg_deal_size: Math.round(avg_deal_size),
+        deals_closed_this_month,
+        revenue_this_month,
+        proposals_open_count: proposals_open?.count || 0,
+        proposals_open_value: proposals_open?.total || 0,
       }
     });
   } catch (err) { next(err); }

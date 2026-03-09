@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown, Save, X, Mail, MessageSquare, PhoneCall } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Save, X, Mail, MessageSquare, PhoneCall, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTemplates } from '../../hooks/useTemplates';
 import type { Sequence, SequenceStep, TemplateChannel } from '../../types';
@@ -12,7 +12,7 @@ const CHANNEL_OPTIONS: { value: TemplateChannel; label: string; icon: React.Elem
 
 interface Props {
   sequence?: Sequence | null;
-  onSave: (data: { name: string; description: string; steps: SequenceStep[] }) => void;
+  onSave: (data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean }) => void;
   onCancel: () => void;
   saving?: boolean;
 }
@@ -20,6 +20,7 @@ interface Props {
 export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   const [name, setName] = useState(sequence?.name || '');
   const [description, setDescription] = useState(sequence?.description || '');
+  const [autoSend, setAutoSend] = useState(!!sequence?.auto_send);
   const [steps, setSteps] = useState<SequenceStep[]>(
     sequence?.steps?.length ? sequence.steps : [
       { order: 1, delay_days: 0, channel: 'email', template_id: 0, label: 'Step 1' },
@@ -32,6 +33,7 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
     if (sequence) {
       setName(sequence.name);
       setDescription(sequence.description || '');
+      setAutoSend(!!sequence.auto_send);
       setSteps(sequence.steps?.length ? sequence.steps : [{ order: 1, delay_days: 0, channel: 'email', template_id: 0, label: 'Step 1' }]);
     }
   }, [sequence]);
@@ -67,7 +69,7 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   function handleSave() {
     if (!name.trim()) return;
     if (steps.some(s => !s.template_id)) return;
-    onSave({ name: name.trim(), description: description.trim(), steps });
+    onSave({ name: name.trim(), description: description.trim(), steps, auto_send: autoSend });
   }
 
   const filteredTemplates = (channel: TemplateChannel) =>
@@ -96,6 +98,28 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
             placeholder="Optional description..."
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
           />
+        </div>
+        {/* Auto-send toggle */}
+        <div
+          onClick={() => setAutoSend(!autoSend)}
+          className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-white/[0.04] cursor-pointer hover:border-white/[0.08] transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Zap className={cn('w-4 h-4', autoSend ? 'text-orange-400' : 'text-zinc-600')} />
+            <div>
+              <p className="text-sm text-zinc-200">Auto-send when due</p>
+              <p className="text-xs text-zinc-500">Emails and SMS send automatically on schedule</p>
+            </div>
+          </div>
+          <div className={cn(
+            'w-9 h-5 rounded-full transition-colors relative',
+            autoSend ? 'bg-orange-500' : 'bg-zinc-700'
+          )}>
+            <div className={cn(
+              'w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all',
+              autoSend ? 'left-[18px]' : 'left-[3px]'
+            )} />
+          </div>
         </div>
       </div>
 

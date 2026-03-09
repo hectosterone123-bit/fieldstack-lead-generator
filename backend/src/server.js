@@ -11,8 +11,8 @@ if (!process.env.ANTHROPIC_API_KEY) {
 if (!process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_PLACES_API_KEY === 'YOUR_API_KEY_HERE') {
   console.warn('[Warning] GOOGLE_PLACES_API_KEY not set — Google Places search will be unavailable');
 }
-if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
-  console.warn('[Warning] SMTP not configured — Email sending will be unavailable. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');
+if (!process.env.RESEND_API_KEY) {
+  console.warn('[Warning] Resend not configured — Email sending will be unavailable. Set RESEND_API_KEY in .env');
 }
 if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
   console.warn('[Warning] Twilio not configured — SMS sending will be unavailable. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env');
@@ -36,6 +36,7 @@ async function start() {
   const chatRouter = require('./routes/chat');
   const sequencesRouter = require('./routes/sequences');
   const smsRouter = require('./routes/sms');
+  const settingsRouter = require('./routes/settings');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
@@ -44,6 +45,7 @@ async function start() {
   app.use('/api/chat', chatRouter);
   app.use('/api/sequences', sequencesRouter);
   app.use('/api/sms', smsRouter);
+  app.use('/api/settings', settingsRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
