@@ -138,6 +138,7 @@ export interface BatchSearchParams {
   cities: Array<{ city: string; state: string }>;
   radius_km?: number;
   source?: 'google' | 'osm' | 'both';
+  country?: string;
 }
 
 export interface BatchSearchMeta {

@@ -217,6 +217,9 @@ async function initDb() {
   // Migration: add direct loom delivery email templates if missing
   migrateDirectLoomEmails();
 
+  // Migration: add 4 new high-impact loom scripts (v2)
+  migrateLoomScriptsV2();
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 
@@ -391,6 +394,207 @@ function migrateLoomScripts() {
   const scripts = getLoomScriptTemplates();
   const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)";
   scripts.forEach(t => db.run(stmt, [t.name, t.channel, t.status_stage, t.step_order, t.subject, t.body]));
+}
+
+function migrateLoomScriptsV2() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Loom — The 11:47 PM' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding 4 new Loom scripts (v2)...');
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)";
+  const scripts = getNewLoomScripts();
+  scripts.forEach(t => db.run(stmt, [t.name, t.channel, t.status_stage, t.step_order, t.subject, t.body]));
+}
+
+function getNewLoomScripts() {
+  return [
+    {
+      name: 'Loom — The 11:47 PM',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `LOOM — "THE 11:47 PM" SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): {business_name}'s Google Business listing or website.
+Tab 2 (Open): Sam dashboard — SMS thread from a late-night lead, timestamped 11:47 PM.
+
+0:00 - 0:12: THE SETUP
+"Hey {first_name}, real quick — it's a Wednesday night. 11:47 PM. A homeowner in {city} just got hit by a hail storm. Roof is leaking. They're scared. They grab their phone and search for {service_type} near me."
+
+0:12 - 0:28: THE MOMENT (Point mouse at their Google listing)
+"They find {business_name}. Great reviews. They fill out your contact form — or they call and get voicemail. And then they wait.
+
+[PAUSE 2 seconds — let the silence sit]
+
+Most {service_type} companies don't respond until 9 AM the next morning. By then, that homeowner has already booked someone else."
+
+0:28 - 0:55: THE REVEAL (Switch to Tab 2 — scroll the SMS thread slowly)
+"Here's what happens when Sam is running. Same lead. Same 11:47 PM. Sam picks up in 18 seconds — texts from a local {city} number, asks about the damage, asks them to send photos. The homeowner sends two pictures of the leak. Sam qualifies the job, offers two inspection times for tomorrow morning, and books it. Your calendar invite is already sent.
+
+You were asleep. You woke up to a booked job."
+
+0:55 - 1:10: THE MATH
+"Storms don't follow business hours. Every after-hours lead you miss is {avg_job_single} walking to your competitor. Sam catches every one. 24 hours a day, 7 days a week, under 20 seconds every time."
+
+1:10 - 1:25: THE ASK
+"One {service_type} company per market. {city} is open. If Sam doesn't book you 5 qualified estimates this month, you pay nothing. I take the risk.
+
+Reply back and I'll have {business_name} live in 72 hours."
+
+TIPS:
+• Start recording in the evening if possible — Loom shows your timestamp, it adds credibility
+• Scroll the SMS thread slowly at 0:28 — let them read every message themselves
+• Pause hard after "and then they wait" — 2 full seconds of silence hits harder than any statistic
+• End on the calendar invite confirmation — that's the "aha" visual
+• Your energy should be: calm and matter-of-fact, not excited. You're showing a problem, not selling.`,
+    },
+    {
+      name: 'Loom — The Money Calculator',
+      channel: 'loom_script',
+      status_stage: 'contacted',
+      step_order: 2,
+      subject: null,
+      body: `LOOM — "THE MONEY CALCULATOR" SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Notepad/sheet with their revenue math pre-filled (monthly leads × avg job × close rate gap).
+Tab 2 (Open): Sam dashboard — completed SMS booking thread showing a qualified lead.
+
+0:00 - 0:12: THE HOOK (On camera, before showing screen)
+"Hey {first_name}, I did some math on {business_name} before making this video. The number I got surprised me. Let me show you."
+
+0:12 - 0:45: THE MATH (Switch to Tab 1 — walk through it line by line, slowly)
+"{loom_math_intro}
+
+Here's the math I ran. {city} {service_type} companies in your market are getting roughly {monthly_leads_single} leads a month — web forms, Google calls, referrals. At a typical close rate for companies that respond slowly — around {close_rate_slow} — you're booking maybe 6 or 7 of those jobs.
+
+But here's what the data shows: contractors who respond in under 5 minutes close at {close_rate_fast}. Same leads. Same market. Same pricing.
+
+[Point mouse to the gap line in the math]
+
+That gap — those extra jobs you're not closing — works out to roughly {lost_revenue_monthly} every month. Not from new leads. From the ones you already paid to get.
+
+[Pause 2 seconds]
+
+That's the number I wanted you to see."
+
+0:45 - 1:05: THE REVEAL (Switch to Tab 2 — Sam SMS thread)
+"This is Sam. Every lead that comes into {business_name} — web form, missed call, Google message — Sam responds in under 20 seconds. Qualifies the job in the same text thread. Books your Google Calendar automatically. No human in the loop.
+
+The {close_rate_fast} close rate isn't a theory. It's what happens when the homeowner hears back before they've even put their phone down."
+
+1:05 - 1:20: THE CLOSE
+"One {service_type} company per city. {city} is still open. Five booked quotes this month or you pay nothing.
+
+Worth a 5-minute call? Just reply."
+
+TIPS:
+• Write the math on screen BEFORE recording — don't calculate live, it kills the pace
+• Use their actual estimated lead volume if you know it — the more specific, the harder it lands
+• Pause after showing the monthly gap number — let them do the multiplication themselves
+• The key moment is "from the ones you already paid to get" — slow down here
+• Keep the calculator simple: 3 lines max. Complexity kills the point.`,
+    },
+    {
+      name: 'Loom — The Race',
+      channel: 'loom_script',
+      status_stage: 'qualified',
+      step_order: 3,
+      subject: null,
+      body: `LOOM — "THE RACE" SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Two-column comparison layout — "{business_name}" vs "Fastest Competitor in {city}" with timestamps.
+Tab 2 (Open): Sam dashboard — SMS thread with 18-second response timestamp visible.
+
+0:00 - 0:14: THE SETUP
+"Hey {first_name}, last week I did something a lot of {service_type} companies ask us not to do after they see the results. I submitted identical service requests to {business_name} and three of your competitors in {city}. I used the same homeowner scenario. And I timed every single response."
+
+0:14 - 0:38: THE DATA (Switch to Tab 1 — reveal each row slowly)
+"Here's what I found.
+
+[Reveal competitor 1 row] The first company responded in 4 minutes. Text message. Friendly. Tried to book on the spot.
+
+[Reveal competitor 2 row] Second company — 11 minutes. Phone call. Professional. Got my address.
+
+[Reveal competitor 3 row] Third — 2 hours 40 minutes. Email. By then I'd already talked to two other people.
+
+[Pause. Reveal {business_name} row last.]
+
+{business_name}: [their actual response time, or 'I'm still waiting.']
+
+[Hold that on screen for 3 seconds without speaking.]
+
+I'm not showing you this to be harsh. I'm showing you because this is exactly what a homeowner in {city} experiences right now, every time they fill out your form."
+
+0:38 - 1:00: THE FIX (Switch to Tab 2 — Sam SMS thread)
+"This is what it looks like when Sam is running. Same form submit. 18 seconds later, the homeowner gets a text from a local {city} number. Within 4 minutes, the job is qualified and two inspection slots are on the table. No competitor can beat that. Not manually."
+
+1:00 - 1:15: THE ASK
+"You're already spending money to get these leads. The race starts the second they hit send — and right now, {business_name} is starting it late.
+
+One {service_type} company per market. Five booked quotes this month or you pay nothing. Reply and I'll flip this for {business_name} in 72 hours."
+
+TIPS:
+• The 3-second pause after revealing {business_name}'s time is the most important moment in the video — do NOT fill it
+• If you actually submitted their form and they didn't respond, use the real data — authenticity is everything
+• Don't trash competitors by name — show timestamps, let the numbers do the work
+• Your tone should be: a friend sharing uncomfortable data, not a salesperson
+• If they're actually fast (rare), pivot: "You responded in 8 minutes — faster than most. But your #1 competitor was under 2."`,
+    },
+    {
+      name: 'Loom — The Homeowner',
+      channel: 'loom_script',
+      status_stage: 'qualified',
+      step_order: 3,
+      subject: null,
+      body: `LOOM — "THE HOMEOWNER" SCRIPT
+Runtime: Under 90 seconds
+Tab 1 (Open): Google search — "{service_type} near me {city}" — {business_name} visible in results.
+Tab 2 (Open): Their website contact form.
+Tab 3 (Open): Sam dashboard — completed SMS thread, homeowner booked.
+
+0:00 - 0:10: THE FRAME
+"Hey {first_name}, for the next 90 seconds I want you to forget you're the business owner. I want you to be the homeowner."
+
+0:10 - 0:32: THE JOURNEY (Tab 1 — show the search results)
+"It's a Tuesday afternoon. Your {loom_pain} — it's urgent, it's stressful, you need someone today.
+
+You Google {service_type} near me in {city}. You see {business_name}. Good reviews. You click.
+
+[Switch to Tab 2 — their contact form]
+
+You fill out the form. Name, phone, what's going on. You hit submit.
+
+[Stop typing. Go still on screen. Don't speak.]
+
+[5 seconds of silence while a cursor blinks on an empty page]
+
+And you wait."
+
+0:32 - 0:52: THE DECISION
+"Most homeowners wait about 3 minutes before they open a new tab. They don't leave a voicemail. They don't send a follow-up email. They just go back to Google and call the next number.
+
+By the time {business_name} calls back — whether that's 2 hours or 2 days — that homeowner is already booked with someone else. They're not being rude. They're just scared and they needed help fast."
+
+0:52 - 1:12: THE FLIP (Switch to Tab 3 — Sam thread, scroll it slowly)
+"This is the same homeowner. Same form. Same Tuesday afternoon. Except Sam is running.
+
+18 seconds after they hit submit — before they've even put their phone down — they get a text from a local {city} number. Sam asks what's going on. They explain. Sam asks a follow-up. They answer. Within 4 minutes, they've got two appointment slots and they pick one.
+
+They never opened that second tab."
+
+1:12 - 1:25: THE CLOSE
+"That homeowner experience — the waiting, the silence, the second tab — that's happening to {business_name}'s leads right now. Sam ends it.
+
+One {service_type} company per market. {city} is open. Five booked quotes or you don't pay. Reply and I'll fix this in 72 hours."
+
+TIPS:
+• The 5-second silence at "and you wait" is non-negotiable — it's the entire emotional core of the video
+• Move your mouse slowly during the silence, like you're actually waiting. Don't freeze.
+• Scroll the Sam thread slowly at 0:52 — let them read the conversation as a homeowner, not as a business owner
+• Your tone in the first half: tired, stressed homeowner energy. Second half: calm relief.
+• This script works best for skeptical owners — it bypasses the "I respond fast" defense by making them feel what their customers feel`,
+    },
+  ];
 }
 
 function seedDefaultTemplates() {
@@ -1242,6 +1446,7 @@ Fieldstack`,
     },
 
     ...getLoomScriptTemplates(),
+    ...getNewLoomScripts(),
   ];
 
   const stmt = `INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)`;

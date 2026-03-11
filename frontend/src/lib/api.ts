@@ -99,6 +99,7 @@ export interface FinderSearch {
   state: string;
   radius_km?: number;
   source?: 'google' | 'osm' | 'both';
+  country?: string;
 }
 
 export interface FinderSearchResult {

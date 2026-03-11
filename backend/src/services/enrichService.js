@@ -10,6 +10,10 @@ function normalizePhone(raw) {
     const d = digits.slice(1);
     return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
   }
+  if (digits.length === 12 && digits.startsWith('52')) {
+    const d = digits.slice(2);
+    return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  }
   return raw;
 }
 

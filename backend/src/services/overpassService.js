@@ -22,8 +22,8 @@ const NAME_PATTERNS = {
   general:     'HVAC|Plumb|Electri|Roof',
 };
 
-async function geocodeCity(city, state) {
-  const q = encodeURIComponent(`${city}, ${state}, USA`);
+async function geocodeCity(city, state, country = 'USA') {
+  const q = encodeURIComponent(`${city}, ${state}, ${country}`);
   const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`;
 
   const res = await fetch(url, {
@@ -86,9 +86,9 @@ function normalizeOSMResult(element, serviceType) {
   };
 }
 
-async function searchBusinesses(serviceType, city, state, radiusKm = 10) {
+async function searchBusinesses(serviceType, city, state, radiusKm = 10, country = 'USA') {
   // Step 1: geocode
-  const { lat, lon } = await geocodeCity(city, state);
+  const { lat, lon } = await geocodeCity(city, state, country);
   const radiusMeters = radiusKm * 1000;
 
   // Step 2: query Overpass

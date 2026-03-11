@@ -14,16 +14,16 @@ function hasGoogleKey() {
 }
 
 // Shared: search a single city, returns raw results
-async function searchCity(service_type, city, state, radius_km, source) {
+async function searchCity(service_type, city, state, radius_km, source, country = 'USA') {
   let results = [];
 
   if (source === 'osm' || source === 'both') {
-    const osm = await overpassService.searchBusinesses(service_type, city, state, parseInt(radius_km));
+    const osm = await overpassService.searchBusinesses(service_type, city, state, parseInt(radius_km), country);
     results.push(...osm.results);
   }
 
   if (source === 'google' || source === 'both') {
-    const google = await googlePlacesService.searchBusinesses(service_type, city, state, parseInt(radius_km));
+    const google = await googlePlacesService.searchBusinesses(service_type, city, state, parseInt(radius_km), country);
     results.push(...google.results);
   }
 
@@ -81,7 +81,7 @@ async function processResults(allResults) {
 // POST /api/finder/search — single city search
 router.post('/search', async (req, res, next) => {
   try {
-    const { service_type = 'hvac', city, state, radius_km = 10, source = 'osm' } = req.body;
+    const { service_type = 'hvac', city, state, radius_km = 10, source = 'osm', country = 'USA' } = req.body;
 
     if (!city || !state) {
       return res.status(400).json({ success: false, error: 'city and state are required' });
@@ -90,9 +90,9 @@ router.post('/search', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Google Places API key not configured' });
     }
 
-    console.log(`[Finder] Searching ${service_type} in ${city}, ${state} (${radius_km}km, source: ${source})`);
+    console.log(`[Finder] Searching ${service_type} in ${city}, ${state}, ${country} (${radius_km}km, source: ${source})`);
 
-    const rawResults = await searchCity(service_type, city, state, radius_km, source);
+    const rawResults = await searchCity(service_type, city, state, radius_km, source, country);
     console.log(`[Finder] Found ${rawResults.length} results`);
 
     const finalResults = await processResults(rawResults);
@@ -111,7 +111,7 @@ router.post('/search', async (req, res, next) => {
 // POST /api/finder/batch-search — multi-city search
 router.post('/batch-search', async (req, res, next) => {
   try {
-    const { service_type = 'hvac', cities = [], radius_km = 10, source = 'google' } = req.body;
+    const { service_type = 'hvac', cities = [], radius_km = 10, source = 'google', country = 'USA' } = req.body;
 
     if (!Array.isArray(cities) || cities.length === 0) {
       return res.status(400).json({ success: false, error: 'cities array is required' });
@@ -136,7 +136,7 @@ router.post('/batch-search', async (req, res, next) => {
           await new Promise(r => setTimeout(r, 1100));
         }
 
-        const cityResults = await searchCity(service_type, city, state, radius_km, source);
+        const cityResults = await searchCity(service_type, city, state, radius_km, source, country);
         cityLog.push({ city, state, found: cityResults.length });
         allResults.push(...cityResults);
         console.log(`[Finder] ${city}, ${state}: ${cityResults.length} results`);

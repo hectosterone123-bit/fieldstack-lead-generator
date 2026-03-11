@@ -47,6 +47,40 @@ const CITY_PRESETS: Record<string, Array<{ city: string; state: string }>> = {
   ],
 };
 
+const MX_STATES = [
+  'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche',
+  'Chiapas', 'Chihuahua', 'Coahuila', 'Colima', 'Ciudad de México',
+  'Durango', 'Guanajuato', 'Guerrero', 'Hidalgo', 'Jalisco',
+  'Estado de México', 'Michoacán', 'Morelos', 'Nayarit', 'Nuevo León',
+  'Oaxaca', 'Puebla', 'Querétaro', 'Quintana Roo', 'San Luis Potosí',
+  'Sinaloa', 'Sonora', 'Tabasco', 'Tamaulipas', 'Tlaxcala',
+  'Veracruz', 'Yucatán', 'Zacatecas',
+];
+
+const MX_CITY_PRESETS: Record<string, Array<{ city: string; state: string }>> = {
+  'Top CDMX Markets': [
+    { city: 'Mexico City', state: 'Ciudad de México' },
+    { city: 'Ecatepec', state: 'Estado de México' },
+    { city: 'Naucalpan', state: 'Estado de México' },
+    { city: 'Tlalnepantla', state: 'Estado de México' },
+    { city: 'Iztapalapa', state: 'Ciudad de México' },
+  ],
+  'Top JAL Markets': [
+    { city: 'Guadalajara', state: 'Jalisco' },
+    { city: 'Zapopan', state: 'Jalisco' },
+    { city: 'Tlaquepaque', state: 'Jalisco' },
+    { city: 'Tonalá', state: 'Jalisco' },
+    { city: 'Tlajomulco de Zúñiga', state: 'Jalisco' },
+  ],
+  'Top NL Markets': [
+    { city: 'Monterrey', state: 'Nuevo León' },
+    { city: 'San Nicolás de los Garza', state: 'Nuevo León' },
+    { city: 'Guadalupe', state: 'Nuevo León' },
+    { city: 'Apodaca', state: 'Nuevo León' },
+    { city: 'Santa Catarina', state: 'Nuevo León' },
+  ],
+};
+
 function resultKey(r: FinderResult): string {
   return r.osm_id || r.google_place_id || r.business_name;
 }
@@ -170,9 +204,10 @@ function ImportModal({ onConfirm, onCancel, count, sequences }: {
 
 export function Finder() {
   const [mode, setMode] = useState<'single' | 'batch'>('single');
-  const [form, setForm] = useState<{ service_type: string; city: string; state: string; radius_km: number; source: 'osm' | 'google' | 'both' }>({ service_type: 'hvac', city: '', state: 'TX', radius_km: 10, source: 'osm' });
+  const [form, setForm] = useState<{ service_type: string; city: string; state: string; radius_km: number; source: 'osm' | 'google' | 'both'; country: string }>({ service_type: 'hvac', city: '', state: 'TX', radius_km: 10, source: 'google', country: 'US' });
   const [batchCities, setBatchCities] = useState('');
   const [batchState, setBatchState] = useState('TX');
+  const [batchCountry, setBatchCountry] = useState('US');
   const [results, setResults] = useState<FinderResult[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [imported, setImported] = useState(false);
@@ -187,6 +222,10 @@ export function Finder() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  const activeStates = form.country === 'MX' ? MX_STATES : US_STATES;
+  const activeBatchStates = batchCountry === 'MX' ? MX_STATES : US_STATES;
+  const activePresets = batchCountry === 'MX' ? MX_CITY_PRESETS : CITY_PRESETS;
+
   const isSearching = search.isPending || batchSearch.isPending;
 
   function handleSingleSearch() {
@@ -196,7 +235,7 @@ export function Finder() {
     setImported(false);
     setCityLog([]);
     search.mutate(
-      { service_type: form.service_type, city: form.city, state: form.state, radius_km: form.radius_km, source: form.source },
+      { service_type: form.service_type, city: form.city, state: form.state, radius_km: form.radius_km, source: form.source, country: form.country === 'MX' ? 'Mexico' : 'USA' },
       { onSuccess: (data) => setResults(data.results) }
     );
   }
@@ -219,7 +258,7 @@ export function Finder() {
     setImported(false);
     setCityLog([]);
     batchSearch.mutate(
-      { service_type: form.service_type, cities, radius_km: form.radius_km, source: form.source },
+      { service_type: form.service_type, cities, radius_km: form.radius_km, source: form.source, country: batchCountry === 'MX' ? 'Mexico' : 'USA' },
       {
         onSuccess: (data) => {
           setResults(data.results);
@@ -235,10 +274,18 @@ export function Finder() {
   }
 
   function applyPreset(name: string) {
-    const cities = CITY_PRESETS[name];
+    const mxCities = MX_CITY_PRESETS[name];
+    const usCities = CITY_PRESETS[name];
+    const cities = mxCities || usCities;
     if (!cities) return;
     setBatchCities(cities.map(c => c.city).join('\n'));
-    setBatchState(cities[0].state);
+    if (mxCities) {
+      setBatchCountry('MX');
+      setBatchState(cities[0].state);
+    } else {
+      setBatchCountry('US');
+      setBatchState(cities[0].state);
+    }
   }
 
   function toggleSelect(key: string) {
@@ -329,6 +376,32 @@ export function Finder() {
               </div>
             </div>
 
+            {/* Country */}
+            <div>
+              <label className="text-overline text-zinc-500 block mb-1.5">Country</label>
+              <div className="flex rounded-lg border border-white/[0.06] overflow-hidden">
+                {([{ code: 'US', label: 'United States' }, { code: 'MX', label: 'Mexico' }] as const).map(({ code, label }) => (
+                  <button
+                    key={code}
+                    onClick={() => {
+                      const defaultState = code === 'MX' ? 'Ciudad de México' : 'TX';
+                      setForm(f => ({ ...f, country: code, state: defaultState }));
+                      setBatchCountry(code);
+                      setBatchState(defaultState);
+                    }}
+                    className={cn(
+                      'flex-1 py-2 text-xs font-medium transition-colors',
+                      (mode === 'single' ? form.country : batchCountry) === code
+                        ? 'bg-orange-500/15 text-orange-400'
+                        : 'bg-zinc-800/40 text-zinc-500 hover:text-zinc-400',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Service Type */}
             <div>
               <label className="text-overline text-zinc-500 block mb-1.5">Service Type</label>
@@ -369,7 +442,7 @@ export function Finder() {
                       onChange={e => setForm(f => ({ ...f, state: e.target.value }))}
                       className="w-full appearance-none bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-3 pr-7 py-2.5 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-colors cursor-pointer"
                     >
-                      {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                      {activeStates.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                     <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500 pointer-events-none" />
                   </div>
@@ -396,7 +469,7 @@ export function Finder() {
                       onChange={e => setBatchState(e.target.value)}
                       className="w-full appearance-none bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-3 pr-7 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 focus:border-orange-500/30 transition-colors cursor-pointer"
                     >
-                      {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                      {activeBatchStates.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                     <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-500 pointer-events-none" />
                   </div>
@@ -404,7 +477,7 @@ export function Finder() {
                 <div>
                   <label className="text-overline text-zinc-500 block mb-1">Presets</label>
                   <div className="flex flex-wrap gap-1">
-                    {Object.keys(CITY_PRESETS).map(name => (
+                    {Object.keys(activePresets).map(name => (
                       <button
                         key={name}
                         onClick={() => applyPreset(name)}

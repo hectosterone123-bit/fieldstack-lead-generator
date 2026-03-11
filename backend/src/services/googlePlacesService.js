@@ -1,5 +1,18 @@
 const fetch = require('node-fetch');
-const { geocodeCity } = require('./overpassService');
+
+async function geocodeWithGoogle(city, state, country = 'USA') {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  const address = encodeURIComponent(`${city}, ${state}, ${country}`);
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=${apiKey}`
+  );
+  const data = await res.json();
+  if (!data.results || data.results.length === 0) {
+    throw new Error(`Could not geocode "${city}, ${state}"`);
+  }
+  const { lat, lng } = data.results[0].geometry.location;
+  return { lat, lon: lng };
+}
 
 const QUERY_MAP = {
   hvac: 'HVAC contractor',
@@ -98,12 +111,13 @@ async function fetchPlacesPage(textQuery, locationBias, pageToken) {
   return res.json();
 }
 
-async function searchBusinesses(serviceType, city, state, radiusKm = 10) {
-  const { lat, lon } = await geocodeCity(city, state);
+async function searchBusinesses(serviceType, city, state, radiusKm = 10, country = 'USA') {
+  const { lat, lon } = await geocodeWithGoogle(city, state, country);
   const radiusMeters = radiusKm * 1000;
 
   const queryText = QUERY_MAP[serviceType] || QUERY_MAP.general;
-  const textQuery = `${queryText} in ${city}, ${state}`;
+  const countryLabel = country === 'Mexico' ? ', Mexico' : '';
+  const textQuery = `${queryText} in ${city}, ${state}${countryLabel}`;
 
   const locationBias = {
     circle: {
