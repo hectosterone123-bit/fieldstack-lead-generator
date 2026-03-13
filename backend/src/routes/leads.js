@@ -5,6 +5,16 @@ const { scrapeWebsite } = require('../services/scrapeService');
 const { recomputeHeatScore, computeInitialHeatScore } = require('../services/heatScoreService');
 const smsService = require('../services/smsService');
 
+function formatResponseTime(minutes) {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h < 24) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+}
+
 function autoUpdateHeatScore(id) {
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
   if (!lead) return;
@@ -43,6 +53,12 @@ router.get('/', (req, res, next) => {
     if (tag) {
       conditions.push('tags LIKE ?');
       params.push(`%"${tag}"%`);
+    }
+    if (req.query.no_response === 'true') {
+      conditions.push('test_submitted_at IS NOT NULL AND test_responded_at IS NULL');
+    }
+    if (req.query.no_website === 'true') {
+      conditions.push('(has_website = 0 OR has_website IS NULL)');
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -125,6 +141,28 @@ router.patch('/bulk', (req, res, next) => {
         }).join(','))
       ].join('\n');
       return res.json({ success: true, data: { csv } });
+    }
+
+    if (action === 'mark_contacted') {
+      let affected = 0;
+      for (const id of ids) {
+        const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
+        if (!lead) continue;
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+          [id, 'email_sent', 'Manual outreach logged', 'Marked as contacted (bulk)']
+        );
+        db.run(
+          'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [id]
+        );
+        if (lead.status === 'new') {
+          db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+        }
+        autoUpdateHeatScore(id);
+        affected++;
+      }
+      return res.json({ success: true, data: { affected } });
     }
 
     return res.status(400).json({ success: false, error: 'Invalid action' });
@@ -419,7 +457,7 @@ router.put('/:id', (req, res, next) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [req.params.id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time'];
+    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at'];
     const updates = [];
     const params = [];
 
@@ -598,6 +636,170 @@ router.patch('/:id/snooze', (req, res, next) => {
 
     const updated = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/find-email — fast email-only scrape (root + /contact + /about)
+router.post('/:id/find-email', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!lead.website) return res.status(400).json({ success: false, error: 'Lead has no website' });
+
+    const result = await scrapeWebsite(lead.website);
+    const emails = result.emails || [];
+
+    let saved = null;
+    if (!lead.email && emails.length > 0) {
+      db.run('UPDATE leads SET email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [emails[0], lead.id]);
+      saved = emails[0];
+    }
+
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'enrichment', 'Email search', ?)`,
+      [lead.id, emails.length > 0 ? `Found ${emails.length} email(s): ${emails.join(', ')}` : 'No emails found on website']
+    );
+
+    res.json({ success: true, data: { emails, saved } });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/leads/:id/test-submit — stamp test_submitted_at, start timer
+router.patch('/:id/test-submit', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    db.run(
+      'UPDATE leads SET test_submitted_at = CURRENT_TIMESTAMP, test_responded_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Response test submitted', 'Submitted a test lead to their website. Timer started.')`,
+      [id]
+    );
+    res.json({ success: true, data: db.get('SELECT * FROM leads WHERE id = ?', [id]) });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/leads/:id/test-respond — stamp test_responded_at, compute elapsed
+router.patch('/:id/test-respond', (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!lead.test_submitted_at) {
+      return res.status(400).json({ success: false, error: 'No test submitted yet' });
+    }
+
+    db.run(
+      'UPDATE leads SET test_responded_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+
+    const diffMs = Date.now() - new Date(lead.test_submitted_at).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Response received', ?)`,
+      [id, `Contractor responded after ${formatResponseTime(mins)}.`]
+    );
+    res.json({ success: true, data: db.get('SELECT * FROM leads WHERE id = ?', [id]) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/send-email — send template email via Resend
+router.post('/:id/send-email', async (req, res, next) => {
+  try {
+    const { template_id } = req.body;
+    if (!template_id) return res.status(400).json({ success: false, error: 'template_id required' });
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!lead.email) return res.status(400).json({ success: false, error: 'Lead has no email address' });
+
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+    if (!template) return res.status(404).json({ success: false, error: 'Template not found' });
+
+    const emailService = require('../services/emailService');
+    if (!emailService.isConfigured()) {
+      return res.status(400).json({ success: false, error: 'Email not configured — set RESEND_API_KEY' });
+    }
+
+    const { renderTemplate } = require('../services/templateService');
+    const subject = renderTemplate(template.subject || template.name, lead);
+    const body = renderTemplate(template.body, lead);
+
+    const result = await emailService.sendEmail(lead.email, subject, body);
+    if (!result.success) return res.status(500).json({ success: false, error: result.error });
+
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, 'email_sent', ?, ?, ?)`,
+      [lead.id, `Email sent: ${subject}`, `Template: ${template.name}`, JSON.stringify({ resend_message_id: result.messageId })]
+    );
+    db.run(
+      'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [lead.id]
+    );
+    autoUpdateHeatScore(lead.id);
+
+    if (lead.status === 'new') {
+      db.run(
+        `UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [lead.id]
+      );
+      db.run(
+        `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'status_change', 'Status changed to contacted', 'Auto-advanced after email sent')`,
+        [lead.id]
+      );
+    }
+
+    // Auto-schedule step 3 follow-up if this was the Loom email (step 2)
+    if (template.step_order === 2 && template.channel === 'email') {
+      const next = db.get(
+        `SELECT id FROM templates WHERE channel = 'email' AND step_order = 3 AND status_stage = ? AND is_default = 1 LIMIT 1`,
+        [template.status_stage]
+      );
+      if (next) {
+        db.run(
+          `UPDATE scheduled_emails SET cancelled_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND sent_at IS NULL AND cancelled_at IS NULL`,
+          [lead.id]
+        );
+        const scheduledAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+        db.run(
+          `INSERT INTO scheduled_emails (lead_id, template_id, scheduled_at) VALUES (?, ?, ?)`,
+          [lead.id, next.id, scheduledAt]
+        );
+      }
+    }
+
+    res.json({ success: true, data: { message_id: result.messageId } });
+  } catch (err) { next(err); }
+});
+
+// GET /api/leads/:id/scheduled-emails
+router.get('/:id/scheduled-emails', (req, res, next) => {
+  try {
+    const rows = db.all(
+      `SELECT se.*, t.name as template_name, t.subject as template_subject
+       FROM scheduled_emails se
+       JOIN templates t ON t.id = se.template_id
+       WHERE se.lead_id = ? AND se.sent_at IS NULL AND se.cancelled_at IS NULL
+       ORDER BY se.scheduled_at ASC`,
+      [req.params.id]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/leads/:id/scheduled-emails/:schedId
+router.delete('/:id/scheduled-emails/:schedId', (req, res, next) => {
+  try {
+    db.run(
+      `UPDATE scheduled_emails SET cancelled_at = CURRENT_TIMESTAMP WHERE id = ? AND lead_id = ?`,
+      [req.params.schedId, req.params.id]
+    );
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 

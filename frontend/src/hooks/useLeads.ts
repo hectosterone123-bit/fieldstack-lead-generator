@@ -3,6 +3,8 @@ import {
   fetchLeads, fetchLead, createLead, updateLead,
   deleteLead, patchLeadStatus, patchLeadHeatScore, logActivity, enrichLead,
   fetchFollowups, snoozeLead, bulkUpdateLeads, bulkEnrichLeads,
+  testSubmitLead, testRespondLead, sendLeadEmail,
+  fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms,
   type LeadsFilters
 } from '../lib/api';
 
@@ -134,6 +136,83 @@ export function useSnoozeLead() {
       qc.invalidateQueries({ queryKey: ['followups'] });
       qc.invalidateQueries({ queryKey: ['leads'] });
       qc.invalidateQueries({ queryKey: ['lead', id] });
+    },
+  });
+}
+
+export function useTestSubmitLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => testSubmitLead(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
+
+export function useTestRespondLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => testRespondLead(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
+
+export function useSendLeadEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, templateId }: { leadId: number; templateId: number }) =>
+      sendLeadEmail(leadId, templateId),
+    onSuccess: (_, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['lead', leadId] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['scheduled-emails', leadId] });
+    },
+  });
+}
+
+export function useScheduledEmails(leadId: number | null) {
+  return useQuery({
+    queryKey: ['scheduled-emails', leadId],
+    queryFn: () => fetchScheduledEmails(leadId!),
+    enabled: leadId != null,
+  });
+}
+
+export function useCancelScheduledEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, schedId }: { leadId: number; schedId: number }) =>
+      cancelScheduledEmail(leadId, schedId),
+    onSuccess: (_, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['scheduled-emails', leadId] });
+    },
+  });
+}
+
+export function useFindLeadEmail() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => findLeadEmail(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
+
+export function useSendLeadSms() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, templateId }: { leadId: number; templateId: number }) =>
+      sendSms(leadId, undefined, templateId),
+    onSuccess: (_, { leadId }) => {
+      qc.invalidateQueries({ queryKey: ['lead', leadId] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
     },
   });
 }

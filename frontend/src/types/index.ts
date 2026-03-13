@@ -8,7 +8,7 @@ export type LeadStatus =
 
 export type ActivityType =
   | 'status_change' | 'note' | 'call_attempt'
-  | 'email_sent' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
+  | 'email_sent' | 'email_opened' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
 
 export type TemplateChannel = 'email' | 'sms' | 'call_script' | 'loom_script';
 
@@ -34,6 +34,16 @@ export interface TemplateVariable {
   variable: string;
   description: string;
   fallback: string;
+}
+
+export interface ScheduledEmail {
+  id: number;
+  lead_id: number;
+  template_id: number;
+  template_name: string;
+  template_subject: string | null;
+  scheduled_at: string;
+  created_at: string;
 }
 
 export interface Lead {
@@ -77,6 +87,9 @@ export interface Lead {
   lost_reason: string | null;
   loom_url: string | null;
   ghost_time: string | null;
+  test_submitted_at: string | null;
+  test_responded_at: string | null;
+  email_opened_at: string | null;
   created_at: string;
   updated_at: string;
 }

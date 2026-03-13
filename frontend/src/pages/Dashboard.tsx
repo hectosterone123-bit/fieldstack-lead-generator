@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
-  Clock, CheckCircle, RefreshCw, FileText, Mail, MessageSquare as MessageSquareIcon, Thermometer,
+  Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
@@ -30,6 +30,7 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   note: FileText,
   call_attempt: Phone,
   email_sent: Mail,
+  email_opened: MailOpen,
   sms_sent: MessageSquareIcon,
   heat_update: Thermometer,
   import: Download,
@@ -41,6 +42,7 @@ const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
   note: 'text-zinc-400',
   call_attempt: 'text-green-400',
   email_sent: 'text-violet-400',
+  email_opened: 'text-emerald-400',
   sms_sent: 'text-emerald-400',
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',

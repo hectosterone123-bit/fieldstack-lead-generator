@@ -37,6 +37,7 @@ async function start() {
   const sequencesRouter = require('./routes/sequences');
   const smsRouter = require('./routes/sms');
   const settingsRouter = require('./routes/settings');
+  const webhooksRouter = require('./routes/webhooks');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
@@ -46,6 +47,7 @@ async function start() {
   app.use('/api/sequences', sequencesRouter);
   app.use('/api/sms', smsRouter);
   app.use('/api/settings', settingsRouter);
+  app.use('/api/webhooks', webhooksRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

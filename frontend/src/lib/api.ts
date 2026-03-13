@@ -1,4 +1,4 @@
-import type { Lead, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
+import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
 
 const BASE = '/api';
 
@@ -23,6 +23,8 @@ export interface LeadsFilters {
   order?: string;
   page?: number;
   limit?: number;
+  no_response?: boolean;
+  no_website?: boolean;
 }
 
 export interface LeadsPaginated {
@@ -89,6 +91,33 @@ export async function snoozeLead(id: number, days: number): Promise<Lead> {
 
 export async function bulkEnrichLeads(ids?: number[]): Promise<{ total: number; enriched: number; failed: number; skipped: number }> {
   return request('/leads/bulk/enrich', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) });
+}
+
+export async function testSubmitLead(id: number): Promise<Lead> {
+  return request(`/leads/${id}/test-submit`, { method: 'PATCH' });
+}
+
+export async function testRespondLead(id: number): Promise<Lead> {
+  return request(`/leads/${id}/test-respond`, { method: 'PATCH' });
+}
+
+export async function sendLeadEmail(leadId: number, templateId: number): Promise<{ message_id: string }> {
+  return request(`/leads/${leadId}/send-email`, {
+    method: 'POST',
+    body: JSON.stringify({ template_id: templateId }),
+  });
+}
+
+export async function fetchScheduledEmails(leadId: number): Promise<ScheduledEmail[]> {
+  return request(`/leads/${leadId}/scheduled-emails`);
+}
+
+export async function cancelScheduledEmail(leadId: number, schedId: number): Promise<void> {
+  return request(`/leads/${leadId}/scheduled-emails/${schedId}`, { method: 'DELETE' });
+}
+
+export async function findLeadEmail(id: number): Promise<{ emails: string[]; saved: string | null }> {
+  return request(`/leads/${id}/find-email`, { method: 'POST' });
 }
 
 // ─── Finder ───────────────────────────────────────────────────────────────────

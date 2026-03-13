@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS leads (
   last_contacted_at DATETIME,
   next_followup_at  DATETIME,
   notes            TEXT,
+  email_opened_at  DATETIME,
   created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -157,6 +158,19 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_emails (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id     INTEGER NOT NULL,
+  template_id INTEGER NOT NULL,
+  scheduled_at DATETIME NOT NULL,
+  sent_at     DATETIME,
+  cancelled_at DATETIME,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_emails_lead_id ON scheduled_emails(lead_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_emails_scheduled_at ON scheduled_emails(scheduled_at);
 `;
 
 async function initDb() {
@@ -207,6 +221,13 @@ async function initDb() {
   // Migration: outreach tracking fields
   try { db.run('ALTER TABLE leads ADD COLUMN loom_url TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN ghost_time TEXT'); } catch(e) {}
+
+  // Migration: response time tracker
+  try { db.run('ALTER TABLE leads ADD COLUMN test_submitted_at DATETIME'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN test_responded_at DATETIME'); } catch(e) {}
+
+  // Migration: email open tracking
+  try { db.run('ALTER TABLE leads ADD COLUMN email_opened_at DATETIME'); } catch(e) {}
 
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();

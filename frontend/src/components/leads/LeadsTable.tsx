@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2 } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2, CheckCheck, MailOpen, Repeat } from 'lucide-react';
 import type { Lead, LeadStatus, ServiceType } from '../../types';
 import { STATUS_LABELS, SERVICE_LABELS, SERVICE_COLORS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -7,6 +7,7 @@ import { HeatScore } from '../shared/HeatScore';
 import { EmptyState } from '../shared/EmptyState';
 import { formatCurrency, formatRelativeTime, cn } from '../../lib/utils';
 import { useLeads, useDeleteLead, useBulkUpdateLeads, useBulkEnrich } from '../../hooks/useLeads';
+import { useSequences, useEnrollLeads } from '../../hooks/useSequences';
 import { Users } from 'lucide-react';
 import { useToast } from '../../lib/toast';
 
@@ -32,6 +33,8 @@ export function LeadsTable({ onRowClick }: Props) {
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState('');
+  const [noResponseFilter, setNoResponseFilter] = useState(false);
+  const [noWebsiteFilter, setNoWebsiteFilter] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
 
@@ -40,17 +43,24 @@ export function LeadsTable({ onRowClick }: Props) {
     status: statusFilter !== 'all' ? statusFilter : undefined,
     service_type: serviceFilter !== 'all' ? serviceFilter : undefined,
     tag: tagFilter || undefined,
+    no_response: noResponseFilter || undefined,
+    no_website: noWebsiteFilter || undefined,
     sort, order, page, limit: 25,
   });
+
+  const [enrollSeqId, setEnrollSeqId] = useState<number | ''>('');
 
   const deleteLead = useDeleteLead();
   const bulkUpdate = useBulkUpdateLeads();
   const bulkEnrich = useBulkEnrich();
+  const enrollLeads = useEnrollLeads();
+  const { data: sequences } = useSequences();
+  const activeSequences = (sequences || []).filter(s => s.is_active);
   const { toast } = useToast();
 
   useEffect(() => {
     setSelected(new Set());
-  }, [search, statusFilter, serviceFilter, tagFilter, sort, order, page]);
+  }, [search, statusFilter, serviceFilter, tagFilter, noResponseFilter, noWebsiteFilter, sort, order, page]);
 
   function handleSort(col: string) {
     if (sort === col) setOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -228,6 +238,28 @@ export function LeadsTable({ onRowClick }: Props) {
               {t}
             </button>
           ))}
+          <button
+            onClick={() => { setNoResponseFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              noResponseFilter
+                ? 'bg-red-500/15 border-red-500/30 text-red-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            No Response
+          </button>
+          <button
+            onClick={() => { setNoWebsiteFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              noWebsiteFilter
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            No Website
+          </button>
         </div>
       </div>
 
@@ -306,6 +338,26 @@ export function LeadsTable({ onRowClick }: Props) {
                         if (date === today) return <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded shrink-0">Due today</span>;
                         return null;
                       })()}
+                      {lead.test_submitted_at && (() => {
+                        const sub = new Date(lead.test_submitted_at).getTime();
+                        const end = lead.test_responded_at ? new Date(lead.test_responded_at).getTime() : Date.now();
+                        const mins = Math.floor((end - sub) / 60000);
+                        if (lead.test_responded_at) {
+                          if (mins < 60)  return <span className="text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded shrink-0">Fast</span>;
+                          if (mins < 240) return <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded shrink-0">Slow</span>;
+                          return <span className="text-[10px] font-semibold bg-zinc-700 text-zinc-400 px-1.5 py-0.5 rounded shrink-0">Very Slow</span>;
+                        }
+                        if (mins >= 240) return <span className="text-[10px] font-semibold bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded shrink-0">Ghost</span>;
+                        return null;
+                      })()}
+                      {lead.email && lead.loom_url && lead.test_submitted_at && (
+                        <span title="Pitch ready: has email, Loom, and response test" className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
+                      )}
+                      {lead.email_opened_at && (
+                        <span title="Prospect opened your email" className="flex items-center gap-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded shrink-0">
+                          <MailOpen className="w-2.5 h-2.5" />Opened
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {lead.phone && (
@@ -441,6 +493,48 @@ export function LeadsTable({ onRowClick }: Props) {
               }
               Enrich
             </button>
+            <button
+              onClick={() => {
+                bulkUpdate.mutate(
+                  { ids: Array.from(selected), action: 'mark_contacted' },
+                  { onSuccess: (data) => { toast(`Marked ${(data as any).affected} lead(s) as contacted`); setSelected(new Set()); } }
+                );
+              }}
+              disabled={bulkUpdate.isPending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/[0.06] rounded-lg disabled:opacity-40 transition-colors"
+            >
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> Mark Contacted
+            </button>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={enrollSeqId}
+                onChange={e => setEnrollSeqId(e.target.value ? Number(e.target.value) : '')}
+                className="text-xs bg-zinc-800 border border-white/[0.06] text-zinc-400 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500/40"
+              >
+                <option value="">Enroll in sequence...</option>
+                {activeSequences.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              {enrollSeqId !== '' && (
+                <button
+                  onClick={async () => {
+                    const result = await enrollLeads.mutateAsync({
+                      lead_ids: Array.from(selected),
+                      sequence_id: enrollSeqId as number,
+                    });
+                    toast(`Enrolled ${result.enrolled} lead(s)${result.skipped ? `, ${result.skipped} already active` : ''}`);
+                    setEnrollSeqId('');
+                    setSelected(new Set());
+                  }}
+                  disabled={enrollLeads.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-orange-500 hover:bg-orange-400 text-white rounded-lg disabled:opacity-40 transition-colors"
+                >
+                  <Repeat className="w-3.5 h-3.5" />
+                  {enrollLeads.isPending ? 'Enrolling...' : 'Enroll'}
+                </button>
+              )}
+            </div>
             <button
               onClick={handleBulkExport}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/[0.06] rounded-lg transition-colors"

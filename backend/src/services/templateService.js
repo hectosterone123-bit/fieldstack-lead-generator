@@ -1,5 +1,15 @@
 const db = require('../db');
 
+function formatResponseTime(minutes) {
+  if (minutes < 60) return `${minutes} minutes`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h < 24) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+}
+
 const VARIABLE_MAP = {
   business_name: { field: 'business_name', fallback: 'your company' },
   first_name:    { field: 'first_name',    fallback: 'there' },
@@ -226,6 +236,17 @@ function renderTemplate(text, lead) {
     if (key === 'booking_link') {
       return getSettingValue('booking_link') || '[Set booking link in Settings]';
     }
+    if (key === 'response_time') {
+      if (!lead.test_submitted_at) return 'no response data';
+      if (!lead.test_responded_at) {
+        const mins = Math.floor((Date.now() - new Date(lead.test_submitted_at).getTime()) / 60000);
+        return formatResponseTime(mins) + ' with no response';
+      }
+      const mins = Math.floor(
+        (new Date(lead.test_responded_at).getTime() - new Date(lead.test_submitted_at).getTime()) / 60000
+      );
+      return formatResponseTime(mins);
+    }
     if (nicheData[key] !== undefined) {
       return nicheData[key];
     }
@@ -256,6 +277,11 @@ function getAvailableVariables() {
     variable: '{booking_link}',
     description: 'booking link',
     fallback: '[Set booking link in Settings]',
+  });
+  standard.push({
+    variable: '{response_time}',
+    description: 'response time (e.g. "4h 23m with no response")',
+    fallback: 'no response data',
   });
   const nicheVars = Object.keys(NICHE_DATA.general)
     .filter(k => !k.startsWith('scenario_') && !k.startsWith('loom_'))

@@ -13,6 +13,7 @@ function startSequenceScheduler() {
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
+      await sendScheduledEmails();
       logPendingCount();
     } catch (err) {
       console.error('[Scheduler] Error:', err.message);
@@ -106,8 +107,9 @@ async function autoSendDueItems() {
         }
 
         db.run(
-          'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
-          [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`]
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`,
+           JSON.stringify({ resend_message_id: result.messageId })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { failed++; continue; }
@@ -175,6 +177,57 @@ async function autoSendDueItems() {
   if (sent > 0 || failed > 0) {
     console.log(`[Scheduler] Auto-send: ${sent} sent, ${failed} failed`);
   }
+}
+
+async function sendScheduledEmails() {
+  if (!emailService.isConfigured()) return;
+
+  const due = db.all(
+    `SELECT se.id, se.lead_id, t.name as template_name, t.subject as template_subject, t.body as template_body
+     FROM scheduled_emails se
+     JOIN leads l ON l.id = se.lead_id
+     JOIN templates t ON t.id = se.template_id
+     WHERE se.scheduled_at <= datetime('now') AND se.sent_at IS NULL AND se.cancelled_at IS NULL
+     LIMIT 20`
+  );
+
+  if (due.length === 0) return;
+
+  let sent = 0;
+  for (const row of due) {
+    try {
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [row.lead_id]);
+      if (!lead?.email) continue;
+
+      const subject = renderTemplate(row.template_subject || row.template_name, lead);
+      const body = renderTemplate(row.template_body, lead);
+      const result = await emailService.sendEmail(lead.email, subject, body);
+
+      if (result.success) {
+        db.run(`UPDATE scheduled_emails SET sent_at = CURRENT_TIMESTAMP WHERE id = ?`, [row.id]);
+        db.run(
+          `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'email_sent', ?, ?)`,
+          [row.lead_id, `Follow-up sent: ${subject}`, `Template: ${row.template_name} (auto-scheduled)`]
+        );
+        db.run(
+          'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [row.lead_id]
+        );
+        const updatedLead = db.get('SELECT * FROM leads WHERE id = ?', [row.lead_id]);
+        if (updatedLead) {
+          const newScore = recomputeHeatScore(updatedLead);
+          if (newScore !== updatedLead.heat_score) {
+            db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, row.lead_id]);
+          }
+        }
+        sent++;
+      }
+    } catch (e) {
+      console.error('[Scheduler] Scheduled email error:', e.message);
+    }
+  }
+
+  if (sent > 0) console.log(`[Scheduler] Auto-sent ${sent} scheduled follow-up(s)`);
 }
 
 function logPendingCount() {

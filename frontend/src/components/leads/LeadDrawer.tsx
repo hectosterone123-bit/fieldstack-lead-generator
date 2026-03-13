@@ -3,7 +3,7 @@ import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
-  FileText, Thermometer, Download, Sparkles, Send, Video, Clock,
+  FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
@@ -12,7 +12,7 @@ import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '.
 import { StatusBadge } from '../shared/StatusBadge';
 import { HeatScore } from '../shared/HeatScore';
 import { formatCurrency, formatRelativeTime, cn } from '../../lib/utils';
-import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead } from '../../hooks/useLeads';
+import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail } from '../../hooks/useLeads';
 import { useToast } from '../../lib/toast';
 
 const STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'];
@@ -72,6 +72,11 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const logActivity = useLogActivity();
   const updateLead = useUpdateLead();
   const enrichLead = useEnrichLead();
+  const testSubmit = useTestSubmitLead();
+  const testRespond = useTestRespondLead();
+  const { data: scheduledEmails } = useScheduledEmails(leadId);
+  const cancelScheduled = useCancelScheduledEmail();
+  const findEmail = useFindLeadEmail();
   const { toast } = useToast();
 
   const [noteText, setNoteText] = useState('');
@@ -283,6 +288,22 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                     />
                   )}
                   {lead.website && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          const r = await findEmail.mutateAsync(lead.id);
+                          if (r.emails.length > 0) toast(`Found ${r.emails.length} email(s)${r.saved ? ` — saved ${r.saved}` : ''}`);
+                          else toast('No emails found on website', 'error');
+                        } catch (e: any) { toast(e.message || 'Failed', 'error'); }
+                      }}
+                      disabled={findEmail.isPending}
+                      className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-orange-400 transition-colors disabled:opacity-40 py-0.5"
+                    >
+                      {findEmail.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                      {findEmail.isPending ? 'Searching...' : 'Find Email'}
+                    </button>
+                  )}
+                  {lead.website && (
                     <ContactRow
                       icon={Globe}
                       label={lead.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
@@ -400,6 +421,74 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 </div>
               </div>
 
+              {/* Response Test Tracker */}
+              {(() => {
+                const submittedAt = lead.test_submitted_at ? new Date(lead.test_submitted_at) : null;
+                const respondedAt = lead.test_responded_at ? new Date(lead.test_responded_at) : null;
+                const elapsedMins = submittedAt
+                  ? Math.floor(((respondedAt ?? new Date()).getTime() - submittedAt.getTime()) / 60000)
+                  : null;
+                const fmt = (m: number) => {
+                  if (m < 60) return `${m}m`;
+                  const h = Math.floor(m / 60), rm = m % 60;
+                  if (h < 24) return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+                  const d = Math.floor(h / 24), rh = h % 24;
+                  return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
+                };
+                const responseLabel = elapsedMins !== null ? fmt(elapsedMins) : null;
+                const isWaiting = !!submittedAt && !respondedAt;
+                const isLongWait = isWaiting && elapsedMins !== null && elapsedMins > 240;
+                return (
+                  <div className="px-5 py-4 border-b border-white/[0.04]">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Timer className="w-3.5 h-3.5 text-zinc-500" />
+                        <p className="text-overline text-zinc-600">Response Test</p>
+                      </div>
+                      {!submittedAt && (
+                        <button
+                          onClick={() => testSubmit.mutate(lead.id)}
+                          disabled={testSubmit.isPending}
+                          className="text-xs px-2.5 py-1 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-colors disabled:opacity-50"
+                        >
+                          Mark Test Sent
+                        </button>
+                      )}
+                      {isWaiting && (
+                        <button
+                          onClick={() => testRespond.mutate(lead.id)}
+                          disabled={testRespond.isPending}
+                          className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                        >
+                          They Responded
+                        </button>
+                      )}
+                    </div>
+                    {!submittedAt && (
+                      <p className="text-xs text-zinc-600">No test submitted yet.</p>
+                    )}
+                    {isWaiting && (
+                      <p className={cn('text-sm font-data font-medium', isLongWait ? 'text-red-400' : 'text-amber-400')}>
+                        ⏱ {responseLabel} — still waiting
+                      </p>
+                    )}
+                    {respondedAt && (
+                      <p className="text-sm font-data font-medium text-emerald-400">
+                        ✓ Responded in {responseLabel}
+                      </p>
+                    )}
+                    {submittedAt && (
+                      <button
+                        onClick={() => updateLead.mutate({ id: lead.id, data: { test_submitted_at: null, test_responded_at: null } as any })}
+                        className="mt-1.5 text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Deal Tracking */}
               {(['proposal_sent', 'booked', 'lost', 'closed_won'] as LeadStatus[]).includes(lead.status) && (
                 <div className="px-5 py-4 border-b border-white/[0.04] space-y-3">
@@ -482,6 +571,35 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                     </button>
                   </div>
                 </div>
+
+                {/* Scheduled Follow-up */}
+                {scheduledEmails && scheduledEmails.length > 0 && (
+                  <div>
+                    <p className="text-overline text-zinc-600 mb-3">Scheduled Follow-up</p>
+                    {scheduledEmails.map(s => {
+                      const daysUntil = Math.ceil((new Date(s.scheduled_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      return (
+                        <div key={s.id} className="flex items-center justify-between gap-3 bg-zinc-800/50 rounded-lg px-3 py-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <CalendarClock className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-zinc-300 truncate">{s.template_name}</p>
+                              <p className="text-[11px] text-zinc-500 mt-0.5">
+                                Sends in {daysUntil} day{daysUntil !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => cancelScheduled.mutate({ leadId: lead.id, schedId: s.id })}
+                            className="w-6 h-6 rounded flex items-center justify-center text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Follow-up date */}
                 <div>
@@ -605,9 +723,15 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                           </div>
                           <div className="space-y-1">
                             {enrichment.emails.map(email => (
-                              <a key={email} href={`mailto:${email}`} className="block text-sm text-blue-400 hover:text-blue-300 truncate transition-colors">
-                                {email}
-                              </a>
+                              <div key={email} className="flex items-center justify-between gap-2">
+                                <a href={`mailto:${email}`} className="text-sm text-blue-400 hover:text-blue-300 truncate transition-colors">
+                                  {email}
+                                </a>
+                                {lead.email === email
+                                  ? <span className="text-[10px] text-emerald-500 shrink-0">Active</span>
+                                  : <button onClick={() => updateLead.mutate({ id: lead.id, data: { email } })} className="text-[10px] font-medium text-zinc-500 hover:text-orange-400 transition-colors shrink-0">Use</button>
+                                }
+                              </div>
                             ))}
                           </div>
                         </div>

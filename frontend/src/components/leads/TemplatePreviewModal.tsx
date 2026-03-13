@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import {
   X, Mail, MessageSquare, PhoneCall, Video, Copy, Check,
-  ChevronRight, Loader2,
+  ChevronRight, Loader2, Send,
 } from 'lucide-react';
 import type { Lead, Template, TemplateChannel, TemplatePreview } from '../../types';
 import { STATUS_LABELS } from '../../types';
 import { cn } from '../../lib/utils';
 import { useTemplates, usePreviewTemplate } from '../../hooks/useTemplates';
-import { useLogActivity } from '../../hooks/useLeads';
+import { useLogActivity, useSendLeadEmail, useSendLeadSms } from '../../hooks/useLeads';
 import { useToast } from '../../lib/toast';
+import { fetchEmailStatus, fetchSmsStatus } from '../../lib/api';
 
 const CHANNEL_TABS: { key: TemplateChannel; label: string; icon: React.ElementType }[] = [
   { key: 'email', label: 'Email', icon: Mail },
@@ -34,10 +35,19 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [preview, setPreview] = useState<TemplatePreview | null>(null);
   const [copied, setCopied] = useState(false);
+  const [emailConfigured, setEmailConfigured] = useState<boolean | null>(null);
+  const [smsConfigured, setSmsConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetchEmailStatus().then(d => setEmailConfigured(d.configured)).catch(() => setEmailConfigured(false));
+    fetchSmsStatus().then(d => setSmsConfigured(d.configured)).catch(() => setSmsConfigured(false));
+  }, []);
 
   const { data: templates, isLoading } = useTemplates({ channel });
   const previewMutation = usePreviewTemplate();
   const logActivity = useLogActivity();
+  const sendEmail = useSendLeadEmail();
+  const sendSms = useSendLeadSms();
   const { toast } = useToast();
 
   // Group templates by step_order
@@ -144,6 +154,19 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
           })}
         </div>
 
+        {/* Resend config warning */}
+        {channel === 'email' && emailConfigured === false && (
+          <div className="mx-6 mt-3 mb-1 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 flex-shrink-0">
+            Email sending not configured — set <span className="font-mono">RESEND_API_KEY</span> in Railway to enable Send Email.
+          </div>
+        )}
+        {/* Twilio config warning */}
+        {channel === 'sms' && smsConfigured === false && (
+          <div className="mx-6 mt-3 mb-1 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 flex-shrink-0">
+            SMS sending not configured — set <span className="font-mono">TWILIO_ACCOUNT_SID</span>, <span className="font-mono">TWILIO_AUTH_TOKEN</span>, <span className="font-mono">TWILIO_PHONE_NUMBER</span> to enable Send SMS.
+          </div>
+        )}
+
         {/* Body: list + preview */}
         <div className="flex-1 flex overflow-hidden">
 
@@ -227,21 +250,61 @@ export function TemplatePreviewModal({ lead, onClose }: Props) {
                         Step {preview.step_order} · {preview.channel === 'email' ? 'Email' : preview.channel === 'sms' ? 'SMS' : 'Call Script'}
                       </p>
                     </div>
-                    <button
-                      onClick={handleCopy}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
-                        copied
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
-                          : 'bg-orange-500 hover:bg-orange-400 text-white shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]',
+                    <div className="flex items-center gap-2">
+                      {channel === 'email' && lead.email && selectedId && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await sendEmail.mutateAsync({ leadId: lead.id, templateId: selectedId });
+                              toast(`Email sent to ${lead.email}`);
+                            } catch (err: any) {
+                              toast(err.message || 'Failed to send email', 'error');
+                            }
+                          }}
+                          disabled={sendEmail.isPending}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-violet-500/15 hover:bg-violet-500/25 text-violet-400 border border-violet-500/25 disabled:opacity-50 transition-colors"
+                        >
+                          {sendEmail.isPending
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                            : <><Send className="w-4 h-4" /> Send Email</>
+                          }
+                        </button>
                       )}
-                    >
-                      {copied ? (
-                        <><Check className="w-4 h-4" /> Copied!</>
-                      ) : (
-                        <><Copy className="w-4 h-4" /> Copy to Clipboard</>
+                      {channel === 'sms' && lead.phone && selectedId && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              await sendSms.mutateAsync({ leadId: lead.id, templateId: selectedId });
+                              toast(`SMS sent to ${lead.phone}`);
+                            } catch (err: any) {
+                              toast(err.message || 'Failed to send SMS', 'error');
+                            }
+                          }}
+                          disabled={sendSms.isPending || smsConfigured === false}
+                          className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-green-500/15 hover:bg-green-500/25 text-green-400 border border-green-500/25 disabled:opacity-50 transition-colors"
+                        >
+                          {sendSms.isPending
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+                            : <><MessageSquare className="w-4 h-4" /> Send SMS</>
+                          }
+                        </button>
                       )}
-                    </button>
+                      <button
+                        onClick={handleCopy}
+                        className={cn(
+                          'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                          copied
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                            : 'bg-orange-500 hover:bg-orange-400 text-white shadow-[0_0_16px_-4px_rgba(249,115,22,0.5)]',
+                        )}
+                      >
+                        {copied ? (
+                          <><Check className="w-4 h-4" /> Copied!</>
+                        ) : (
+                          <><Copy className="w-4 h-4" /> Copy to Clipboard</>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
