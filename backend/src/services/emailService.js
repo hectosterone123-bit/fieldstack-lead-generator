@@ -23,17 +23,30 @@ function getFromAddress() {
   return 'onboarding@resend.dev';
 }
 
+function getSenderName() {
+  try {
+    const db = require('../db');
+    const row = db.get('SELECT value FROM settings WHERE key = ?', ['sender_name']);
+    if (row?.value) return row.value;
+  } catch {}
+  return '';
+}
+
 async function sendEmail(to, subject, htmlBody) {
   const client = getClient();
   if (!client) return { success: false, error: 'Resend API key not configured' };
+
+  const senderName = getSenderName();
+  const footer = senderName ? `\n\n${senderName}, from FieldStack` : '';
+  const bodyWithFooter = htmlBody + footer;
 
   try {
     const { data, error } = await client.emails.send({
       from: getFromAddress(),
       to: Array.isArray(to) ? to : [to],
       subject,
-      html: htmlBody,
-      text: htmlBody.replace(/<[^>]*>/g, ''),
+      html: bodyWithFooter,
+      text: bodyWithFooter.replace(/<[^>]*>/g, ''),
     });
 
     if (error) {

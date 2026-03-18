@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -15,12 +15,14 @@ export function Settings() {
   const [bookingLink, setBookingLink] = useState('');
   const [resendFrom, setResendFrom] = useState('');
   const [appUrl, setAppUrl] = useState('');
+  const [senderName, setSenderName] = useState('');
 
   useEffect(() => {
     if (settings) {
       setBookingLink(settings.booking_link || '');
       setResendFrom(settings.resend_from || '');
       setAppUrl(settings.app_url || '');
+      setSenderName(settings.sender_name || '');
     }
   }, [settings]);
 
@@ -42,6 +44,7 @@ export function Settings() {
       { key: 'booking_link', value: bookingLink },
       { key: 'resend_from', value: resendFrom },
       { key: 'app_url', value: appUrl },
+      { key: 'sender_name', value: senderName },
     ]);
   }
 
@@ -61,6 +64,24 @@ export function Settings() {
       </div>
 
       <div className="space-y-6">
+        {/* Sender Name */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <User className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Sender Name</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Your name for the email footer. Emails will end with "[Name], from FieldStack".
+          </p>
+          <input
+            type="text"
+            value={senderName}
+            onChange={e => setSenderName(e.target.value)}
+            placeholder="Hector"
+            className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+          />
+        </div>
+
         {/* Booking Link */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-3">

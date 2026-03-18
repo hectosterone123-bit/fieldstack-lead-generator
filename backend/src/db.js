@@ -235,6 +235,7 @@ async function initDb() {
   // Migration: unsubscribe support
   try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')"); } catch(e) {}
 
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();
@@ -384,7 +385,7 @@ function migrateDirectLoomEmails() {
 
 I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
 
-Here it is: [INSERT LOOM LINK HERE]
+Here it is: {loom_url}
 
 The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
 
@@ -400,7 +401,7 @@ Fieldstack`
 
 I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
 
-Made a short video showing the results side by side: [INSERT LOOM LINK HERE]
+Made a short video showing the results side by side: {loom_url}
 
 Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
 
@@ -765,7 +766,7 @@ This data becomes the centerpiece of Step 2.`,
 
 I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
 
-Here it is: [INSERT LOOM LINK HERE]
+Here it is: {loom_url}
 
 The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
 
@@ -786,7 +787,7 @@ Fieldstack`,
 
 I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
 
-Made a short video showing the results side by side: [INSERT LOOM LINK HERE]
+Made a short video showing the results side by side: {loom_url}
 
 Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
 
@@ -946,7 +947,7 @@ IF HARD NO:
 
 As promised. Here's the Loom video I made for {business_name}:
 
-[INSERT LOOM LINK HERE]
+{loom_url}
 
 What you'll see in 3 minutes:
 1. The exact response time when I submitted a lead to {business_name}
@@ -972,7 +973,7 @@ Fieldstack`,
 
 I don't send generic videos. This one was built specifically for {business_name}.
 
-Here's your Loom: [INSERT LOOM LINK HERE]
+Here's your Loom: {loom_url}
 
 I walk through:
 • Your actual response data (timestamp and all)
@@ -997,7 +998,7 @@ Fieldstack`,
       subject: 'I bet you fix problem #2 before the video ends',
       body: `{first_name},
 
-Here's your speed test video: [INSERT LOOM LINK HERE]
+Here's your speed test video: {loom_url}
 
 Fair warning: most {service_type} owners who watch this end up making changes the same day. Not because I'm persuasive — because the data is hard to unsee.
 
@@ -1023,7 +1024,7 @@ Fieldstack`,
       status_stage: 'qualified',
       step_order: 3,
       subject: null,
-      body: `{first_name}, here's your {business_name} speed test video: [LOOM LINK] — watch the part at 1:45, that's where it gets interesting. 3 min total.`,
+      body: `{first_name}, here's your {business_name} speed test video: {loom_url} — watch the part at 1:45, that's where it gets interesting. 3 min total.`,
     },
     {
       name: 'Video Delivery — SMS Challenge',
@@ -1031,7 +1032,7 @@ Fieldstack`,
       status_stage: 'qualified',
       step_order: 3,
       subject: null,
-      body: `Your video is ready: [LOOM LINK]. My prediction: you'll want to fix problem #2 before it's even done playing. Let me know what you think, {first_name}.`,
+      body: `Your video is ready: {loom_url}. My prediction: you'll want to fix problem #2 before it's even done playing. Let me know what you think, {first_name}.`,
     },
 
     // --- Call Script ---
@@ -1142,7 +1143,7 @@ Fieldstack`,
       status_stage: 'proposal_sent',
       step_order: 4,
       subject: null,
-      body: `Hey {first_name}, did the {business_name} video come through? Here it is again: [LOOM LINK]. One thing that surprised most owners — the part at 1:45. Worth 3 min.`,
+      body: `Hey {first_name}, did the {business_name} video come through? Here it is again: {loom_url}. One thing that surprised most owners — the part at 1:45. Worth 3 min.`,
     },
     {
       name: 'Follow-Up #1 — SMS Question',
@@ -1356,7 +1357,7 @@ Fieldstack`,
       status_stage: 'proposal_sent',
       step_order: 6,
       subject: null,
-      body: `{first_name}, last note from me. Your {business_name} speed test data: [LOOM LINK]. No expiration — watch it whenever. Here if you need me.`,
+      body: `{first_name}, last note from me. Your {business_name} speed test data: {loom_url}. No expiration — watch it whenever. Here if you need me.`,
     },
     {
       name: 'Breakup — SMS Direct',

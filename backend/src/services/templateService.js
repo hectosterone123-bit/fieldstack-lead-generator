@@ -20,6 +20,7 @@ const VARIABLE_MAP = {
   state:         { field: 'state',         fallback: '' },
   service_type:  { field: 'service_type',  fallback: 'home service' },
   estimated_value: { field: 'estimated_value', fallback: '' },
+  loom_url:      { field: 'loom_url',      fallback: '[LOOM LINK]' },
 };
 
 const NICHE_DATA = {
@@ -232,6 +233,14 @@ function renderTemplate(text, lead) {
       if (key === 'service_type') return formatServiceType(value);
       if (key === 'estimated_value') return `$${Number(value).toLocaleString()}`;
       return String(value);
+    }
+    if (key === 'loom_url') {
+      const url = lead.loom_url;
+      if (url) return url;
+      return mapping ? mapping.fallback : '[LOOM LINK]';
+    }
+    if (key === 'sender_name') {
+      return getSettingValue('sender_name') || 'FieldStack';
     }
     if (key === 'booking_link') {
       return getSettingValue('booking_link') || '[Set booking link in Settings]';
