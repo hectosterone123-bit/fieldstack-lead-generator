@@ -77,7 +77,7 @@ export async function bulkUpdateLeads(ids: number[], action: string, value?: str
   return request('/leads/bulk', { method: 'PATCH', body: JSON.stringify({ ids, action, value }) });
 }
 
-export async function importCsv(csv: string): Promise<{ imported: number; skipped: number }> {
+export async function importCsv(csv: string): Promise<{ imported: number; skipped: number; lead_ids: number[] }> {
   return request('/leads/import-csv', { method: 'POST', body: JSON.stringify({ csv }) });
 }
 
@@ -338,6 +338,10 @@ export async function cancelEnrollment(enrollmentId: number): Promise<void> {
 
 export async function skipEnrollmentStep(enrollmentId: number): Promise<void> {
   return request(`/sequences/enrollments/${enrollmentId}/skip`, { method: 'PATCH' });
+}
+
+export async function setEnrollmentAutoSend(enrollmentId: number): Promise<void> {
+  return request(`/sequences/enrollments/${enrollmentId}/auto-send`, { method: 'PATCH' });
 }
 
 export async function fetchOutreachQueue(): Promise<OutreachQueueItem[]> {

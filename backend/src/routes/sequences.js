@@ -25,6 +25,30 @@ function getEnrollmentCounts() {
   return map;
 }
 
+function getSequenceSentCounts() {
+  const rows = db.all(`
+    SELECT ls.sequence_id, COUNT(DISTINCT a.id) as count
+    FROM lead_sequences ls
+    JOIN activities a ON a.lead_id = ls.lead_id AND a.type = 'email_sent'
+    GROUP BY ls.sequence_id
+  `);
+  const map = {};
+  rows.forEach(r => { map[r.sequence_id] = r.count; });
+  return map;
+}
+
+function getSequenceOpenedCounts() {
+  const rows = db.all(`
+    SELECT ls.sequence_id, COUNT(DISTINCT a.id) as count
+    FROM lead_sequences ls
+    JOIN activities a ON a.lead_id = ls.lead_id AND a.type = 'email_opened'
+    GROUP BY ls.sequence_id
+  `);
+  const map = {};
+  rows.forEach(r => { map[r.sequence_id] = r.count; });
+  return map;
+}
+
 // ─── Outreach Queue (registered before /:id) ────────────────────────────────
 
 router.get('/queue', (req, res) => {
@@ -33,11 +57,11 @@ router.get('/queue', (req, res) => {
            l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website
+           l.contact_count, l.estimated_value, l.website, l.email_opened_at
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
-    WHERE ls.status = 'active'
+    WHERE ls.status = 'active' AND (ls.auto_send IS NULL OR ls.auto_send = 0)
   `);
 
   const now = new Date();
@@ -85,6 +109,7 @@ router.get('/queue', (req, res) => {
         due_date: dueDate.toISOString(),
         is_overdue: dueDate < now,
         enrolled_at: enrollment.enrolled_at,
+        email_opened_at: enrollment.email_opened_at || null,
       });
     }
   }
@@ -242,6 +267,7 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
 
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+  if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
   if (!lead.email) return res.status(400).json({ success: false, error: 'Lead has no email address' });
 
   const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
@@ -311,6 +337,7 @@ router.post('/queue/:enrollmentId/send-sms', async (req, res) => {
 
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+  if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
   if (!lead.phone) return res.status(400).json({ success: false, error: 'Lead has no phone number' });
 
   const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
@@ -471,6 +498,14 @@ router.patch('/enrollments/:enrollmentId/cancel', (req, res) => {
   res.json({ success: true, data: { id: enrollmentId, status: 'cancelled' } });
 });
 
+router.patch('/enrollments/:enrollmentId/auto-send', (req, res) => {
+  const { enrollmentId } = req.params;
+  const enrollment = db.get('SELECT * FROM lead_sequences WHERE id = ?', [enrollmentId]);
+  if (!enrollment) return res.status(404).json({ success: false, error: 'Enrollment not found' });
+  db.run('UPDATE lead_sequences SET auto_send = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [enrollmentId]);
+  res.json({ success: true, data: { ok: true } });
+});
+
 router.patch('/enrollments/:enrollmentId/skip', (req, res) => {
   const { enrollmentId } = req.params;
   const enrollment = db.get('SELECT * FROM lead_sequences WHERE id = ?', [enrollmentId]);
@@ -501,11 +536,15 @@ router.patch('/enrollments/:enrollmentId/skip', (req, res) => {
 router.get('/', (req, res) => {
   const sequences = db.all('SELECT * FROM sequences ORDER BY created_at DESC');
   const counts = getEnrollmentCounts();
+  const sentCounts = getSequenceSentCounts();
+  const openedCounts = getSequenceOpenedCounts();
 
   const result = sequences.map(s => ({
     ...s,
     steps: parseSteps(s),
     active_enrollments: counts[s.id] || 0,
+    emails_sent: sentCounts[s.id] || 0,
+    emails_opened: openedCounts[s.id] || 0,
   }));
 
   res.json({ success: true, data: result });

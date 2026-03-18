@@ -61,7 +61,7 @@ async function autoSendDueItems() {
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
-    WHERE ls.status = 'active' AND s.auto_send = 1
+    WHERE ls.status = 'active' AND (s.auto_send = 1 OR ls.auto_send = 1) AND (l.unsubscribed_at IS NULL)
   `);
 
   if (enrollments.length === 0) return;

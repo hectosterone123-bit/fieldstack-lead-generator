@@ -32,6 +32,11 @@ Your capabilities:
 - Schedule follow-up reminders for leads
 - Adjust heat scores manually
 - Add notes to leads
+- Send actual SMS text messages to leads via Twilio
+- Enroll leads in automated outreach sequences
+- List available sequences
+- Send emails to individual leads using templates (Resend)
+- Mass-email multiple leads matching a filter using a template
 
 Guidelines:
 - Be concise and actionable. Contractors are busy.
@@ -41,7 +46,16 @@ Guidelines:
 - Heat score guide: 0-30 = cold, 31-60 = warm, 61-85 = hot, 86-100 = on fire.
 - Status pipeline: new → contacted → qualified → proposal_sent → booked → closed_won (or lost).
 - Always recommend a next concrete action (e.g., "call them today", "send the Step 2 email").
-- Format responses with markdown for readability.`;
+- Format responses with markdown for readability.
+
+IMPORTANT RULES FOR ACTIONS:
+- Before calling send_sms: tell the user exactly what message you will send and to which lead/number. Ask "Should I send this?" and wait for explicit confirmation (yes, send it, go ahead) before calling the tool.
+- Before calling enroll_in_sequence: confirm which lead and which sequence. Ask "Should I enroll [Name] in [Sequence]?" and wait for confirmation.
+- Before sending SMS, always check the lead has a phone number using get_lead. If no phone, tell the user.
+- Keep all SMS messages under 160 characters. No emojis. Professional, direct tone.
+- Before calling send_email: call preview_template first, show the user the subject and first ~150 chars of the body. Ask "Should I send this?" and wait for yes.
+- Before calling bulk_send_email: call search_leads with the same status/service_type filter to show which leads will receive it and the count. Say "I'll send [template name] to X leads: [list names]. Should I proceed?" Wait for explicit confirmation before sending.
+- Never bulk send email without confirming the count and template name first.`;
 
 const tools = [
   {
@@ -164,10 +178,64 @@ const tools = [
       },
       required: ['lead_id', 'note']
     }
+  },
+  {
+    name: 'get_sequences',
+    description: 'List all active outreach sequences available for enrollment. Use this before enrolling a lead to show the user what sequences exist and their step counts.',
+    input_schema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'send_sms',
+    description: 'Send an actual SMS text message to a lead via Twilio. IMPORTANT: Always show the user the exact message content and get explicit confirmation before calling this tool. Verify the lead has a phone number first using get_lead.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'ID of the lead to text' },
+        message: { type: 'string', description: 'The SMS message body. Max 160 characters. No emojis.' }
+      },
+      required: ['lead_id', 'message']
+    }
+  },
+  {
+    name: 'enroll_in_sequence',
+    description: 'Enroll a lead in an automated outreach sequence. Use get_sequences first to find available sequences. Always get user confirmation before enrolling.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'ID of the lead to enroll' },
+        sequence_id: { type: 'integer', description: 'ID of the sequence to enroll them in' }
+      },
+      required: ['lead_id', 'sequence_id']
+    }
+  },
+  {
+    name: 'send_email',
+    description: 'Send an email to a single lead using a template via Resend. Use get_templates(channel: "email") to find templates, use preview_template to show the rendered content. IMPORTANT: Always show the user the email subject and first 150 chars of body and get explicit confirmation before calling this tool.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        lead_id: { type: 'integer', description: 'ID of the lead to email' },
+        template_id: { type: 'integer', description: 'ID of the email template to use' }
+      },
+      required: ['lead_id', 'template_id']
+    }
+  },
+  {
+    name: 'bulk_send_email',
+    description: 'Send an email template to multiple leads matching a filter. IMPORTANT: Before calling this, use search_leads with the same filters to show how many leads will receive the email. Present the count and template name, then get explicit confirmation. Do NOT call without confirmed approval.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        template_id: { type: 'integer', description: 'ID of the email template to send' },
+        status: { type: 'string', description: 'Filter by lead status (optional). E.g. "new", "contacted"' },
+        service_type: { type: 'string', description: 'Filter by service type (optional). E.g. "hvac", "roofing"' }
+      },
+      required: ['template_id']
+    }
   }
 ];
 
-function executeTool(toolName, input) {
+async function executeTool(toolName, input) {
   switch (toolName) {
     case 'get_lead': {
       const lead = db.get('SELECT * FROM leads WHERE id = ?', [input.lead_id]);
@@ -352,6 +420,149 @@ function executeTool(toolName, input) {
       return { success: true, message: `Note added to ${lead.business_name}` };
     }
 
+    case 'get_sequences': {
+      const sequences = db.all(
+        'SELECT id, name, description, steps, auto_send FROM sequences WHERE is_active = 1 ORDER BY created_at DESC'
+      );
+      return {
+        sequences: sequences.map(s => ({
+          id: s.id,
+          name: s.name,
+          description: s.description || '',
+          steps_count: JSON.parse(s.steps || '[]').length,
+          auto_send: !!s.auto_send,
+        })),
+      };
+    }
+
+    case 'send_sms': {
+      const { lead_id, message } = input;
+      if (!message || message.length > 160) {
+        return { error: 'Message must be 1–160 characters' };
+      }
+      const lead = db.get('SELECT id, phone, business_name FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (!lead.phone) return { error: 'Lead has no phone number on file' };
+
+      const smsService = require('./smsService');
+      const result = await smsService.sendSms(lead.phone, message);
+      if (!result.success) return { error: result.error };
+
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+        [lead_id, 'sms_sent', 'SMS sent via Sam AI', message.substring(0, 100),
+         JSON.stringify({ twilio_sid: result.sid, via: 'sam_ai' })]
+      );
+      const normalized = smsService.normalizePhone(lead.phone);
+      db.run(
+        "INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status) VALUES (?, 'outbound', ?, ?, ?, ?, 'sent')",
+        [lead_id, process.env.TWILIO_PHONE_NUMBER || '', normalized, message, result.sid]
+      );
+      return { success: true, message: `SMS sent to ${lead.business_name} (${normalized})` };
+    }
+
+    case 'enroll_in_sequence': {
+      const { lead_id, sequence_id } = input;
+      const lead = db.get('SELECT id, business_name FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [sequence_id]);
+      if (!sequence) return { error: 'Sequence not found' };
+      if (!sequence.is_active) return { error: `"${sequence.name}" is not active` };
+      const existing = db.get(
+        "SELECT id FROM lead_sequences WHERE lead_id = ? AND sequence_id = ? AND status IN ('active', 'paused')",
+        [lead_id, sequence_id]
+      );
+      if (existing) return { error: `${lead.business_name} is already enrolled in "${sequence.name}"` };
+
+      const steps = JSON.parse(sequence.steps || '[]');
+      db.run(
+        "INSERT INTO lead_sequences (lead_id, sequence_id, current_step, status) VALUES (?, ?, 1, 'active')",
+        [lead_id, sequence_id]
+      );
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+        [lead_id, 'note', `Enrolled in sequence: ${sequence.name}`,
+         `Started "${sequence.name}" (${steps.length} steps) via Sam AI`]
+      );
+      return { success: true, message: `${lead.business_name} enrolled in "${sequence.name}" (${steps.length} steps)` };
+    }
+
+    case 'send_email': {
+      const { lead_id, template_id } = input;
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (!lead.email) return { error: `${lead.business_name} has no email address on file` };
+
+      const emailService = require('./emailService');
+      if (!emailService.isConfigured()) return { error: 'Email not configured (missing RESEND_API_KEY)' };
+
+      const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+      if (!template) return { error: 'Template not found' };
+      if (template.channel !== 'email') return { error: 'Template is not an email template' };
+
+      const rendered = renderTemplate(template, lead);
+      const result = await emailService.sendEmail(lead.email, rendered.subject || template.subject || 'Follow-up', rendered.body);
+      if (!result.success) return { error: result.error };
+
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+        [lead_id, 'email_sent', `Email sent: ${template.name}`, template.subject || '',
+         JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'sam_ai' })]
+      );
+      db.run(
+        'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [lead_id]
+      );
+      if (lead.status === 'new') {
+        db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead_id]);
+      }
+      return { success: true, message: `Email sent to ${lead.business_name} (${lead.email})` };
+    }
+
+    case 'bulk_send_email': {
+      const { template_id, status, service_type } = input;
+
+      const emailService = require('./emailService');
+      if (!emailService.isConfigured()) return { error: 'Email not configured (missing RESEND_API_KEY)' };
+
+      const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+      if (!template) return { error: 'Template not found' };
+      if (template.channel !== 'email') return { error: 'Template is not an email template' };
+
+      const conditions = ["email IS NOT NULL AND email != ''", "(unsubscribed_at IS NULL OR unsubscribed_at = '')"];
+      const params = [];
+      if (status) { conditions.push('status = ?'); params.push(status); }
+      if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
+      const leads = db.all(`SELECT * FROM leads WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`, params);
+
+      if (leads.length === 0) return { error: 'No leads match that filter with a valid email address' };
+
+      let sent = 0, failed = 0;
+      for (const lead of leads) {
+        try {
+          const rendered = renderTemplate(template, lead);
+          const result = await emailService.sendEmail(lead.email, rendered.subject || template.subject || 'Follow-up', rendered.body);
+          if (result.success) {
+            sent++;
+            db.run(
+              'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+              [lead.id, 'email_sent', `Email sent: ${template.name}`, template.subject || '',
+               JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'sam_ai_bulk' })]
+            );
+            db.run(
+              'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+              [lead.id]
+            );
+            if (lead.status === 'new') {
+              db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead.id]);
+            }
+          } else { failed++; }
+        } catch { failed++; }
+      }
+
+      return { success: true, message: `Sent ${sent} email${sent !== 1 ? 's' : ''}${failed > 0 ? `, ${failed} failed` : ''}. New leads auto-advanced to "contacted".` };
+    }
+
     default:
       return { error: `Unknown tool: ${toolName}` };
   }
@@ -452,15 +663,15 @@ async function streamChat(dbMessages, context, onEvent) {
       claudeMessages.push({ role: 'assistant', content: assistantContent });
 
       // Execute each tool and build tool results
-      const toolResults = toolUseBlocks.map(tool => {
-        const result = executeTool(tool.name, tool.input);
+      const toolResults = await Promise.all(toolUseBlocks.map(async tool => {
+        const result = await executeTool(tool.name, tool.input);
         onEvent({ type: 'tool_done', tool: tool.name });
         return {
           type: 'tool_result',
           tool_use_id: tool.id,
           content: JSON.stringify(result),
         };
-      });
+      }));
 
       claudeMessages.push({ role: 'user', content: toolResults });
 

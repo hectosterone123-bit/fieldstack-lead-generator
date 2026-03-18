@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap,
+  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
@@ -105,6 +105,16 @@ export function Sequences() {
                         <span className="text-xs text-zinc-500 flex items-center gap-1">
                           <Users className="w-3 h-3" />
                           {seq.active_enrollments} active
+                        </span>
+                      )}
+                      {(seq.emails_sent ?? 0) > 0 && (
+                        <span className="text-xs text-zinc-500 flex items-center gap-1">
+                          <Mail className="w-3 h-3" />
+                          {seq.emails_sent} sent
+                          <span className="text-zinc-600">·</span>
+                          <span className={(seq.emails_opened ?? 0) / (seq.emails_sent ?? 1) >= 0.3 ? 'text-emerald-400' : 'text-zinc-400'}>
+                            {Math.round(((seq.emails_opened ?? 0) / (seq.emails_sent ?? 1)) * 100)}% opened
+                          </span>
                         </span>
                       )}
                     </div>

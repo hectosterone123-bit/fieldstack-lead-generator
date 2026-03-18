@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -14,11 +14,13 @@ export function Settings() {
 
   const [bookingLink, setBookingLink] = useState('');
   const [resendFrom, setResendFrom] = useState('');
+  const [appUrl, setAppUrl] = useState('');
 
   useEffect(() => {
     if (settings) {
       setBookingLink(settings.booking_link || '');
       setResendFrom(settings.resend_from || '');
+      setAppUrl(settings.app_url || '');
     }
   }, [settings]);
 
@@ -39,6 +41,7 @@ export function Settings() {
     saveMutation.mutate([
       { key: 'booking_link', value: bookingLink },
       { key: 'resend_from', value: resendFrom },
+      { key: 'app_url', value: appUrl },
     ]);
   }
 
@@ -90,6 +93,24 @@ export function Settings() {
             value={resendFrom}
             onChange={e => setResendFrom(e.target.value)}
             placeholder="sam@fieldstack.io"
+            className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+          />
+        </div>
+
+        {/* App URL */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Globe className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">App URL</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Your deployed app URL. Used to generate {'{unsubscribe_url}'} links in templates (e.g. https://yourapp.up.railway.app).
+          </p>
+          <input
+            type="url"
+            value={appUrl}
+            onChange={e => setAppUrl(e.target.value)}
+            placeholder="https://yourapp.up.railway.app"
             className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
           />
         </div>

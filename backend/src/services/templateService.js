@@ -236,6 +236,11 @@ function renderTemplate(text, lead) {
     if (key === 'booking_link') {
       return getSettingValue('booking_link') || '[Set booking link in Settings]';
     }
+    if (key === 'unsubscribe_url') {
+      const appUrl = process.env.APP_URL || getSettingValue('app_url') || '';
+      const email = lead.email ? encodeURIComponent(lead.email) : '';
+      return appUrl ? `${appUrl}/api/leads/unsubscribe?email=${email}` : '#unsubscribe';
+    }
     if (key === 'response_time') {
       if (!lead.test_submitted_at) return 'no response data';
       if (!lead.test_responded_at) {

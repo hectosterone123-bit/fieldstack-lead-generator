@@ -127,6 +127,23 @@ router.post('/webhook', express.urlencoded({ extended: false }), (req, res) => {
       'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
       [lead.id, 'sms_sent', 'SMS received', Body.substring(0, 100) + (Body.length > 100 ? '...' : ''), JSON.stringify({ twilio_sid: MessageSid, direction: 'inbound' })]
     );
+
+    // Auto-pause active sequence enrollments when lead replies
+    const activeEnrollments = db.all(
+      "SELECT id FROM lead_sequences WHERE lead_id = ? AND status = 'active'",
+      [lead.id]
+    );
+    if (activeEnrollments.length > 0) {
+      db.run(
+        "UPDATE lead_sequences SET status = 'paused', paused_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
+        [lead.id]
+      );
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+        [lead.id, 'note', 'Sequence auto-paused',
+         `Lead replied via SMS: "${Body.substring(0, 80)}${Body.length > 80 ? '...' : ''}" — resume when ready`]
+      );
+    }
   }
 
   // Empty TwiML response (don't auto-reply — Sam AI will handle that separately)

@@ -4,6 +4,7 @@ import {
   enrollLeads, fetchEnrollments, pauseEnrollment, resumeEnrollment, cancelEnrollment, skipEnrollmentStep,
   fetchOutreachQueue, fetchQueueStats, markQueueItemSent, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
+  setEnrollmentAutoSend,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -230,6 +231,19 @@ export function useSendSms() {
     },
     onError: (err: Error) => {
       toast(err.message, 'error');
+    },
+  });
+}
+
+export function useSetEnrollmentAutoSend() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: setEnrollmentAutoSend,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['queue'] });
+      qc.invalidateQueries({ queryKey: ['enrollments'] });
+      toast('Follow-ups will auto-send on schedule');
     },
   });
 }

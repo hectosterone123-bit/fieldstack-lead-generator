@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Loader2, Bot, Trash2, ChevronLeft, Wrench, AlertCircle, RotateCcw } from 'lucide-react';
+import { X, Plus, Loader2, Bot, Trash2, ChevronLeft, Wrench, AlertCircle, RotateCcw, BarChart3, Send, Repeat, CalendarClock } from 'lucide-react';
 import { cn, formatRelativeTime } from '../../lib/utils';
 import { useCopilotContext } from '../../lib/copilotContext';
 import { useConversations, useCreateConversation, useDeleteConversation, useMessages, useSendMessage } from '../../hooks/useChat';
@@ -19,6 +19,11 @@ const TOOL_LABELS: Record<string, string> = {
   set_followup: 'Scheduling follow-up',
   update_heat_score: 'Updating heat score',
   add_note: 'Adding note',
+  get_sequences: 'Loading sequences',
+  send_sms: 'Sending SMS',
+  enroll_in_sequence: 'Enrolling in sequence',
+  send_email: 'Sending email',
+  bulk_send_email: 'Sending bulk emails',
 };
 
 interface Props {
@@ -177,14 +182,29 @@ export function CopilotSidebar({ open, onClose }: Props) {
               <div className="flex-1 overflow-y-auto">
                 {!hasMessages ? (
                   /* Empty state */
-                  <div className="flex flex-col items-center justify-center h-full px-6 text-center">
-                    <div className="w-12 h-12 rounded-full bg-orange-500/10 flex items-center justify-center mb-4">
-                      <Bot className="w-6 h-6 text-orange-400" />
+                  <div className="flex flex-col items-center justify-center h-full px-4 py-8 text-center">
+                    <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center mb-3">
+                      <Bot className="w-5 h-5 text-orange-400" />
                     </div>
-                    <h3 className="text-sm font-medium text-zinc-300 mb-1">FieldStack AI</h3>
-                    <p className="text-xs text-zinc-500 mb-6">
-                      Ask about your leads, get follow-up advice, or draft outreach messages.
-                    </p>
+                    <h3 className="text-sm font-semibold text-zinc-200 mb-0.5">Sam AI</h3>
+                    <p className="text-xs text-zinc-500 mb-5">Your AI sales copilot</p>
+                    <div className="grid grid-cols-2 gap-2 w-full">
+                      {([
+                        { icon: BarChart3, label: 'Pipeline health', msg: 'Show me pipeline health and hot leads' },
+                        { icon: Send, label: 'Send outreach', msg: 'Send the intro email to all new leads' },
+                        { icon: Repeat, label: 'Enroll sequence', msg: 'Enroll my hottest leads in a follow-up sequence' },
+                        { icon: CalendarClock, label: "Today's follow-ups", msg: 'Which leads need follow-up today?' },
+                      ] as const).map(({ icon: Icon, label, msg }) => (
+                        <button
+                          key={label}
+                          onClick={() => handleSend(msg)}
+                          className="flex flex-col items-center gap-2 p-3 bg-zinc-800/40 hover:bg-zinc-800/80 border border-white/[0.06] hover:border-orange-500/20 rounded-xl transition-colors"
+                        >
+                          <Icon className="w-4 h-4 text-orange-400" />
+                          <span className="text-xs text-zinc-300 font-medium leading-tight">{label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   /* Messages */

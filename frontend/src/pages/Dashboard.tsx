@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
-  Download, Sparkles, ChevronRight, Database, Send, Zap,
+  Download, Sparkles, ChevronRight, Database, Send, Zap, UserX,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -385,6 +385,67 @@ export function Dashboard() {
 
       {/* Outreach Queue */}
       <OutreachQueue />
+
+      {/* Ghost Detection — leads that went silent after contact */}
+      {stats && stats.ghost_count > 0 && (
+        <div className="bg-zinc-900 border border-amber-500/[0.12] rounded-xl shadow-surface mb-6 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+            <UserX className="w-4 h-4 text-amber-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Went Silent</h2>
+            <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.ghost_count}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">contacted 7+ days ago, no reply</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {stats.ghost_leads.map(ghost => {
+              const daysSince = Math.floor(
+                (Date.now() - new Date(ghost.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24)
+              );
+              return (
+                <div key={ghost.id} className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-amber-500/40" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-zinc-200 font-medium truncate block">{ghost.business_name}</span>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {ghost.phone && <span>{ghost.phone}</span>}
+                      <span>· {ghost.service_type}</span>
+                      <span>· silent {daysSince}d</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: ghost.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Log Call
+                    </button>
+                    <button
+                      onClick={() => snoozeLead.mutate(
+                        { id: ghost.id, days: 3 },
+                        { onSuccess: () => toast('Snoozed 3 days') },
+                      )}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      Snooze 3d
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {stats.ghost_count > 5 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <Link to="/leads" className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
+                +{stats.ghost_count - 5} more → view in Leads
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Leads by Status */}

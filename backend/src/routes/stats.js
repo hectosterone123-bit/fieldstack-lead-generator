@@ -111,6 +111,25 @@ router.get('/', (req, res, next) => {
       `SELECT COUNT(*) as count, COALESCE(SUM(proposal_amount), 0) as total FROM leads WHERE status = 'proposal_sent' AND proposal_amount IS NOT NULL`
     );
 
+    const ghost_count = db.get(`
+      SELECT COUNT(*) as count FROM leads
+      WHERE status IN ('contacted', 'qualified')
+      AND last_contacted_at IS NOT NULL
+      AND last_contacted_at < datetime('now', '-7 days')
+      AND (unsubscribed_at IS NULL OR unsubscribed_at = '')
+    `)?.count || 0;
+
+    const ghost_leads = db.all(`
+      SELECT id, business_name, last_contacted_at, status, phone, service_type
+      FROM leads
+      WHERE status IN ('contacted', 'qualified')
+      AND last_contacted_at IS NOT NULL
+      AND last_contacted_at < datetime('now', '-7 days')
+      AND (unsubscribed_at IS NULL OR unsubscribed_at = '')
+      ORDER BY last_contacted_at ASC
+      LIMIT 5
+    `);
+
     res.json({
       success: true,
       data: {
@@ -136,6 +155,8 @@ router.get('/', (req, res, next) => {
         revenue_this_month,
         proposals_open_count: proposals_open?.count || 0,
         proposals_open_value: proposals_open?.total || 0,
+        ghost_count,
+        ghost_leads,
       }
     });
   } catch (err) { next(err); }

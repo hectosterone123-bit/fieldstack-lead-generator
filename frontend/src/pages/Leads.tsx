@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Download, Upload, List, Columns3 } from 'lucide-react';
+import { Download, Upload, List, Columns3, Repeat, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Lead } from '../types';
 import { LeadsTable } from '../components/leads/LeadsTable';
@@ -7,6 +7,8 @@ import { KanbanBoard } from '../components/leads/KanbanBoard';
 import { LeadDrawer } from '../components/leads/LeadDrawer';
 import { importCsv } from '../lib/api';
 import { useCopilotContext } from '../lib/copilotContext';
+import { useSequences, useEnrollLeads } from '../hooks/useSequences';
+import { useToast } from '../lib/toast';
 import { cn } from '../lib/utils';
 
 export function Leads() {
@@ -14,6 +16,7 @@ export function Leads() {
   const [view, setView] = useState<'table' | 'kanban'>('table');
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [enrollAfterImport, setEnrollAfterImport] = useState<{ leadIds: number[]; count: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { setLeadContext } = useCopilotContext();
@@ -41,9 +44,13 @@ export function Leads() {
     try {
       const text = await file.text();
       const result = await importCsv(text);
-      setImportStatus(`Imported ${result.imported} lead${result.imported !== 1 ? 's' : ''}${result.skipped ? `, ${result.skipped} skipped` : ''}`);
       queryClient.invalidateQueries({ queryKey: ['leads'] });
-      setTimeout(() => setImportStatus(null), 5000);
+      if (result.imported > 0) {
+        setEnrollAfterImport({ leadIds: result.lead_ids, count: result.imported });
+      } else {
+        setImportStatus(`No leads imported${result.skipped ? `, ${result.skipped} skipped` : ''}`);
+        setTimeout(() => setImportStatus(null), 5000);
+      }
     } catch (err: any) {
       setImportStatus(`Error: ${err.message}`);
       setTimeout(() => setImportStatus(null), 5000);
@@ -128,6 +135,72 @@ export function Leads() {
         leadId={selectedLead?.id ?? null}
         onClose={() => setSelectedLead(null)}
       />
+
+      {enrollAfterImport && (
+        <EnrollAfterImportModal
+          count={enrollAfterImport.count}
+          leadIds={enrollAfterImport.leadIds}
+          onClose={() => setEnrollAfterImport(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EnrollAfterImportModal({ count, leadIds, onClose }: {
+  count: number;
+  leadIds: number[];
+  onClose: () => void;
+}) {
+  const [seqId, setSeqId] = useState<number | ''>('');
+  const { data: sequences } = useSequences();
+  const enrollLeads = useEnrollLeads();
+  const { toast } = useToast();
+  const activeSequences = (sequences || []).filter(s => s.is_active);
+
+  async function handleEnroll() {
+    if (!seqId) return;
+    const result = await enrollLeads.mutateAsync({ lead_ids: leadIds, sequence_id: seqId as number });
+    toast(`Imported ${count} leads — enrolled ${result.enrolled}${result.skipped ? `, ${result.skipped} already active` : ''}`);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Imported {count} lead{count !== 1 ? 's' : ''}</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Enroll them in a sequence now?</p>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <select
+          value={seqId}
+          onChange={e => setSeqId(e.target.value ? Number(e.target.value) : '')}
+          className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 mb-4"
+        >
+          <option value="">Select a sequence…</option>
+          {activeSequences.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
+            Skip
+          </button>
+          <button
+            onClick={handleEnroll}
+            disabled={!seqId || enrollLeads.isPending}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm bg-orange-500 hover:bg-orange-400 text-white disabled:opacity-40 transition-colors"
+          >
+            <Repeat className="w-3.5 h-3.5" />
+            {enrollLeads.isPending ? 'Enrolling…' : 'Enroll'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

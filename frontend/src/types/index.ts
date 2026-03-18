@@ -90,6 +90,8 @@ export interface Lead {
   test_submitted_at: string | null;
   test_responded_at: string | null;
   email_opened_at: string | null;
+  unsubscribed_at: string | null;
+  first_contacted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -183,6 +185,15 @@ export interface Stats {
   revenue_this_month: number;
   proposals_open_count: number;
   proposals_open_value: number;
+  ghost_count: number;
+  ghost_leads: Array<{
+    id: number;
+    business_name: string;
+    last_contacted_at: string;
+    status: LeadStatus;
+    phone: string | null;
+    service_type: ServiceType;
+  }>;
 }
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -280,6 +291,8 @@ export interface Sequence {
   is_active: number;
   auto_send: number;
   active_enrollments?: number;
+  emails_sent?: number;
+  emails_opened?: number;
   created_at: string;
   updated_at: string;
 }
@@ -321,6 +334,7 @@ export interface OutreachQueueItem {
   due_date: string;
   is_overdue: boolean;
   enrolled_at: string;
+  email_opened_at: string | null;
 }
 
 export interface QueueStats {

@@ -156,6 +156,25 @@ function detectContactForm($) {
   }).length > 0;
 }
 
+async function scrapePageEmails(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    return extractEmails($);
+  } catch {
+    return [];
+  }
+}
+
 async function scrapeWebsite(url) {
   if (!url) return { error: 'No website URL provided' };
 
@@ -183,8 +202,21 @@ async function scrapeWebsite(url) {
 
   const $ = cheerio.load(html);
 
+  const rootEmails = extractEmails($);
+
+  // If root has no emails, try /contact and /about pages in parallel
+  let allEmails = rootEmails;
+  if (rootEmails.length === 0) {
+    try {
+      const base = new URL(normalized).origin;
+      const subpages = ['/contact', '/contact-us', '/about', '/about-us'];
+      const subResults = await Promise.all(subpages.map(p => scrapePageEmails(base + p)));
+      allEmails = [...new Set(subResults.flat())];
+    } catch {}
+  }
+
   return {
-    emails: extractEmails($),
+    emails: allEmails,
     team_names: extractTeamNames($),
     services: extractServices($),
     tech_stack: detectTechStack($, html),

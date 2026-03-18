@@ -229,6 +229,13 @@ async function initDb() {
   // Migration: email open tracking
   try { db.run('ALTER TABLE leads ADD COLUMN email_opened_at DATETIME'); } catch(e) {}
 
+  // Migration: per-enrollment auto_send flag
+  try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
+
+  // Migration: unsubscribe support
+  try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
+
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();
 

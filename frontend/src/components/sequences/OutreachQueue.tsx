@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Mail, MessageSquare, PhoneCall, CheckCircle, SkipForward, Eye, X, Send } from 'lucide-react';
+import { Mail, MailOpen, MessageSquare, PhoneCall, CheckCircle, SkipForward, Eye, X, Send, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { useOutreachQueue, useMarkSent, useDismissQueueItem, useSendEmail, useEmailStatus, useSendSms, useSmsStatus } from '../../hooks/useSequences';
+import { useOutreachQueue, useMarkSent, useDismissQueueItem, useSendEmail, useEmailStatus, useSendSms, useSmsStatus, useSetEnrollmentAutoSend } from '../../hooks/useSequences';
 import type { OutreachQueueItem, TemplateChannel } from '../../types';
 
 const CHANNEL_ICONS: Record<TemplateChannel, React.ElementType> = {
@@ -24,6 +24,7 @@ export function OutreachQueue() {
   const dismiss = useDismissQueueItem();
   const sendEmail = useSendEmail();
   const sendSms = useSendSms();
+  const automateRest = useSetEnrollmentAutoSend();
   const { data: emailStatus } = useEmailStatus();
   const { data: smsStatus } = useSmsStatus();
   const [previewItem, setPreviewItem] = useState<OutreachQueueItem | null>(null);
@@ -56,10 +57,10 @@ export function OutreachQueue() {
 
         <div className="divide-y divide-white/[0.03]">
           {overdue.map(item => (
-            <QueueRow key={item.enrollment_id} item={item} isOverdue onPreview={setPreviewItem} onMarkSent={() => markSent.mutate(item.enrollment_id)} onSkip={() => dismiss.mutate(item.enrollment_id)} onSend={handleSend} emailConfigured={emailConfigured} smsConfigured={smsConfigured} sending={isSending} />
+            <QueueRow key={item.enrollment_id} item={item} isOverdue onPreview={setPreviewItem} onMarkSent={() => markSent.mutate(item.enrollment_id)} onSkip={() => dismiss.mutate(item.enrollment_id)} onSend={handleSend} onAutomate={() => automateRest.mutate(item.enrollment_id)} emailConfigured={emailConfigured} smsConfigured={smsConfigured} sending={isSending} automating={automateRest.isPending} />
           ))}
           {dueToday.map(item => (
-            <QueueRow key={item.enrollment_id} item={item} isOverdue={false} onPreview={setPreviewItem} onMarkSent={() => markSent.mutate(item.enrollment_id)} onSkip={() => dismiss.mutate(item.enrollment_id)} onSend={handleSend} emailConfigured={emailConfigured} smsConfigured={smsConfigured} sending={isSending} />
+            <QueueRow key={item.enrollment_id} item={item} isOverdue={false} onPreview={setPreviewItem} onMarkSent={() => markSent.mutate(item.enrollment_id)} onSkip={() => dismiss.mutate(item.enrollment_id)} onSend={handleSend} onAutomate={() => automateRest.mutate(item.enrollment_id)} emailConfigured={emailConfigured} smsConfigured={smsConfigured} sending={isSending} automating={automateRest.isPending} />
           ))}
         </div>
       </div>
@@ -71,6 +72,7 @@ export function OutreachQueue() {
           onClose={() => setPreviewItem(null)}
           onMarkSent={() => { markSent.mutate(previewItem.enrollment_id); setPreviewItem(null); }}
           onSend={() => { handleSend(previewItem); setPreviewItem(null); }}
+          onAutomate={() => { automateRest.mutate(previewItem.enrollment_id); setPreviewItem(null); }}
           emailConfigured={emailConfigured}
           smsConfigured={smsConfigured}
           sending={isSending}
@@ -97,16 +99,18 @@ function getSendIcon(channel: TemplateChannel) {
   return Mail;
 }
 
-function QueueRow({ item, isOverdue, onPreview, onMarkSent, onSkip, onSend, emailConfigured, smsConfigured, sending }: {
+function QueueRow({ item, isOverdue, onPreview, onMarkSent, onSkip, onSend, onAutomate, emailConfigured, smsConfigured, sending, automating }: {
   item: OutreachQueueItem;
   isOverdue: boolean;
   onPreview: (item: OutreachQueueItem) => void;
   onMarkSent: () => void;
   onSkip: () => void;
   onSend: (item: OutreachQueueItem) => void;
+  onAutomate: () => void;
   emailConfigured: boolean;
   smsConfigured: boolean;
   sending: boolean;
+  automating: boolean;
 }) {
   const ChannelIcon = CHANNEL_ICONS[item.channel];
   const channelColor = CHANNEL_COLORS[item.channel];
@@ -136,6 +140,11 @@ function QueueRow({ item, isOverdue, onPreview, onMarkSent, onSkip, onSend, emai
           )}>
             {isOverdue ? 'Overdue' : 'Due Today'}
           </span>
+          {item.email_opened_at && (
+            <span className="flex items-center gap-0.5 text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded font-medium">
+              <MailOpen className="w-2.5 h-2.5" /> Opened
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
           <span>Step {item.current_step}/{item.total_steps}</span>
@@ -179,16 +188,25 @@ function QueueRow({ item, isOverdue, onPreview, onMarkSent, onSkip, onSend, emai
         >
           <SkipForward className="w-3 h-3" /> Skip
         </button>
+        <button
+          onClick={onAutomate}
+          disabled={automating}
+          title="Auto-send all remaining steps on schedule"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 text-xs font-medium rounded-lg transition-colors border border-amber-500/20 disabled:opacity-40"
+        >
+          <Zap className="w-3 h-3" /> Auto rest
+        </button>
       </div>
     </div>
   );
 }
 
-function PreviewModal({ item, onClose, onMarkSent, onSend, emailConfigured, smsConfigured, sending }: {
+function PreviewModal({ item, onClose, onMarkSent, onSend, onAutomate, emailConfigured, smsConfigured, sending }: {
   item: OutreachQueueItem;
   onClose: () => void;
   onMarkSent: () => void;
   onSend: () => void;
+  onAutomate: () => void;
   emailConfigured: boolean;
   smsConfigured: boolean;
   sending: boolean;
@@ -210,6 +228,9 @@ function PreviewModal({ item, onClose, onMarkSent, onSend, emailConfigured, smsC
               )}
               {item.channel === 'email' && item.lead_email && (
                 <span className="ml-2 text-violet-400">{item.lead_email}</span>
+              )}
+              {item.email_opened_at && (
+                <span className="inline-flex items-center gap-0.5 ml-2 text-emerald-400"><MailOpen className="w-3 h-3" /> Opened</span>
               )}
             </p>
           </div>
@@ -258,6 +279,13 @@ function PreviewModal({ item, onClose, onMarkSent, onSend, emailConfigured, smsC
               <SendIcon className="w-4 h-4 inline mr-1" /> {item.channel === 'sms' ? 'Send SMS' : 'Send Email'}
             </button>
           )}
+          <button
+            onClick={onAutomate}
+            className="px-3 py-1.5 rounded-lg text-sm bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/20 transition-colors"
+            title="Auto-send all remaining steps on schedule"
+          >
+            <Zap className="w-4 h-4 inline mr-1" /> Auto rest
+          </button>
           <button
             onClick={onMarkSent}
             className={cn(

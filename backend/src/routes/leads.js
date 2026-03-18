@@ -269,6 +269,71 @@ router.post('/bulk/enrich', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/leads/bulk/send-email — mass email via Resend with template
+router.post('/bulk/send-email', async (req, res, next) => {
+  try {
+    const { template_id, lead_ids, status, service_type } = req.body;
+    if (!template_id) return res.status(400).json({ success: false, error: 'template_id required' });
+
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+    if (!template) return res.status(404).json({ success: false, error: 'Template not found' });
+    if (template.channel !== 'email') return res.status(400).json({ success: false, error: 'Template is not an email template' });
+
+    let leads;
+    if (Array.isArray(lead_ids) && lead_ids.length > 0) {
+      leads = db.all(
+        `SELECT * FROM leads WHERE id IN (${lead_ids.map(() => '?').join(',')}) AND email IS NOT NULL AND email != '' AND (unsubscribed_at IS NULL OR unsubscribed_at = '')`,
+        lead_ids
+      );
+    } else {
+      const conditions = ["email IS NOT NULL AND email != ''", "(unsubscribed_at IS NULL OR unsubscribed_at = '')"];
+      const params = [];
+      if (status) { conditions.push('status = ?'); params.push(status); }
+      if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
+      leads = db.all(`SELECT * FROM leads WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`, params);
+    }
+
+    const emailService = require('../services/emailService');
+    if (!emailService.isConfigured()) {
+      return res.status(503).json({ success: false, error: 'Email not configured (missing RESEND_API_KEY)' });
+    }
+
+    const { renderTemplate } = require('../services/templateService');
+    let sent = 0, failed = 0;
+    const errors = [];
+
+    for (const lead of leads) {
+      try {
+        const rendered = renderTemplate(template, lead);
+        const result = await emailService.sendEmail(lead.email, rendered.subject || template.subject || 'Follow-up', rendered.body);
+        if (result.success) {
+          sent++;
+          db.run(
+            'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+            [lead.id, 'email_sent', `Email sent: ${template.name}`, template.subject || '',
+             JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'sam_ai_bulk' })]
+          );
+          db.run(
+            'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [lead.id]
+          );
+          if (lead.status === 'new') {
+            db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead.id]);
+          }
+        } else {
+          failed++;
+          errors.push(`${lead.business_name}: ${result.error}`);
+        }
+      } catch (err) {
+        failed++;
+        errors.push(`${lead.business_name}: ${err.message}`);
+      }
+    }
+
+    res.json({ success: true, data: { sent, failed, total: leads.length, errors: errors.slice(0, 5) } });
+  } catch (err) { next(err); }
+});
+
 // GET /api/leads/followups/today — leads due for follow-up
 router.get('/followups/today', (req, res, next) => {
   try {
@@ -378,6 +443,7 @@ router.post('/import-csv', (req, res, next) => {
 
     let imported = 0;
     let skipped = 0;
+    const importedIds = [];
 
     for (let i = 1; i < lines.length; i++) {
       const cols = parseCsvLine(lines[i]);
@@ -409,11 +475,31 @@ router.post('/import-csv', (req, res, next) => {
         `INSERT INTO activities (lead_id, type, title) VALUES (?, 'import', 'Lead imported from CSV')`,
         [result.lastInsertRowid]
       );
+      importedIds.push(result.lastInsertRowid);
       imported++;
     }
 
-    res.json({ success: true, data: { imported, skipped } });
+    res.json({ success: true, data: { imported, skipped, lead_ids: importedIds } });
   } catch (err) { next(err); }
+});
+
+// GET /api/leads/unsubscribe — one-click unsubscribe from email sequences
+router.get('/unsubscribe', (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).send('<p>Invalid unsubscribe link.</p>');
+  const lead = db.get('SELECT id FROM leads WHERE email = ?', [email]);
+  if (lead) {
+    db.run('UPDATE leads SET unsubscribed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [lead.id]);
+    db.run(
+      "UPDATE lead_sequences SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status IN ('active', 'paused')",
+      [lead.id]
+    );
+  }
+  res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Unsubscribed</title></head>
+    <body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;text-align:center;color:#333;padding:0 20px">
+    <h2 style="color:#111">You've been unsubscribed</h2>
+    <p style="color:#666">You've been removed from all email sequences and won't receive further emails.</p>
+    </body></html>`);
 });
 
 // GET /api/leads/:id — single lead with activities
