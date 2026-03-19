@@ -1,4 +1,4 @@
-import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
+import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ReviewStats, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
 
 const BASE = '/api';
 
@@ -300,11 +300,11 @@ export async function fetchSequence(id: number): Promise<Sequence> {
   return request(`/sequences/${id}`);
 }
 
-export async function createSequence(data: { name: string; description?: string; steps: any[]; auto_send?: boolean }): Promise<Sequence> {
+export async function createSequence(data: { name: string; description?: string; steps: any[]; auto_send?: boolean; auto_send_after_step?: number }): Promise<Sequence> {
   return request('/sequences', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function updateSequence(id: number, data: { name?: string; description?: string; steps?: any[]; auto_send?: boolean }): Promise<Sequence> {
+export async function updateSequence(id: number, data: { name?: string; description?: string; steps?: any[]; auto_send?: boolean; auto_send_after_step?: number }): Promise<Sequence> {
   return request(`/sequences/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -405,6 +405,10 @@ export async function fetchMissedCallSettings(): Promise<MissedCallSettings> {
 
 export async function fetchReviewSettings(): Promise<ReviewRequestSettings> {
   return request('/sms/review-settings');
+}
+
+export async function fetchReviewStats(): Promise<ReviewStats> {
+  return request('/sms/review-stats');
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

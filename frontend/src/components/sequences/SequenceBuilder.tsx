@@ -12,7 +12,7 @@ const CHANNEL_OPTIONS: { value: TemplateChannel; label: string; icon: React.Elem
 
 interface Props {
   sequence?: Sequence | null;
-  onSave: (data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean }) => void;
+  onSave: (data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean; auto_send_after_step?: number }) => void;
   onCancel: () => void;
   saving?: boolean;
 }
@@ -20,7 +20,10 @@ interface Props {
 export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   const [name, setName] = useState(sequence?.name || '');
   const [description, setDescription] = useState(sequence?.description || '');
-  const [autoSend, setAutoSend] = useState(!!sequence?.auto_send);
+  const [autoSendMode, setAutoSendMode] = useState<string>(
+    sequence?.auto_send ? 'all' :
+    sequence?.auto_send_after_step ? String(sequence.auto_send_after_step) : '0'
+  );
   const [steps, setSteps] = useState<SequenceStep[]>(
     sequence?.steps?.length ? sequence.steps : [
       { order: 1, delay_days: 0, channel: 'email', template_id: 0, label: 'Step 1' },
@@ -33,7 +36,10 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
     if (sequence) {
       setName(sequence.name);
       setDescription(sequence.description || '');
-      setAutoSend(!!sequence.auto_send);
+      setAutoSendMode(
+        sequence.auto_send ? 'all' :
+        sequence.auto_send_after_step ? String(sequence.auto_send_after_step) : '0'
+      );
       setSteps(sequence.steps?.length ? sequence.steps : [{ order: 1, delay_days: 0, channel: 'email', template_id: 0, label: 'Step 1' }]);
     }
   }, [sequence]);
@@ -69,7 +75,13 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   function handleSave() {
     if (!name.trim()) return;
     if (steps.some(s => !s.template_id)) return;
-    onSave({ name: name.trim(), description: description.trim(), steps, auto_send: autoSend });
+    onSave({
+      name: name.trim(),
+      description: description.trim(),
+      steps,
+      auto_send: autoSendMode === 'all',
+      auto_send_after_step: autoSendMode !== '0' && autoSendMode !== 'all' ? parseInt(autoSendMode) : 0,
+    });
   }
 
   const filteredTemplates = (channel: TemplateChannel) =>
@@ -99,27 +111,26 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
             className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
           />
         </div>
-        {/* Auto-send toggle */}
-        <div
-          onClick={() => setAutoSend(!autoSend)}
-          className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-white/[0.04] cursor-pointer hover:border-white/[0.08] transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <Zap className={cn('w-4 h-4', autoSend ? 'text-orange-400' : 'text-zinc-600')} />
+        {/* Auto-send mode */}
+        <div className="px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-white/[0.04]">
+          <div className="flex items-center gap-2 mb-2">
+            <Zap className={cn('w-4 h-4', autoSendMode !== '0' ? 'text-orange-400' : 'text-zinc-600')} />
             <div>
-              <p className="text-sm text-zinc-200">Auto-send when due</p>
-              <p className="text-xs text-zinc-500">Emails and SMS send automatically on schedule</p>
+              <p className="text-sm text-zinc-200">Auto-send follow-ups</p>
+              <p className="text-xs text-zinc-500">Steps after the cutoff send automatically on schedule</p>
             </div>
           </div>
-          <div className={cn(
-            'w-9 h-5 rounded-full transition-colors relative',
-            autoSend ? 'bg-orange-500' : 'bg-zinc-700'
-          )}>
-            <div className={cn(
-              'w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all',
-              autoSend ? 'left-[18px]' : 'left-[3px]'
-            )} />
-          </div>
+          <select
+            value={autoSendMode}
+            onChange={e => setAutoSendMode(e.target.value)}
+            className="w-full px-2 py-1.5 rounded bg-zinc-900 border border-white/[0.06] text-sm text-zinc-200 focus:outline-none focus:border-orange-500/50 [color-scheme:dark]"
+          >
+            <option value="0">Manual (all steps)</option>
+            <option value="1">Auto after step 1</option>
+            <option value="2">Auto after step 2 (recommended)</option>
+            <option value="3">Auto after step 3</option>
+            <option value="all">Auto (all steps)</option>
+          </select>
         </div>
       </div>
 
@@ -152,6 +163,15 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
                     placeholder="Step label"
                     className="flex-1 px-2 py-1 rounded bg-zinc-900 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
                   />
+                  {autoSendMode !== '0' && (
+                    <span className={cn(
+                      'text-[10px] px-1.5 py-0.5 rounded shrink-0',
+                      (autoSendMode === 'all' || step.order > parseInt(autoSendMode || '0'))
+                        ? 'bg-orange-500/10 text-orange-400' : 'bg-zinc-700/50 text-zinc-500'
+                    )}>
+                      {(autoSendMode === 'all' || step.order > parseInt(autoSendMode || '0')) ? 'Auto' : 'Manual'}
+                    </span>
+                  )}
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="text-xs text-zinc-500">Day</span>
                     <input

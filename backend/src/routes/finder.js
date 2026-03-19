@@ -7,6 +7,7 @@ const { enrichBatch } = require('../services/enrichService');
 const { computeInitialHeatScore, recomputeHeatScore } = require('../services/heatScoreService');
 const { computeProspectScore } = require('../services/prospectScoreService');
 const { scrapeWebsite } = require('../services/scrapeService');
+const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
 
 function hasGoogleKey() {
   const key = process.env.GOOGLE_PLACES_API_KEY;
@@ -255,26 +256,11 @@ router.post('/import', (req, res, next) => {
       });
     }
 
-    // Fire-and-forget: auto-enroll in sequence
-    if (auto_enroll && sequence_id && newLeadIds.length > 0) {
+    // Auto-enroll in sequence (explicit or default)
+    const enrollSeqId = (auto_enroll && sequence_id) ? sequence_id : getDefaultSequenceId();
+    if (enrollSeqId && newLeadIds.length > 0) {
       setImmediate(() => {
-        const sequence = db.get('SELECT * FROM sequences WHERE id = ? AND is_active = 1', [sequence_id]);
-        if (!sequence) { console.error('[AutoEnroll] Sequence not found:', sequence_id); return; }
-        console.log(`[AutoEnroll] Enrolling ${newLeadIds.length} leads in "${sequence.name}"`);
-        for (const leadId of newLeadIds) {
-          const existing = db.get(
-            "SELECT id FROM lead_sequences WHERE lead_id = ? AND sequence_id = ? AND status IN ('active','paused')",
-            [leadId, sequence_id]
-          );
-          if (existing) continue;
-          db.run('INSERT INTO lead_sequences (lead_id, sequence_id, current_step, status) VALUES (?, ?, 1, ?)',
-            [leadId, sequence_id, 'active']);
-          db.run(
-            `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Auto-enrolled in sequence', ?)`,
-            [leadId, `Enrolled in "${sequence.name}" via batch import`]
-          );
-        }
-        console.log(`[AutoEnroll] Done`);
+        autoEnrollLeads(newLeadIds, enrollSeqId);
       });
     }
 

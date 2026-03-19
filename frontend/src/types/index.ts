@@ -290,6 +290,7 @@ export interface Sequence {
   steps: SequenceStep[];
   is_active: number;
   auto_send: number;
+  auto_send_after_step: number;
   active_enrollments?: number;
   emails_sent?: number;
   emails_opened?: number;
@@ -386,7 +387,17 @@ export interface MissedCallSettings {
 
 export interface ReviewRequestSettings {
   enabled: boolean;
-  message: string;
   google_review_link: string;
+  company_name: string;
   twilio_configured: boolean;
+}
+
+export interface ReviewStats {
+  total_sent: number;
+  total_responded: number;
+  response_rate: number;
+  positive_count: number;
+  negative_count: number;
+  google_reviews_directed: number;
+  avg_rating: number;
 }

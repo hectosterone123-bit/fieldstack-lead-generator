@@ -20,7 +20,16 @@ function startSequenceScheduler() {
     }
   });
 
-  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 7am-8pm)');
+  // Daily digest at 7am
+  cron.schedule('0 7 * * *', async () => {
+    try {
+      await sendDailyDigest();
+    } catch (err) {
+      console.error('[Scheduler] Digest error:', err.message);
+    }
+  });
+
+  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 7am-8pm + daily digest 7am)');
 }
 
 function autoCompleteEnrollments() {
@@ -51,9 +60,10 @@ function autoCompleteEnrollments() {
 }
 
 async function autoSendDueItems() {
-  // Only process enrollments in sequences with auto_send = 1
+  // Process enrollments where auto_send is on OR current step is past the manual cutoff
   const enrollments = db.all(`
     SELECT ls.*, s.steps as sequence_steps, s.name as sequence_name, s.auto_send,
+           s.auto_send_after_step,
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
@@ -61,7 +71,10 @@ async function autoSendDueItems() {
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
-    WHERE ls.status = 'active' AND (s.auto_send = 1 OR ls.auto_send = 1) AND (l.unsubscribed_at IS NULL)
+    WHERE ls.status = 'active'
+      AND (s.auto_send = 1 OR ls.auto_send = 1
+           OR (s.auto_send_after_step > 0 AND ls.current_step > s.auto_send_after_step))
+      AND (l.unsubscribed_at IS NULL)
   `);
 
   if (enrollments.length === 0) return;
@@ -228,6 +241,79 @@ async function sendScheduledEmails() {
   }
 
   if (sent > 0) console.log(`[Scheduler] Auto-sent ${sent} scheduled follow-up(s)`);
+}
+
+async function sendDailyDigest() {
+  const digestEmail = db.get("SELECT value FROM settings WHERE key = 'digest_email'");
+  if (!digestEmail?.value || !emailService.isConfigured()) return;
+
+  // Loom videos due today (step 2 = manual Loom step)
+  const loomDue = db.all(`
+    SELECT ls.id, l.business_name, l.city, l.state, s.steps as sequence_steps, ls.current_step
+    FROM lead_sequences ls
+    JOIN sequences s ON ls.sequence_id = s.id
+    JOIN leads l ON ls.lead_id = l.id
+    WHERE ls.status = 'active'
+      AND s.auto_send_after_step > 0
+      AND ls.current_step <= s.auto_send_after_step
+  `).filter(e => {
+    try {
+      const steps = JSON.parse(e.sequence_steps);
+      const step = steps.find(s => s.order === e.current_step);
+      if (!step) return false;
+      const enrolled = new Date(e.enrolled_at || Date.now());
+      const due = new Date(enrolled);
+      due.setDate(due.getDate() + step.delay_days);
+      due.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return due <= today;
+    } catch { return false; }
+  });
+
+  // Emails sent overnight (last 24h)
+  const sentOvernight = db.get(`
+    SELECT COUNT(*) as count FROM activities
+    WHERE type = 'email_sent'
+      AND description LIKE '%Auto-sent via sequence%'
+      AND created_at >= datetime('now', '-1 day')
+  `);
+
+  // Active enrollments
+  const activeCount = db.get("SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'active'");
+
+  // New leads (last 24h)
+  const newLeads = db.get("SELECT COUNT(*) as count FROM leads WHERE created_at >= datetime('now', '-1 day')");
+
+  const loomCount = loomDue.length;
+  const sentCount = sentOvernight?.count || 0;
+  const loomList = loomDue.map(e => `  - ${e.business_name} (${e.city}, ${e.state})`).join('\n');
+
+  const subject = `FieldStack Daily: ${loomCount} Loom${loomCount !== 1 ? 's' : ''} due, ${sentCount} sent overnight`;
+  const body = `
+<div style="font-family: system-ui, sans-serif; max-width: 500px; color: #e4e4e7;">
+  <h2 style="color: #f97316; margin-bottom: 16px;">FieldStack Daily Digest</h2>
+
+  <div style="background: #18181b; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+    <h3 style="color: #f97316; margin: 0 0 8px 0;">Loom Videos Due: ${loomCount}</h3>
+    ${loomCount > 0 ? `<pre style="color: #a1a1aa; margin: 0; white-space: pre-wrap;">${loomList}</pre>` : '<p style="color: #71717a; margin: 0;">None today — all caught up!</p>'}
+  </div>
+
+  <div style="background: #18181b; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+    <p style="margin: 4px 0; color: #a1a1aa;">Emails sent overnight: <strong style="color: #e4e4e7;">${sentCount}</strong></p>
+    <p style="margin: 4px 0; color: #a1a1aa;">Active sequences: <strong style="color: #e4e4e7;">${activeCount?.count || 0}</strong></p>
+    <p style="margin: 4px 0; color: #a1a1aa;">New leads (24h): <strong style="color: #e4e4e7;">${newLeads?.count || 0}</strong></p>
+  </div>
+
+  <p style="color: #71717a; font-size: 12px;">— FieldStack Autopilot</p>
+</div>`.trim();
+
+  const result = await emailService.sendEmail(digestEmail.value, subject, body);
+  if (result.success) {
+    console.log(`[Scheduler] Daily digest sent to ${digestEmail.value}`);
+  } else {
+    console.error(`[Scheduler] Digest failed: ${result.error}`);
+  }
 }
 
 function logPendingCount() {

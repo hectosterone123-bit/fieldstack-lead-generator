@@ -54,6 +54,7 @@ function getSequenceOpenedCounts() {
 router.get('/queue', (req, res) => {
   const enrollments = db.all(`
     SELECT ls.*, s.steps as sequence_steps, s.name as sequence_name,
+           s.auto_send_after_step,
            l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
@@ -61,7 +62,11 @@ router.get('/queue', (req, res) => {
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
-    WHERE ls.status = 'active' AND (ls.auto_send IS NULL OR ls.auto_send = 0)
+    WHERE ls.status = 'active'
+      AND (ls.auto_send IS NULL OR ls.auto_send = 0)
+      AND (s.auto_send IS NULL OR s.auto_send = 0)
+      AND (s.auto_send_after_step IS NULL OR s.auto_send_after_step = 0
+           OR ls.current_step <= s.auto_send_after_step)
   `);
 
   const now = new Date();
@@ -551,14 +556,14 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, description, steps, auto_send } = req.body;
+  const { name, description, steps, auto_send, auto_send_after_step } = req.body;
   if (!name || !steps?.length) {
     return res.status(400).json({ success: false, error: 'name and steps are required' });
   }
 
   const { lastInsertRowid } = db.run(
-    'INSERT INTO sequences (name, description, steps, auto_send) VALUES (?, ?, ?, ?)',
-    [name, description || null, JSON.stringify(steps), auto_send ? 1 : 0]
+    'INSERT INTO sequences (name, description, steps, auto_send, auto_send_after_step) VALUES (?, ?, ?, ?, ?)',
+    [name, description || null, JSON.stringify(steps), auto_send ? 1 : 0, parseInt(auto_send_after_step) || 0]
   );
 
   const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [lastInsertRowid]);
@@ -585,13 +590,13 @@ router.get('/:id', (req, res) => {
 });
 
 router.put('/:id', (req, res) => {
-  const { name, description, steps, auto_send } = req.body;
+  const { name, description, steps, auto_send, auto_send_after_step } = req.body;
   const existing = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ success: false, error: 'Sequence not found' });
 
   db.run(
-    'UPDATE sequences SET name = ?, description = ?, steps = ?, auto_send = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, auto_send !== undefined ? (auto_send ? 1 : 0) : existing.auto_send, req.params.id]
+    'UPDATE sequences SET name = ?, description = ?, steps = ?, auto_send = ?, auto_send_after_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, auto_send !== undefined ? (auto_send ? 1 : 0) : existing.auto_send, auto_send_after_step !== undefined ? (parseInt(auto_send_after_step) || 0) : existing.auto_send_after_step, req.params.id]
   );
 
   const updated = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);

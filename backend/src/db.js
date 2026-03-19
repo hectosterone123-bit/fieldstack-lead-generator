@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS sequences (
   description TEXT,
   steps TEXT NOT NULL,
   is_active INTEGER DEFAULT 1,
+  auto_send INTEGER DEFAULT 0,
+  auto_send_after_step INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -171,6 +173,24 @@ CREATE TABLE IF NOT EXISTS scheduled_emails (
 );
 CREATE INDEX IF NOT EXISTS idx_scheduled_emails_lead_id ON scheduled_emails(lead_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_emails_scheduled_at ON scheduled_emails(scheduled_at);
+
+CREATE TABLE IF NOT EXISTS review_requests (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id          INTEGER NOT NULL,
+  phone            TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'pending',
+  rating           INTEGER,
+  outcome          TEXT,
+  feedback         TEXT,
+  initial_sms_sid  TEXT,
+  followup_sms_sid TEXT,
+  created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  rated_at         DATETIME,
+  FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_review_requests_lead_id ON review_requests(lead_id);
+CREATE INDEX IF NOT EXISTS idx_review_requests_phone ON review_requests(phone);
+CREATE INDEX IF NOT EXISTS idx_review_requests_status ON review_requests(status);
 `;
 
 async function initDb() {
@@ -217,6 +237,8 @@ async function initDb() {
 
   // Migration: auto_send toggle for sequences
   try { db.run('ALTER TABLE sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
+  // Migration: auto_send_after_step — manual steps 1-N, auto steps (N+1)+
+  try { db.run('ALTER TABLE sequences ADD COLUMN auto_send_after_step INTEGER DEFAULT 0'); } catch(e) {}
 
   // Migration: outreach tracking fields
   try { db.run('ALTER TABLE leads ADD COLUMN loom_url TEXT'); } catch(e) {}
@@ -236,6 +258,15 @@ async function initDb() {
   try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')"); } catch(e) {}
+
+  // Migration: set auto_send_after_step=1 on default sequence + seed default_sequence_id
+  try {
+    const defSeq = get("SELECT id FROM sequences WHERE name = '7-Step Outreach' LIMIT 1");
+    if (defSeq) {
+      db.run("UPDATE sequences SET auto_send_after_step = 1, auto_send = 1 WHERE id = ? AND auto_send_after_step = 0", [defSeq.id]);
+      db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_sequence_id', ?)", [String(defSeq.id)]);
+    }
+  } catch(e) {}
 
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();
@@ -1518,14 +1549,16 @@ function seedDefaultSequence() {
   }
 
   if (steps.length > 0) {
-    db.run(
-      "INSERT INTO sequences (name, description, steps, is_active) VALUES (?, ?, ?, 1)",
+    const result = db.run(
+      "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step) VALUES (?, ?, ?, 1, 1, 1)",
       [
         '7-Step Outreach',
         'Default outreach sequence: mystery shopper test → reveal → video delivery → follow-ups → breakup → re-engagement.',
         JSON.stringify(steps),
       ]
     );
+    // Set as default sequence for auto-enrollment
+    db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_sequence_id', ?)", [String(result.lastInsertRowid)]);
   }
 }
 

@@ -20,7 +20,7 @@ export function Sequences() {
   const selectedSequence = sequences?.find(s => s.id === selectedId) || null;
   const showBuilder = creating || selectedId != null;
 
-  function handleSave(data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean }) {
+  function handleSave(data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean; auto_send_after_step?: number }) {
     if (creating) {
       createSequence.mutate(data, {
         onSuccess: () => setCreating(false),
@@ -90,9 +90,10 @@ export function Sequences() {
                       {!seq.is_active && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">Inactive</span>
                       )}
-                      {!!seq.auto_send && (
+                      {(!!seq.auto_send || !!seq.auto_send_after_step) && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 flex items-center gap-0.5">
-                          <Zap className="w-2.5 h-2.5" /> Auto
+                          <Zap className="w-2.5 h-2.5" />
+                          {seq.auto_send ? 'Auto' : `Auto after step ${seq.auto_send_after_step}`}
                         </span>
                       )}
                     </div>

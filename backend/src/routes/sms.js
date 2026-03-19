@@ -4,6 +4,7 @@ const db = require('../db');
 const smsService = require('../services/smsService');
 const { renderTemplate } = require('../services/templateService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
+const reviewService = require('../services/reviewService');
 
 // ─── SMS Status ──────────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ router.get('/conversation/:leadId', (req, res) => {
 // ─── Twilio Incoming Webhook ─────────────────────────────────────────────────
 // Set your Twilio webhook URL to: https://yourdomain.com/api/sms/webhook
 
-router.post('/webhook', express.urlencoded({ extended: false }), (req, res) => {
+router.post('/webhook', express.urlencoded({ extended: false }), async (req, res) => {
   const { From, To, Body, MessageSid } = req.body;
 
   if (!From || !Body) {
@@ -104,6 +105,22 @@ router.post('/webhook', express.urlencoded({ extended: false }), (req, res) => {
     smsService.handleOptIn(From);
     res.type('text/xml').send('<Response><Message>You have been resubscribed. Reply STOP to unsubscribe.</Message></Response>');
     return;
+  }
+
+  // Check if this is a review rating reply (1-5)
+  try {
+    const ratingResult = await reviewService.handleRatingReply(From, Body);
+    if (ratingResult && ratingResult.handled) {
+      db.run(
+        `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+         VALUES (?, 'inbound', ?, ?, ?, ?, 'received')`,
+        [ratingResult.lead_id, From, To, Body, MessageSid]
+      );
+      res.type('text/xml').send('<Response></Response>');
+      return;
+    }
+  } catch (err) {
+    // Don't block normal flow if review handling fails
   }
 
   // Find lead by phone number
@@ -329,19 +346,28 @@ router.get('/missed-call-settings', (req, res) => {
   });
 });
 
-// ─── Review Request Settings ────────────────────────────────────────────────
+// ─── Review Request Settings & Stats ────────────────────────────────────────
 
 router.get('/review-settings', (req, res) => {
-  const reviewLink = process.env.GOOGLE_REVIEW_LINK || '';
+  const settings = reviewService.getReviewSettings();
   res.json({
     success: true,
     data: {
-      enabled: process.env.REVIEW_REQUEST_ENABLED !== 'false' && !!reviewLink,
-      message: process.env.REVIEW_REQUEST_MESSAGE || `Thanks for choosing us! If you had a great experience, a quick Google review means the world: ${reviewLink || '{review_link}'}. Reply STOP to opt out.`,
-      google_review_link: reviewLink,
+      enabled: settings.review_request_enabled === 'true' && !!settings.google_review_link,
+      google_review_link: settings.google_review_link || '',
+      company_name: settings.company_name || '',
       twilio_configured: smsService.isConfigured(),
     },
   });
+});
+
+router.get('/review-stats', (req, res) => {
+  res.json({ success: true, data: reviewService.getStats() });
+});
+
+router.get('/review-requests', (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  res.json({ success: true, data: reviewService.getRecentRequests(limit) });
 });
 
 module.exports = router;

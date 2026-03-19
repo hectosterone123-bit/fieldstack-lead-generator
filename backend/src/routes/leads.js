@@ -4,6 +4,7 @@ const db = require('../db');
 const { scrapeWebsite } = require('../services/scrapeService');
 const { recomputeHeatScore, computeInitialHeatScore } = require('../services/heatScoreService');
 const smsService = require('../services/smsService');
+const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
 
 function formatResponseTime(minutes) {
   if (minutes < 60) return `${minutes}m`;
@@ -479,7 +480,15 @@ router.post('/import-csv', (req, res, next) => {
       imported++;
     }
 
-    res.json({ success: true, data: { imported, skipped, lead_ids: importedIds } });
+    // Auto-enroll imported leads into default sequence
+    let auto_enrolled = 0;
+    const defaultSeqId = getDefaultSequenceId();
+    if (defaultSeqId && importedIds.length > 0) {
+      const result2 = autoEnrollLeads(importedIds, defaultSeqId);
+      auto_enrolled = result2.enrolled;
+    }
+
+    res.json({ success: true, data: { imported, skipped, lead_ids: importedIds, auto_enrolled } });
   } catch (err) { next(err); }
 });
 
@@ -533,6 +542,13 @@ router.post('/', (req, res, next) => {
     );
 
     const lead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
+
+    // Auto-enroll into default sequence
+    const defaultSeqId = getDefaultSequenceId();
+    if (defaultSeqId) {
+      autoEnrollLeads([lead.id], defaultSeqId);
+    }
+
     res.status(201).json({ success: true, data: lead });
   } catch (err) { next(err); }
 });
@@ -613,29 +629,11 @@ router.patch('/:id/status', (req, res, next) => {
       db.run('UPDATE leads SET next_followup_at = NULL WHERE id = ?', [req.params.id]);
     }
 
-    // Google Review Request: auto-send SMS when lead reaches closed_won
+    // Review Request Funnel: send rating request when lead reaches closed_won
     if (status === 'closed_won' && oldStatus !== 'closed_won') {
-      const reviewLink = process.env.GOOGLE_REVIEW_LINK;
-      const reviewEnabled = process.env.REVIEW_REQUEST_ENABLED !== 'false';
-
-      if (reviewEnabled && reviewLink && smsService.isConfigured() && lead.phone) {
-        const defaultMsg = `Thanks for choosing us! If you had a great experience, a quick Google review means the world: ${reviewLink}. Reply STOP to opt out.`;
-        const reviewMessage = (process.env.REVIEW_REQUEST_MESSAGE || defaultMsg).replace('{review_link}', reviewLink);
-
-        // Fire-and-forget: don't block status change on SMS result
-        smsService.sendSms(lead.phone, reviewMessage).then(result => {
-          if (result.success) {
-            db.run(
-              `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
-               VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
-              [req.params.id, process.env.TWILIO_PHONE_NUMBER, smsService.normalizePhone(lead.phone), reviewMessage, result.sid, result.status]
-            );
-            db.run(
-              'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-              [req.params.id, 'sms_sent', 'Review request sent', reviewMessage.substring(0, 100), JSON.stringify({ twilio_sid: result.sid, trigger: 'review_request' })]
-            );
-          }
-        }).catch(() => {});
+      const reviewService = require('../services/reviewService');
+      if (reviewService.isEnabled() && lead.phone) {
+        reviewService.sendInitialRequest(lead).catch(() => {});
       }
     }
 
