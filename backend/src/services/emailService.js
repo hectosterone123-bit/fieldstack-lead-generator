@@ -13,46 +13,59 @@ function getClient() {
   return resend;
 }
 
-function getFromAddress() {
-  if (process.env.RESEND_FROM) return process.env.RESEND_FROM;
+function getSetting(key) {
   try {
     const db = require('../db');
-    const row = db.get('SELECT value FROM settings WHERE key = ?', ['resend_from']);
-    if (row?.value) return row.value;
-  } catch {}
-  return 'onboarding@resend.dev';
+    const row = db.get('SELECT value FROM settings WHERE key = ?', [key]);
+    return row?.value || '';
+  } catch { return ''; }
 }
 
-function getSenderName() {
-  try {
-    const db = require('../db');
-    const row = db.get('SELECT value FROM settings WHERE key = ?', ['sender_name']);
-    if (row?.value) return row.value;
-  } catch {}
-  return '';
+function getFromAddress() {
+  const raw = process.env.RESEND_FROM || getSetting('resend_from');
+  if (!raw) return 'onboarding@resend.dev';
+  // Already formatted as "Name <email>" — use as-is
+  if (raw.includes('<')) return raw;
+  // Auto-prefix sender name so inbox shows "Hector <email@domain.com>"
+  const name = getSetting('sender_name');
+  return name ? `${name} <${raw}>` : raw;
+}
+
+function getReplyTo() {
+  return getSetting('reply_to_email');
+}
+
+function getAppUrl() {
+  return process.env.APP_URL || getSetting('app_url');
 }
 
 async function sendEmail(to, subject, htmlBody) {
   const client = getClient();
   if (!client) return { success: false, error: 'Resend API key not configured' };
 
-  const senderName = getSenderName();
-  const footer = senderName ? `\n\n${senderName}, from FieldStack` : '';
-  const bodyWithFooter = htmlBody + footer;
+  const toEmail = Array.isArray(to) ? to[0] : to;
+
+  // Append unsubscribe link (CAN-SPAM compliance)
+  const appUrl = getAppUrl();
+  const footer = appUrl
+    ? `\n\n---\nTo unsubscribe: ${appUrl}/api/leads/unsubscribe?email=${encodeURIComponent(toEmail)}`
+    : '';
+  const body = htmlBody + footer;
+
+  const payload = {
+    from: getFromAddress(),
+    to: Array.isArray(to) ? to : [to],
+    subject,
+    html: body,
+    text: body.replace(/<[^>]*>/g, ''),
+  };
+
+  const replyTo = getReplyTo();
+  if (replyTo) payload.reply_to = replyTo;
 
   try {
-    const { data, error } = await client.emails.send({
-      from: getFromAddress(),
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html: bodyWithFooter,
-      text: bodyWithFooter.replace(/<[^>]*>/g, ''),
-    });
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
+    const { data, error } = await client.emails.send(payload);
+    if (error) return { success: false, error: error.message };
     return { success: true, messageId: data.id };
   } catch (err) {
     return { success: false, error: err.message };

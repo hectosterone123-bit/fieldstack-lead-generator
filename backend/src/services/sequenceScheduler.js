@@ -8,8 +8,8 @@ const { recomputeHeatScore } = require('./heatScoreService');
 const MAX_SENDS_PER_TICK = 20;
 
 function startSequenceScheduler() {
-  // Run every 15 minutes during business hours (7am-8pm, Mon-Fri)
-  cron.schedule('*/15 7-20 * * 1-5', async () => {
+  // Run every 15 minutes during Central business hours (13-22 UTC = 8am-5pm CDT / 7am-4pm CST)
+  cron.schedule('*/15 13-22 * * 1-5', async () => {
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
@@ -29,7 +29,7 @@ function startSequenceScheduler() {
     }
   });
 
-  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 7am-8pm + daily digest 7am)');
+  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 8am-5pm CT + daily digest 7am)');
 }
 
 function autoCompleteEnrollments() {

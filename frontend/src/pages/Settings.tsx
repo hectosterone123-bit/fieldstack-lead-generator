@@ -24,6 +24,7 @@ export function Settings() {
   const [companyName, setCompanyName] = useState('');
   const [googleReviewLink, setGoogleReviewLink] = useState('');
   const [reviewEnabled, setReviewEnabled] = useState(false);
+  const [replyToEmail, setReplyToEmail] = useState('');
   const [defaultSequenceId, setDefaultSequenceId] = useState('');
   const [digestEmail, setDigestEmail] = useState('');
 
@@ -41,6 +42,7 @@ export function Settings() {
       setCompanyName(settings.company_name || '');
       setGoogleReviewLink(settings.google_review_link || '');
       setReviewEnabled(settings.review_request_enabled === 'true');
+      setReplyToEmail(settings.reply_to_email || '');
       setDefaultSequenceId(settings.default_sequence_id || '');
       setDigestEmail(settings.digest_email || '');
     }
@@ -64,6 +66,7 @@ export function Settings() {
     saveMutation.mutate([
       { key: 'booking_link', value: bookingLink },
       { key: 'resend_from', value: resendFrom },
+      { key: 'reply_to_email', value: replyToEmail },
       { key: 'app_url', value: appUrl },
       { key: 'sender_name', value: senderName },
       { key: 'company_name', value: companyName },
@@ -97,7 +100,7 @@ export function Settings() {
             <h2 className="text-sm font-medium text-zinc-200">Sender Name</h2>
           </div>
           <p className="text-xs text-zinc-500 mb-3">
-            Your name for the email footer. Emails will end with "[Name], from FieldStack".
+            Used in email templates as {'{sender_name}'} and auto-prefixed to your From address (e.g. "Hector &lt;you@domain.com&gt;").
           </p>
           <input
             type="text"
@@ -133,13 +136,31 @@ export function Settings() {
             <h2 className="text-sm font-medium text-zinc-200">Email From Address</h2>
           </div>
           <p className="text-xs text-zinc-500 mb-3">
-            Sender address for outgoing emails. Must be verified in your Resend dashboard.
+            Must be a verified domain in Resend. Enter just the email, or "Name &lt;email&gt;" to control the display name.
+          </p>
+          <input
+            type="text"
+            value={resendFrom}
+            onChange={e => setResendFrom(e.target.value)}
+            placeholder="hector@yourdomain.com"
+            className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+          />
+        </div>
+
+        {/* Reply-To */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Mail className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Reply-To Address</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            When prospects reply to your emails, their reply goes here. Set this to your real inbox.
           </p>
           <input
             type="email"
-            value={resendFrom}
-            onChange={e => setResendFrom(e.target.value)}
-            placeholder="sam@fieldstack.io"
+            value={replyToEmail}
+            onChange={e => setReplyToEmail(e.target.value)}
+            placeholder="hector@yourdomain.com"
             className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
           />
         </div>

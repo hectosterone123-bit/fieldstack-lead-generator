@@ -280,6 +280,9 @@ async function initDb() {
   // Migration: add 4 new high-impact loom scripts (v2)
   migrateLoomScriptsV2();
 
+  // Migration: fix loom link placeholders + improve copy across steps 2-7
+  migrateTemplatesV3();
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 
@@ -414,31 +417,31 @@ function migrateDirectLoomEmails() {
     "I tested {business_name}'s response time — made you a 90-second video",
     `{first_name},
 
-I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
+I submitted a service request to {business_name} last week — same way a homeowner in {city} would. Turned what happened into a 90-second Loom. Just timestamps and data.
 
 Here it is: {loom_url}
 
-The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
+I show exactly what that costs in bookings — and the one fix that closes the gap in under 72 hours.
 
-Worth a watch. If anything lands, reply and we can talk through it.
+Worth a watch. Reply and we'll talk through what to fix first.
 
-[Your Name]
+{sender_name}
 Fieldstack`
   ]);
   db.run(stmt, [
     'Reveal — Direct Loom (Competitor)', 'email', 'contacted', 2,
-    'Built this for {business_name} — 90 seconds',
+    'I compared {business_name} to 3 competitors — 90 seconds',
     `{first_name},
 
 I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
 
-Made a short video showing the results side by side: {loom_url}
+Here are the results: {loom_url}
 
-Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
+The gap is fixable in 72 hours. Most owners don't know it exists until they see the timestamps.
 
-Watch the part at the 0:45 mark. That's where it gets expensive.
+Watch the 0:45 mark. That's where it gets expensive.
 
-[Your Name]
+{sender_name}
 Fieldstack`
   ]);
 }
@@ -463,6 +466,428 @@ function migrateLoomScriptsV2() {
   const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 1)";
   const scripts = getNewLoomScripts();
   scripts.forEach(t => db.run(stmt, [t.name, t.channel, t.status_stage, t.step_order, t.subject, t.body]));
+}
+
+function migrateTemplatesV3() {
+  // Check if migration needed: follow-up templates still using [INSERT LOOM LINK]
+  const sample = get("SELECT body FROM templates WHERE name = 'Follow-Up #1 — Soft + Insight' AND is_default = 1 LIMIT 1");
+  if (!sample || !sample.body?.includes('[INSERT LOOM LINK]')) return;
+  console.log('[DB] Migrating templates v3: fixing loom links + improving copy...');
+
+  const u = (name, subject, body) => {
+    if (subject !== null) {
+      db.run('UPDATE templates SET subject = ?, body = ? WHERE name = ? AND is_default = 1', [subject, body, name]);
+    } else {
+      db.run('UPDATE templates SET body = ? WHERE name = ? AND is_default = 1', [body, name]);
+    }
+  };
+
+  // ── Step 2 reveals: remove "no sales pitch" disclaimers + tighten CTAs ──
+
+  u('Reveal — Direct Loom (Speed Test)',
+    "I tested {business_name}'s response time — made you a 90-second video",
+    `{first_name},
+
+I submitted a service request to {business_name} last week — same way a homeowner in {city} would. Turned what happened into a 90-second Loom. Just timestamps and data.
+
+Here it is: {loom_url}
+
+I show exactly what that costs in bookings — and the one fix that closes the gap in under 72 hours.
+
+Worth a watch. Reply and we'll talk through what to fix first.
+
+{sender_name}
+Fieldstack`);
+
+  u('Reveal — Direct Loom (Competitor)',
+    'I compared {business_name} to 3 competitors — 90 seconds',
+    `{first_name},
+
+I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
+
+Here are the results: {loom_url}
+
+The gap is fixable in 72 hours. Most owners don't know it exists until they see the timestamps.
+
+Watch the 0:45 mark. That's where it gets expensive.
+
+{sender_name}
+Fieldstack`);
+
+  u('Reveal — Curiosity Hook', null,
+    `{first_name},
+
+Last week, I submitted a service request to {business_name} — the exact same way a homeowner in {city} would.
+
+I wasn't a real customer. I was testing something.
+
+See, I work with {service_type} contractors across {state}, and I've noticed a pattern: the companies that respond first win the job. Not sometimes. Almost every time.
+
+InsideSales research put a number on it: contractors who respond within 5 minutes are 21x more likely to book the job than those who wait 30 minutes.
+
+I recorded what happened with {business_name}'s response — the timing, the follow-up (or lack of it), and how it stacks up against other {service_type} companies in {city}. Put it all in a short Loom video.
+
+Just your data.
+
+Want me to send it over? Reply "yes" and I'll drop the link.
+
+{sender_name}
+Fieldstack | Speed-to-Lead for Contractors`);
+
+  u('Reveal — Lost Revenue Angle', null,
+    `{first_name},
+
+Quick math that might ruin your morning (sorry in advance):
+
+The average {service_type} job in {city} is worth {avg_job_value}. If {business_name} gets {monthly_leads_single} leads a month and your close rate is around {close_rate_slow}, you're leaving a lot on the table.
+
+But here's the thing — industry data shows contractors who respond in under 5 minutes close at {close_rate_fast}. Same leads. Same market. Same prices. Just faster follow-up.
+
+That's the gap between your current bookings and what you should be closing. From leads you already paid for.
+
+I tested {business_name}'s actual response time last week. Submitted a real-looking service request and timed it. Then I compared it to other {service_type} companies near {city}.
+
+I broke down the numbers in a short Loom video — what I found, what it's costing you, and the three things I'd change this week.
+
+3 minutes. Just timestamps and math.
+
+Want me to send the link? Just reply "show me."
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 3 video delivery: remove weak close ──
+
+  u('Video — Challenge Angle', null,
+    `{first_name},
+
+Here's your speed test video: {loom_url}
+
+Fair warning: most {service_type} owners who watch this end up making changes the same day. Not because I'm persuasive — because the data is hard to unsee.
+
+Here's my prediction: you'll fix problem #2 before the video even finishes. It's that obvious once you see it.
+
+The three things I cover:
+1. Your response time vs. the {city} average (spoiler: there's a gap)
+2. A dead-simple settings change that most {service_type} companies miss
+3. The follow-up sequence your competitors are running that you aren't
+
+Total watch time: 3 minutes and 12 seconds.
+
+If I'm wrong and none of it is useful, reply and tell me what I missed.
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 4 follow-ups: fix loom links + sharpen ──
+
+  u('Follow-Up #1 — Soft + Insight',
+    "One thing I didn't mention, {first_name}",
+    `{first_name},
+
+Following up on the speed test video. In case it got buried: {loom_url}
+
+One thing I didn't mention that's worth knowing:
+
+Google's own data shows that 60% of mobile searchers call a business directly from search results — and if nobody picks up, they immediately call the next result. They don't leave voicemails. They don't wait. They just move on.
+
+For a {service_type} company in {city}, every missed call during business hours is a donated lead to whoever ranks below you.
+
+The fix isn't complicated. Reply and I'll walk you through exactly what to change — takes 15 minutes.
+
+{sender_name}`);
+
+  u('Follow-Up #1 — Quick Question', null,
+    `{first_name},
+
+Honest question — when a new lead comes in through your website or Google listing, what happens next?
+
+Does it go to an email inbox? A CRM? Someone's phone? A shared voicemail?
+
+I ask because the #1 predictor of whether a {service_type} company books the job isn't pricing, reviews, or reputation. It's how fast the lead gets to a human who can respond.
+
+I put together that Loom video showing where {business_name} stands: {loom_url}
+
+What did you think? Anything surprise you?
+
+{sender_name}`);
+
+  u('Follow-Up #1 — Seasonal Timing', null,
+    `{first_name},
+
+Heads up: search volume for "{service_type} near me" in the {city} area is climbing. Every year it follows the same pattern — slow build, then a flood right when {seasonal_trigger}.
+
+The contractors who win that surge aren't the ones with the biggest ad budgets. They're the ones who respond in under 5 minutes while everyone else is taking 2-4 hours.
+
+I showed this in the Loom video I sent: {loom_url}
+
+Right now, {business_name} has a window to fix the response gap before {busy_season}. Once the rush hits, you'll be too busy to change anything.
+
+15-minute call this week? I'll show you exactly what to set up.
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 5 social proof: fix loom links ──
+
+  u('Follow-Up #2 — Case Study', null,
+    `{first_name},
+
+Short story — then I'll leave you alone.
+
+We started working with a {service_type} contractor in {state} about four months ago. Similar size to {business_name}. Decent reviews, steady lead flow, but their close rate was stuck around 23%.
+
+Turned out their average response time was 3 hours and 47 minutes. By the time they called back, homeowners had already booked someone else.
+
+We set up automated speed-to-lead response. Under 20 seconds, every time — nights, weekends, holidays.
+
+Within 60 days:
+• Close rate: 23% → 58%
+• New bookings: +11 per month
+• Revenue increase: $14,300/mo
+• Additional ad spend: $0
+
+They didn't get more leads. They just stopped losing the ones they already had.
+
+I think {business_name} has the same gap. The video I sent shows exactly where: {loom_url}
+
+Worth a 15-minute call?
+
+{sender_name}
+Fieldstack`);
+
+  u('Follow-Up #2 — Industry Data', null,
+    `{first_name},
+
+I've been digging into response time data across {service_type} companies and wanted to share what I'm seeing:
+
+The numbers:
+• Average {service_type} company responds to a web lead in 3-5 hours
+• 48% never respond at all (the lead just dies)
+• Companies that respond in under 5 minutes are 21x more likely to book
+• 78% of homeowners hire whoever calls back first
+
+The trend:
+The top 10% of contractors are getting faster while everyone else stays the same. This means the gap is widening. The fast companies are pulling further ahead every month.
+
+Where {business_name} fits:
+I showed your specific data in the video I sent last week: {loom_url}
+
+This isn't about working harder. It's about setting up a system so leads get a response in under a minute — whether you're on a job site, eating dinner, or sleeping.
+
+That's what we build at Fieldstack. Happy to show you how it works in 15 minutes.
+
+{sender_name}`);
+
+  u('Follow-Up #2 — Competitor Pressure', null,
+    `{first_name},
+
+Figured you should know: we've been getting more calls from {service_type} companies in the {city} / {state} area lately.
+
+Not sharing this to create pressure — sharing it because the math changes when your competitors get faster and you don't.
+
+Right now, if {business_name} and a competitor both get the same lead, and they respond in 60 seconds while you respond in 2 hours — they book the job 9 times out of 10. Not because they're better. Because they're there.
+
+The good news: you can flip that equation. The setup takes about a week, and once it's running, every lead gets a response in under a minute without you lifting a finger.
+
+I laid out the specifics for {business_name} in the video: {loom_url}
+
+Want to get ahead of this? Let's talk this week.
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 6 breakup: fix loom links ──
+
+  u('Breakup — Honest & Direct', null,
+    `{first_name},
+
+I've sent a few emails about the speed test I ran for {business_name}. Haven't heard back, which is totally fine — I know you're running a business, not checking your inbox.
+
+I'll keep this simple: should I close your file?
+
+If the answer is "yes, not interested" — no hard feelings. I'll stop emailing today.
+
+If the answer is "not right now" — just say when and I'll follow up then. No pressure.
+
+And if the answer is "I've been meaning to reply" — here's the video one more time: {loom_url}. It's 3 minutes and it shows exactly what's happening with {business_name}'s lead response time.
+
+Either way, one number to remember:
+
+Every hour you wait to respond to a new lead, your chance of booking that job drops by 80%. That's the difference between a {avg_job_single} job booked and a {avg_job_single} job lost.
+
+Your call, {first_name}.
+
+{sender_name}
+Fieldstack`);
+
+  u('Breakup — Value Gift', null,
+    `{first_name},
+
+This is my last email about the speed test. But I don't want to leave empty-handed, so here's a few things that'll help {business_name} regardless of whether we ever talk:
+
+3 things you can do this week for free:
+
+1. Turn on Google Business messaging. Most {service_type} companies in {city} don't have it enabled. Takes 5 minutes. Lets homeowners text you straight from your Google listing.
+
+2. Set up a simple auto-reply. When a lead emails or fills out your form, send an instant reply: "Got it — we'll call you within 15 minutes." Even that small step cuts your lead loss in half.
+
+3. Check your voicemail. Seriously. Call your own number. Is the voicemail full? Does it sound professional? Does it give them a reason to leave a message? 40% of {service_type} companies have a full or generic voicemail box.
+
+The biggest thing: {pain_point}. If you're not responding fast, someone else is.
+
+These are all in the video I made: {loom_url}
+
+If you ever want to automate this stuff properly, you know where to find me.
+
+{sender_name}
+Fieldstack`);
+
+  u("Breakup — Numbers Don't Lie", null,
+    `{first_name},
+
+Last email. Just want to leave you with the math.
+
+If {business_name} gets {monthly_leads_single} leads per month (pretty standard for {service_type} in {city}):
+• At a {close_rate_slow} close rate — you're leaving jobs on the table
+• At a {close_rate_fast} close rate — that's what speed-to-lead gets you
+• Average job value in your area: ~{avg_job_single}
+
+That gap is {lost_revenue_monthly} per month. Same leads. Same ads. Same team.
+
+The only variable? How fast you respond.
+
+I know because I tested it: {loom_url}
+
+Whenever you're ready, I'm here. No expiration date on this.
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 7 re-engage: fix placeholder ──
+
+  u('Re-engage — Fresh Data', null,
+    `{first_name},
+
+It's been a while. I ran a new speed test on {business_name} — curious if anything had changed.
+
+Response time this time: {response_time}.
+
+The {service_type} companies that locked in automated lead response early are pulling ahead in a way that's getting harder to catch. Whether things have improved since we last talked or the gap is still there — either way, there's a window right now to close it.
+
+Not sending a new video unless you want one. But if you're open to a quick call, I'll show you exactly where things stand and what I'd change today.
+
+No re-pitch. Just the data.
+
+Worth 15 minutes?
+
+{sender_name}
+Fieldstack`);
+
+  // ── Also fix [Your Name] → {sender_name} in remaining email templates ──
+
+  u('Reveal — Competitor Angle', null,
+    `{first_name},
+
+I'm going to share something that might sting — but I think you'd rather hear it from me than figure it out after another slow quarter.
+
+I tested the lead response time of several {service_type} companies in the {city} area. I submitted identical service requests and timed the responses.
+
+Your fastest local competitor responded in under 2 minutes.
+
+{business_name}? I'll save the exact number for the video.
+
+Here's the thing — this isn't about effort. You're probably spending real money on ads, SEO, or Google Business to get those leads. But if a homeowner fills out your form and hears back from someone else first, that ad spend is a donation to your competitor.
+
+I made a 3-minute Loom video that shows the full breakdown — {business_name} vs. competitors, side by side. No opinions, just timestamps.
+
+Want to see it? Reply "send it" and it's yours.
+
+{sender_name}
+Fieldstack`);
+
+  u('Video — Clean Delivery', null,
+    `{first_name},
+
+As promised. Here's the Loom video I made for {business_name}:
+
+{loom_url}
+
+What you'll see in 3 minutes:
+1. The exact response time when I submitted a lead to {business_name}
+2. Side-by-side comparison with other {service_type} companies in {city}
+3. Three specific fixes — the first one takes about 10 minutes
+
+One thing to watch for: at the 1:45 mark I show what a homeowner sees when they're waiting for a callback. It changes how you think about every lead sitting in your inbox.
+
+After you watch, I'm happy to jump on a 15-minute call to talk through what makes sense for {business_name} specifically.
+
+{sender_name}
+Fieldstack`);
+
+  u('Video — Personalized Audit', null,
+    `{first_name},
+
+I don't send generic videos. This one was built specifically for {business_name}.
+
+Here's your Loom: {loom_url}
+
+I walk through:
+• Your actual response data (timestamp and all)
+• The exact moment a homeowner in {city} would have moved on to your competitor
+• A side-by-side with the fastest {service_type} responder in your area
+• What I'd change first, second, and third — with specific steps
+
+I spent about 45 minutes putting this together because the data told a clear story. {business_name} is doing a lot of things right — the lead generation is clearly working. The gap is what happens after the lead comes in.
+
+Worth a watch. If anything clicks, reply and we can talk through it.
+
+{sender_name}
+Fieldstack`);
+
+  u('Re-engage — Seasonal', null,
+    `{first_name},
+
+Every year it's the same cycle: {seasonal_trigger}, phones start ringing, and {service_type} companies scramble to keep up.
+
+Last time we talked, {business_name} was leaving some response time on the table. The leads were there — they just weren't getting caught fast enough.
+
+Right now, before the rush hits, is the best time to fix this. Once you're knee-deep in jobs, there's no bandwidth to change anything.
+
+Here's what the setup looks like:
+• Week 1: We map your lead sources and response flow
+• Week 2: Automated speed-to-lead goes live (under 60 seconds, every time)
+• Week 3+: You stop losing leads to slower competitors
+
+The contractors who set this up before their busy season see results within the first 2 weeks. The ones who wait usually reach out mid-season, frustrated, wishing they'd done it sooner.
+
+Up to you, {first_name}. But the window is now.
+
+{sender_name}
+Fieldstack`);
+
+  u("Re-engage — What's New", null,
+    `{first_name},
+
+Quick update — we've added some things at Fieldstack since we last talked, and {business_name} was one of the first companies I thought of.
+
+What's new:
+• AI that responds in under 20 seconds and sounds like a real local person — not a bot
+• Voice calls via a local area code number, plus SMS in the same conversation thread
+• Asks homeowners to send damage photos via text, qualifies the job, and books your Google Calendar automatically
+• Follow-up engine: SMS nudge at 4 hours, outbound voice call at 48 hours, 3 touches total before marking a lead dead
+• Contractor SMS alerts the moment a lead qualifies and again when they book
+
+Why I thought of you: when I tested {business_name}'s response time, the gap wasn't about effort — your team was just busy doing actual work. These tools fix the gap without adding anything to your plate.
+
+We're doing a limited rollout in {state} right now. If you want an early look, I'll set up a 15-minute demo.
+
+No pressure, no pitch history to rehash. Fresh start.
+
+Interested?
+
+{sender_name}
+Fieldstack`);
 }
 
 function getNewLoomScripts() {
@@ -795,15 +1220,15 @@ This data becomes the centerpiece of Step 2.`,
       subject: 'I tested {business_name}\'s response time — made you a 90-second video',
       body: `{first_name},
 
-I submitted a service request to {business_name} last week — same way a homeowner in {city} would. I recorded what happened and turned it into a 90-second Loom video. No sales pitch in it. Just timestamps and data.
+I submitted a service request to {business_name} last week — same way a homeowner in {city} would. Turned what happened into a 90-second Loom. Just timestamps and data.
 
 Here it is: {loom_url}
 
-The short version: there's a gap between when leads hit your site and when they hear back. I show exactly what that costs in bookings — and one fix that closes it in under 72 hours.
+I show exactly what that costs in bookings — and the one fix that closes the gap in under 72 hours.
 
-Worth a watch. If anything lands, reply and we can talk through it.
+Worth a watch. Reply and we'll talk through what to fix first.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -813,18 +1238,18 @@ Fieldstack`,
       channel: 'email',
       status_stage: 'contacted',
       step_order: 2,
-      subject: 'Built this for {business_name} — 90 seconds',
+      subject: 'I compared {business_name} to 3 competitors — 90 seconds',
       body: `{first_name},
 
 I tested lead response times across {service_type} companies in {city} last week — submitted identical requests to {business_name} and three competitors and timed every response.
 
-Made a short video showing the results side by side: {loom_url}
+Here are the results: {loom_url}
 
-Not sending this to criticize. Sending it because the gap is fixable in 72 hours and most owners don't know it exists until they see the timestamps.
+The gap is fixable in 72 hours. Most owners don't know it exists until they see the timestamps.
 
-Watch the part at the 0:45 mark. That's where it gets expensive.
+Watch the 0:45 mark. That's where it gets expensive.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -847,11 +1272,11 @@ InsideSales research put a number on it: contractors who respond within 5 minute
 
 I recorded what happened with {business_name}'s response — the timing, the follow-up (or lack of it), and how it stacks up against other {service_type} companies in {city}. Put it all in a short Loom video.
 
-Not a sales pitch. Just your data.
+Just your data.
 
 Want me to send it over? Reply "yes" and I'll drop the link.
 
-[Your Name]
+{sender_name}
 Fieldstack | Speed-to-Lead for Contractors`,
     },
 
@@ -878,7 +1303,7 @@ I made a 3-minute Loom video that shows the full breakdown — {business_name} v
 
 Want to see it? Reply "send it" and it's yours.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -903,11 +1328,11 @@ I tested {business_name}'s actual response time last week. Submitted a real-look
 
 I broke down the numbers in a short Loom video — what I found, what it's costing you, and the three things I'd change this week.
 
-No sales pitch in the video. Literally just data and math.
+3 minutes. Just timestamps and math.
 
 Want me to send the link? Just reply "show me."
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -987,9 +1412,9 @@ What you'll see in 3 minutes:
 
 One thing to watch for: at the 1:45 mark I show what a homeowner sees when they're waiting for a callback. It changes how you think about every lead sitting in your inbox.
 
-After you watch, I'm happy to jump on a 15-minute call to talk through what makes sense for {business_name} specifically. No pressure — just want to make sure the video makes sense.
+After you watch, I'm happy to jump on a 15-minute call to talk through what makes sense for {business_name} specifically.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1016,7 +1441,7 @@ I spent about 45 minutes putting this together because the data told a clear sto
 
 Worth a watch. If anything clicks, reply and we can talk through it.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1042,9 +1467,9 @@ The three things I cover:
 
 Total watch time: 3 minutes and 12 seconds.
 
-If I'm wrong and none of it is useful, tell me. I'll buy you a coffee for wasting your time.
+If I'm wrong and none of it is useful, reply and tell me what I missed.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1104,22 +1529,20 @@ IF THEY'RE INTERESTED IN A CALL:
       channel: 'email',
       status_stage: 'proposal_sent',
       step_order: 4,
-      subject: 'Quick thought on {business_name} (+ the video link again)',
+      subject: "One thing I didn't mention, {first_name}",
       body: `{first_name},
 
-Following up on the speed test video. In case it got buried: [INSERT LOOM LINK]
+Following up on the speed test video. In case it got buried: {loom_url}
 
-One thing I didn't mention in the video that's worth knowing:
+One thing I didn't mention that's worth knowing:
 
 Google's own data shows that 60% of mobile searchers call a business directly from search results — and if nobody picks up, they immediately call the next result. They don't leave voicemails. They don't wait. They just move on.
 
-For a {service_type} company in {city}, that means every missed call during business hours is essentially a donated lead to whoever ranks below you.
+For a {service_type} company in {city}, every missed call during business hours is a donated lead to whoever ranks below you.
 
-The fix isn't complicated. Happy to walk through it in a 15-minute call if you're interested.
+The fix isn't complicated. Reply and I'll walk you through exactly what to change — takes 15 minutes.
 
-Either way, the video has the full breakdown.
-
-[Your Name]`,
+{sender_name}`,
     },
 
     // --- Angle B: Quick Question (Low Commitment) ---
@@ -1137,11 +1560,11 @@ Does it go to an email inbox? A CRM? Someone's phone? A shared voicemail?
 
 I ask because the #1 predictor of whether a {service_type} company books the job isn't their pricing, their reviews, or even their reputation. It's how fast the lead gets to a human who can respond.
 
-I put together that Loom video showing where {business_name} stands on this. If you haven't watched it yet: [INSERT LOOM LINK]
+I put together that Loom video showing where {business_name} stands: {loom_url}
 
-And if you have watched it — what did you think? Anything surprise you?
+What did you think? Anything surprise you?
 
-[Your Name]`,
+{sender_name}`,
     },
 
     // --- Angle C: Seasonal Urgency ---
@@ -1157,13 +1580,13 @@ Heads up: search volume for "{service_type} near me" in the {city} area is climb
 
 The contractors who win that surge aren't the ones with the biggest ad budgets. They're the ones who respond in under 5 minutes while everyone else is taking 2-4 hours.
 
-I showed this in the Loom video I sent: [INSERT LOOM LINK]
+I showed this in the Loom video I sent: {loom_url}
 
 Right now, {business_name} has a window to fix the response gap before {busy_season}. Once the rush hits, you'll be too busy to change anything.
 
 15-minute call this week? I'll show you exactly what to set up.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1216,11 +1639,11 @@ Within 60 days:
 
 They didn't get more leads. They just stopped losing the ones they already had.
 
-I think {business_name} has the same gap. The video I sent shows exactly where: [INSERT LOOM LINK]
+I think {business_name} has the same gap. The video I sent shows exactly where: {loom_url}
 
 Worth a 15-minute call?
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1245,13 +1668,13 @@ The trend:
 The top 10% of contractors are getting faster while everyone else stays the same. This means the gap is widening. The fast companies are pulling further ahead every month.
 
 Where {business_name} fits:
-I showed your specific data in the video I sent last week: [INSERT LOOM LINK]
+I showed your specific data in the video I sent last week: {loom_url}
 
 This isn't about working harder. It's about setting up a system so leads get a response in under a minute — whether you're on a job site, eating dinner, or sleeping.
 
 That's what we build at Fieldstack. Happy to show you how it works in 15 minutes.
 
-[Your Name]`,
+{sender_name}`,
     },
 
     // --- Angle C: Competitor Movement ---
@@ -1271,11 +1694,11 @@ Right now, if {business_name} and a competitor both get the same lead, and they 
 
 The good news: you can flip that equation. The setup takes about a week, and once it's running, every lead gets a response in under a minute without you lifting a finger.
 
-I laid out the specifics for {business_name} in the video: [INSERT LOOM LINK]
+I laid out the specifics for {business_name} in the video: {loom_url}
 
 Want to get ahead of this? Let's talk this week.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1312,7 +1735,7 @@ If the answer is "yes, not interested" — no hard feelings. I'll stop emailing 
 
 If the answer is "not right now" — just say when and I'll follow up then. No pressure.
 
-And if the answer is "I've been meaning to reply" — here's the video one more time: [INSERT LOOM LINK]. It's 3 minutes and it shows exactly what's happening with {business_name}'s lead response time.
+And if the answer is "I've been meaning to reply" — here's the video one more time: {loom_url}. It's 3 minutes and it shows exactly what's happening with {business_name}'s lead response time.
 
 Either way, one number to remember:
 
@@ -1320,7 +1743,7 @@ Every hour you wait to respond to a new lead, your chance of booking that job dr
 
 Your call, {first_name}.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1345,11 +1768,11 @@ This is my last email about the speed test. But I don't want to leave empty-hand
 
 The biggest thing: {pain_point}. If you're not responding fast, someone else is.
 
-These are all in the video I made: [INSERT LOOM LINK]
+These are all in the video I made: {loom_url}
 
 If you ever want to automate this stuff properly, you know where to find me.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1373,11 +1796,11 @@ That gap is {lost_revenue_monthly} per month. Same leads. Same ads. Same team.
 
 The only variable? How fast you respond.
 
-I know because I tested it: [INSERT LOOM LINK]
+I know because I tested it: {loom_url}
 
 Whenever you're ready, I'm here. No expiration date on this.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1413,19 +1836,19 @@ Fieldstack`,
       subject: '{first_name}, I ran a new test on {business_name}',
       body: `{first_name},
 
-It's been a while. I ran a new speed test on {business_name} — curious if anything had changed since we last spoke.
+It's been a while. I ran a new speed test on {business_name} — curious if anything had changed.
 
-Here's what I found: [one sentence summary — better/worse/same].
+Response time this time: {response_time}.
 
-A lot has happened in the {service_type} space in {state} since we last talked. The contractors who locked in automated lead response early are now pulling ahead in a way that's getting harder to catch.
+The {service_type} companies that locked in automated lead response early are pulling ahead in a way that's getting harder to catch. Whether things have improved since we last talked or the gap is still there — either way, there's a window right now to close it.
 
-I'm not sending a new video (unless you want one). But if things have shifted on your end and you want a fresh look at where {business_name} stands today — happy to jump on a call.
+Not sending a new video unless you want one. But if you're open to a quick call, I'll show you exactly where things stand and what I'd change today.
 
-No re-pitch. Just an honest update.
+No re-pitch. Just the data.
 
 Worth 15 minutes?
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1453,7 +1876,7 @@ The contractors who set this up before their busy season see results within the 
 
 Up to you, {first_name}. But the window is now.
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1483,7 +1906,7 @@ No pressure, no pitch history to rehash. Fresh start.
 
 Interested?
 
-[Your Name]
+{sender_name}
 Fieldstack`,
     },
 
@@ -1494,7 +1917,7 @@ Fieldstack`,
       status_stage: 'lost',
       step_order: 7,
       subject: null,
-      body: `Hey {first_name}, it's [Your Name] from Fieldstack. Been a while. We built some new tools for {service_type} companies — thought of {business_name}. Worth a fresh look? No rehash, just what's new.`,
+      body: `Hey {first_name}, it's {sender_name} from Fieldstack. Been a while. We built some new tools for {service_type} companies — thought of {business_name}. Worth a fresh look? No rehash, just what's new.`,
     },
     {
       name: 'Re-engage — SMS Seasonal',
