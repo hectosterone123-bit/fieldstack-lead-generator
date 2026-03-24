@@ -5,6 +5,7 @@ const { renderTemplate } = require('../services/templateService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
+const { flushOverdueNow, getRemainingBudget } = require('../services/sequenceScheduler');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,8 @@ router.get('/queue', (req, res) => {
            l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website, l.email_opened_at
+           l.contact_count, l.estimated_value, l.website, l.email_opened_at, l.email_invalid_at,
+           EXISTS(SELECT 1 FROM activities WHERE lead_id = l.id AND type = 'email_replied') as has_replied
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -115,6 +117,8 @@ router.get('/queue', (req, res) => {
         is_overdue: dueDate < now,
         enrolled_at: enrollment.enrolled_at,
         email_opened_at: enrollment.email_opened_at || null,
+        email_invalid: !!enrollment.email_invalid_at,
+        has_replied: !!enrollment.has_replied,
       });
     }
   }
@@ -127,6 +131,15 @@ router.get('/queue', (req, res) => {
   });
 
   res.json({ success: true, data: queue });
+});
+
+router.post('/flush-overdue', async (_req, res) => {
+  try {
+    const result = await flushOverdueNow();
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 router.get('/queue/stats', (req, res) => {
@@ -161,7 +174,8 @@ router.get('/queue/stats', (req, res) => {
     else upcoming++;
   }
 
-  res.json({ success: true, data: { overdue, due_today, upcoming } });
+  const budget = getRemainingBudget();
+  res.json({ success: true, data: { overdue, due_today, upcoming, sends_remaining: budget.remaining, daily_limit: budget.dailyLimit, sent_today: budget.sentToday } });
 });
 
 router.post('/queue/:enrollmentId/mark-sent', (req, res) => {
@@ -270,6 +284,11 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Send is only available for email steps' });
   }
 
+  const { remaining } = getRemainingBudget();
+  if (remaining <= 0) {
+    return res.status(429).json({ success: false, error: 'Daily send limit reached. Try again tomorrow or increase your limit in Settings.' });
+  }
+
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
   if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
@@ -281,15 +300,16 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   const subject = renderTemplate(template.subject, lead);
   const body = renderTemplate(template.body, lead);
 
-  const result = await emailService.sendEmail(lead.email, subject, body);
+  const result = await emailService.sendEmail(lead.email, subject, body, { leadId: enrollment.lead_id });
   if (!result.success) {
     return res.status(500).json({ success: false, error: result.error });
   }
 
   // Log activity
   db.run(
-    'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
-    [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`]
+    'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+    [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`,
+     JSON.stringify({ resend_message_id: result.messageId })]
   );
 
   // Update lead contact tracking
@@ -398,6 +418,34 @@ router.post('/queue/:enrollmentId/send-sms', async (req, res) => {
   }
 
   res.json({ success: true, data: { sid: result.sid, advanced_to: nextStep > steps.length ? 'completed' : nextStep } });
+});
+
+router.post('/queue/:enrollmentId/mark-replied', (req, res) => {
+  const { enrollmentId } = req.params;
+  const enrollment = db.get('SELECT * FROM lead_sequences WHERE id = ?', [enrollmentId]);
+  if (!enrollment) return res.status(404).json({ success: false, error: 'Enrollment not found' });
+
+  const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+  if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+  // Log email reply activity
+  db.run(
+    'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+    [enrollment.lead_id, 'email_replied', 'Prospect replied via email', `Marked as replied for ${lead.business_name}`]
+  );
+
+  // Auto-pause all active enrollments for this lead
+  db.run(
+    "UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
+    [enrollment.lead_id]
+  );
+
+  db.run(
+    'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+    [enrollment.lead_id, 'note', 'Sequence auto-paused', 'Lead replied via email — all active sequences paused']
+  );
+
+  res.json({ success: true, data: { paused: true } });
 });
 
 // ─── Enrollments (registered before /:id) ────────────────────────────────────
@@ -556,14 +604,14 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { name, description, steps, auto_send, auto_send_after_step } = req.body;
+  const { name, description, steps, auto_send, auto_send_after_step, auto_flush_overdue } = req.body;
   if (!name || !steps?.length) {
     return res.status(400).json({ success: false, error: 'name and steps are required' });
   }
 
   const { lastInsertRowid } = db.run(
-    'INSERT INTO sequences (name, description, steps, auto_send, auto_send_after_step) VALUES (?, ?, ?, ?, ?)',
-    [name, description || null, JSON.stringify(steps), auto_send ? 1 : 0, parseInt(auto_send_after_step) || 0]
+    'INSERT INTO sequences (name, description, steps, auto_send, auto_send_after_step, auto_flush_overdue) VALUES (?, ?, ?, ?, ?, ?)',
+    [name, description || null, JSON.stringify(steps), auto_send ? 1 : 0, parseInt(auto_send_after_step) || 0, auto_flush_overdue ? 1 : 0]
   );
 
   const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [lastInsertRowid]);
@@ -590,13 +638,13 @@ router.get('/:id', (req, res) => {
 });
 
 router.put('/:id', (req, res) => {
-  const { name, description, steps, auto_send, auto_send_after_step } = req.body;
+  const { name, description, steps, auto_send, auto_send_after_step, auto_flush_overdue } = req.body;
   const existing = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);
   if (!existing) return res.status(404).json({ success: false, error: 'Sequence not found' });
 
   db.run(
-    'UPDATE sequences SET name = ?, description = ?, steps = ?, auto_send = ?, auto_send_after_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, auto_send !== undefined ? (auto_send ? 1 : 0) : existing.auto_send, auto_send_after_step !== undefined ? (parseInt(auto_send_after_step) || 0) : existing.auto_send_after_step, req.params.id]
+    'UPDATE sequences SET name = ?, description = ?, steps = ?, auto_send = ?, auto_send_after_step = ?, auto_flush_overdue = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [name || existing.name, description !== undefined ? description : existing.description, steps ? JSON.stringify(steps) : existing.steps, auto_send !== undefined ? (auto_send ? 1 : 0) : existing.auto_send, auto_send_after_step !== undefined ? (parseInt(auto_send_after_step) || 0) : existing.auto_send_after_step, auto_flush_overdue !== undefined ? (auto_flush_overdue ? 1 : 0) : (existing.auto_flush_overdue || 0), req.params.id]
   );
 
   const updated = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);

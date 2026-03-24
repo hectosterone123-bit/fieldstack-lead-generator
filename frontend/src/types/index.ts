@@ -8,7 +8,7 @@ export type LeadStatus =
 
 export type ActivityType =
   | 'status_change' | 'note' | 'call_attempt'
-  | 'email_sent' | 'email_opened' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
+  | 'email_sent' | 'email_opened' | 'email_replied' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
 
 export type TemplateChannel = 'email' | 'sms' | 'call_script' | 'loom_script';
 
@@ -291,6 +291,7 @@ export interface Sequence {
   is_active: number;
   auto_send: number;
   auto_send_after_step: number;
+  auto_flush_overdue: number;
   active_enrollments?: number;
   emails_sent?: number;
   emails_opened?: number;
@@ -336,12 +337,17 @@ export interface OutreachQueueItem {
   is_overdue: boolean;
   enrolled_at: string;
   email_opened_at: string | null;
+  email_invalid: boolean;
+  has_replied: boolean;
 }
 
 export interface QueueStats {
   overdue: number;
   due_today: number;
   upcoming: number;
+  sends_remaining: number;
+  daily_limit: number;
+  sent_today: number;
 }
 
 // ─── SMS ─────────────────────────────────────────────────────────────────────

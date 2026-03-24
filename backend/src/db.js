@@ -254,10 +254,21 @@ async function initDb() {
   // Migration: per-enrollment auto_send flag
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
 
+  // Migration: auto_flush_overdue — auto-send overdue email/sms steps for opted-in sequences
+  try { db.run('ALTER TABLE sequences ADD COLUMN auto_flush_overdue INTEGER DEFAULT 0'); } catch(e) {}
+
   // Migration: unsubscribe support
   try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')"); } catch(e) {}
+
+  // Migration: email bounce tracking + hot lead alert phone
+  try { db.run('ALTER TABLE leads ADD COLUMN email_invalid_at DATETIME'); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('alert_phone', '')"); } catch(e) {}
+
+  // Migration: daily send limits + domain warmup
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_send_limit', '20')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_start_date', '')"); } catch(e) {}
 
   // Migration: set auto_send_after_step=1 on default sequence + seed default_sequence_id
   try {
@@ -288,6 +299,9 @@ async function initDb() {
 
   // Seed default sequence if table is empty
   seedDefaultSequence();
+
+  // Migration: seed cold outreach templates + sequence
+  seedColdOutreachSequence();
 
   saveDb();
   return db;
@@ -1983,6 +1997,97 @@ function seedDefaultSequence() {
     // Set as default sequence for auto-enrollment
     db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_sequence_id', ?)", [String(result.lastInsertRowid)]);
   }
+}
+
+function seedColdOutreachSequence() {
+  // Only seed once — check if cold outreach sequence already exists
+  const existing = get("SELECT id FROM sequences WHERE name = 'Cold Outreach (3-Step)'");
+  if (existing) return;
+
+  console.log('[DB] Seeding cold outreach email templates + sequence...');
+
+  // Step 1: Hook email (Day 0)
+  const t1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Cold Outreach — Hook',
+      'email',
+      'new',
+      1,
+      'quick question, {first_name}',
+      `Hey {first_name},
+
+Do you have a system that texts back website leads within 5 minutes when you're on a job site?
+
+Most {service_type} contractors in {city} don't — which means they lose jobs to whoever answers first. The average contractor takes 47 hours to respond to a web lead.
+
+We built an AI that texts every new lead within 90 seconds, 24/7. Most of our clients book 3-5 extra jobs the first month from the same traffic they already have.
+
+Worth a 15-minute call this week? I can show you exactly how it works for {service_type} companies.
+
+— {sender_name}
+FieldStack`,
+    ]
+  );
+
+  // Step 2: Proof email (Day 4)
+  const t2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Cold Outreach — Proof',
+      'email',
+      'new',
+      2,
+      'Re: quick question',
+      `Hey {first_name},
+
+Wanted to follow up on this. One of our {service_type} clients went from missing 60% of their web leads to booking 4-5 extra quotes per week in the first month — all from the same website traffic they already had.
+
+The difference was responding in 90 seconds instead of the next morning.
+
+Still interested in a quick look? Takes 15 minutes and you'll know right away if it makes sense for {business_name}.
+
+{booking_link}
+
+— {sender_name}`,
+    ]
+  );
+
+  // Step 3: Breakup email (Day 9)
+  const t3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Cold Outreach — Breakup',
+      'email',
+      'new',
+      3,
+      'closing the loop',
+      `{first_name}, I'll leave you alone after this.
+
+If you ever want to see how {service_type} contractors are automating lead response without hiring anyone, just reply "interested" and I'll send the info.
+
+No pressure either way. Good luck this season.
+
+— {sender_name}
+FieldStack`,
+    ]
+  );
+
+  // Create the sequence
+  const steps = [
+    { order: 1, delay_days: 0, channel: 'email', template_id: Number(t1.lastInsertRowid), label: 'Cold Hook' },
+    { order: 2, delay_days: 4, channel: 'email', template_id: Number(t2.lastInsertRowid), label: 'Social Proof' },
+    { order: 3, delay_days: 9, channel: 'email', template_id: Number(t3.lastInsertRowid), label: 'Breakup' },
+  ];
+
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue) VALUES (?, ?, ?, 1, 1, 0, 1)",
+    [
+      'Cold Outreach (3-Step)',
+      'Top-of-funnel cold email sequence: hook → proof → breakup. Auto-sends all 3 steps. Replies feed into Loom workflow.',
+      JSON.stringify(steps),
+    ]
+  );
 }
 
 function saveDb() {

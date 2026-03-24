@@ -2,9 +2,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchSequences, fetchSequence, createSequence, updateSequence, deleteSequence, toggleSequence,
   enrollLeads, fetchEnrollments, pauseEnrollment, resumeEnrollment, cancelEnrollment, skipEnrollmentStep,
-  fetchOutreachQueue, fetchQueueStats, markQueueItemSent, dismissQueueItem,
+  fetchOutreachQueue, fetchQueueStats, markQueueItemSent, markQueueItemReplied, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
-  setEnrollmentAutoSend,
+  setEnrollmentAutoSend, flushOverdue,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -38,7 +38,7 @@ export function useUpdateSequence() {
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; name?: string; description?: string; steps?: any[]; auto_send?: boolean; auto_send_after_step?: number }) =>
+    mutationFn: ({ id, ...data }: { id: number; name?: string; description?: string; steps?: any[]; auto_send?: boolean; auto_send_after_step?: number; auto_flush_overdue?: boolean }) =>
       updateSequence(id, data),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['sequences'] });
@@ -172,6 +172,21 @@ export function useMarkSent() {
   });
 }
 
+export function useMarkReplied() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: markQueueItemReplied,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['queue'] });
+      qc.invalidateQueries({ queryKey: ['enrollments'] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+      toast('Marked as replied — sequences paused');
+    },
+  });
+}
+
 export function useDismissQueueItem() {
   const qc = useQueryClient();
   return useMutation({
@@ -245,5 +260,19 @@ export function useSetEnrollmentAutoSend() {
       qc.invalidateQueries({ queryKey: ['enrollments'] });
       toast('Follow-ups will auto-send on schedule');
     },
+  });
+}
+
+export function useFlushOverdue() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: flushOverdue,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['queue'] });
+      qc.invalidateQueries({ queryKey: ['queue-stats'] });
+      toast(`Flushed ${data.sent} overdue item(s)`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
   });
 }

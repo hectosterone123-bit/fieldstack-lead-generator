@@ -5,6 +5,7 @@ import { Finder } from './pages/Finder';
 import { Leads } from './pages/Leads';
 import { Templates } from './pages/Templates';
 import { Sequences } from './pages/Sequences';
+import { Campaigns } from './pages/Campaigns';
 import { SmsInbox } from './pages/SmsInbox';
 import { Settings } from './pages/Settings';
 
@@ -16,6 +17,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/finder" element={<Finder />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/sequences" element={<Sequences />} />
           <Route path="/sms" element={<SmsInbox />} />

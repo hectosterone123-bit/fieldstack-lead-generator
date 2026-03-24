@@ -39,7 +39,7 @@ function getAppUrl() {
   return process.env.APP_URL || getSetting('app_url');
 }
 
-async function sendEmail(to, subject, htmlBody) {
+async function sendEmail(to, subject, htmlBody, { leadId } = {}) {
   const client = getClient();
   if (!client) return { success: false, error: 'Resend API key not configured' };
 
@@ -60,8 +60,18 @@ async function sendEmail(to, subject, htmlBody) {
     text: body.replace(/<[^>]*>/g, ''),
   };
 
+  // Per-lead reply-to: reply+{lead_id}@domain.com for future inbound parsing
   const replyTo = getReplyTo();
-  if (replyTo) payload.reply_to = replyTo;
+  if (replyTo && leadId) {
+    const domain = replyTo.split('@')[1];
+    if (domain) {
+      payload.reply_to = `reply+${leadId}@${domain}`;
+    } else {
+      payload.reply_to = replyTo;
+    }
+  } else if (replyTo) {
+    payload.reply_to = replyTo;
+  }
 
   try {
     const { data, error } = await client.emails.send(payload);

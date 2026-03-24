@@ -131,7 +131,7 @@ export function Templates() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold text-white">Outreach Templates</h1>
+            <h1 className="text-lg font-semibold text-zinc-100">Outreach Templates</h1>
             <p className="text-sm text-zinc-500 mt-1">Pre-built sequences for the Fieldstack outreach flow</p>
           </div>
           <button

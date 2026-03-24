@@ -1,15 +1,30 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/finder', icon: Search, label: 'Find Leads' },
-  { to: '/leads', icon: Users, label: 'Pipeline' },
-  { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
-  { to: '/templates', icon: FileText, label: 'Templates' },
-  { to: '/sequences', icon: Repeat, label: 'Sequences' },
-  { to: '/settings', icon: Settings, label: 'Settings' },
+const navGroups = [
+  {
+    items: [
+      { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/finder', icon: Search, label: 'Find Leads' },
+      { to: '/leads', icon: Users, label: 'Pipeline' },
+    ],
+  },
+  {
+    label: 'Outreach',
+    items: [
+      { to: '/campaigns', icon: Target, label: 'Campaigns' },
+      { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
+      { to: '/sequences', icon: Repeat, label: 'Sequences' },
+      { to: '/templates', icon: FileText, label: 'Templates' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { to: '/settings', icon: Settings, label: 'Settings' },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -30,33 +45,40 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        <p className="text-overline text-zinc-600 px-2 mb-2">Navigation</p>
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              cn(
-                'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150',
-                isActive
-                  ? 'bg-orange-500/10 text-orange-400 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.15)]'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03]',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {/* Active indicator bar */}
-                {isActive && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-[60%] bg-orange-500 rounded-r-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" />
-                )}
-                <Icon className="w-4 h-4 flex-shrink-0" />
-                <span className="font-medium">{label}</span>
-              </>
+      <nav className="flex-1 px-2 py-4 overflow-y-auto">
+        {navGroups.map((group, gi) => (
+          <div key={gi} className={gi > 0 ? 'mt-5' : ''}>
+            {group.label && (
+              <p className="text-overline text-zinc-700 px-3 mb-2">{group.label}</p>
             )}
-          </NavLink>
+            <div className="space-y-0.5">
+              {group.items.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/'}
+                  className={({ isActive }) =>
+                    cn(
+                      'relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150',
+                      isActive
+                        ? 'bg-orange-500/10 text-orange-400 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.15)]'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03]',
+                    )
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-[60%] bg-orange-500 rounded-r-full shadow-[0_0_8px_rgba(249,115,22,0.6)]" />
+                      )}
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span className="font-medium">{label}</span>
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
@@ -65,6 +87,7 @@ export function Sidebar() {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02]">
           <MapPin className="w-3 h-3 text-zinc-600 flex-shrink-0" />
           <span className="text-[10px] text-zinc-600 leading-tight">Powered by OpenStreetMap</span>
+          <span className="ml-auto text-[10px] text-zinc-700">v1.0</span>
         </div>
       </div>
     </aside>

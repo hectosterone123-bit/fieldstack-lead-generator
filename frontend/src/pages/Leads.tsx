@@ -60,11 +60,11 @@ export function Leads() {
   }
 
   return (
-    // h-[calc(100vh-3rem)] accounts for the 3rem (h-12) AppLayout top header
-    <div className="flex flex-col h-[calc(100vh-3rem)]">
+    // h-[calc(100vh-3.5rem)] accounts for the 3.5rem (h-14) AppLayout top header
+    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
       {/* Page header */}
       <div className="px-5 py-4 border-b border-white/[0.04] flex items-center justify-between flex-shrink-0">
-        <h1 className="text-zinc-100 font-semibold text-sm tracking-tight">Lead Pipeline</h1>
+        <h1 className="text-zinc-100 font-semibold text-base tracking-tight">Lead Pipeline</h1>
         <div className="flex items-center gap-2.5">
           {/* View toggle */}
           <div className="flex items-center bg-zinc-800/60 border border-white/[0.06] rounded-lg p-0.5">

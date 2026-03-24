@@ -12,7 +12,7 @@ const CHANNEL_OPTIONS: { value: TemplateChannel; label: string; icon: React.Elem
 
 interface Props {
   sequence?: Sequence | null;
-  onSave: (data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean; auto_send_after_step?: number }) => void;
+  onSave: (data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean; auto_send_after_step?: number; auto_flush_overdue?: boolean }) => void;
   onCancel: () => void;
   saving?: boolean;
 }
@@ -23,6 +23,9 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   const [autoSendMode, setAutoSendMode] = useState<string>(
     sequence?.auto_send ? 'all' :
     sequence?.auto_send_after_step ? String(sequence.auto_send_after_step) : '0'
+  );
+  const [autoFlushOverdue, setAutoFlushOverdue] = useState<boolean>(
+    !!(sequence?.auto_flush_overdue)
   );
   const [steps, setSteps] = useState<SequenceStep[]>(
     sequence?.steps?.length ? sequence.steps : [
@@ -40,6 +43,7 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
         sequence.auto_send ? 'all' :
         sequence.auto_send_after_step ? String(sequence.auto_send_after_step) : '0'
       );
+      setAutoFlushOverdue(!!(sequence.auto_flush_overdue));
       setSteps(sequence.steps?.length ? sequence.steps : [{ order: 1, delay_days: 0, channel: 'email', template_id: 0, label: 'Step 1' }]);
     }
   }, [sequence]);
@@ -81,6 +85,7 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
       steps,
       auto_send: autoSendMode === 'all',
       auto_send_after_step: autoSendMode !== '0' && autoSendMode !== 'all' ? parseInt(autoSendMode) : 0,
+      auto_flush_overdue: autoFlushOverdue,
     });
   }
 
@@ -131,6 +136,31 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
             <option value="3">Auto after step 3</option>
             <option value="all">Auto (all steps)</option>
           </select>
+        </div>
+
+        {/* Auto-flush overdue toggle */}
+        <div className="px-3 py-2.5 rounded-lg bg-zinc-800/50 border border-white/[0.04]">
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <p className="text-sm text-zinc-200">Auto-flush overdue steps</p>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Email/SMS steps past due date send automatically. Loom and call steps stay manual.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAutoFlushOverdue(v => !v)}
+              className={cn(
+                'relative w-9 h-5 rounded-full transition-colors shrink-0 ml-3',
+                autoFlushOverdue ? 'bg-orange-500' : 'bg-zinc-700'
+              )}
+            >
+              <span className={cn(
+                'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform',
+                autoFlushOverdue ? 'translate-x-4' : 'translate-x-0'
+              )} />
+            </button>
+          </label>
         </div>
       </div>
 

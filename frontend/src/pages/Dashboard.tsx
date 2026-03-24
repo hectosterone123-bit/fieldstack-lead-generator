@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
-  Download, Sparkles, ChevronRight, Database, Send, Zap, UserX,
+  Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -35,6 +35,7 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
+  email_replied: Reply,
 };
 
 const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
@@ -47,6 +48,7 @@ const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
+  email_replied: 'text-emerald-400',
 };
 
 export function Dashboard() {
@@ -62,13 +64,14 @@ export function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="p-6 max-w-5xl">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
+      <div className="p-6 max-w-6xl">
+        <div className="h-10 w-48 bg-zinc-900 rounded-lg animate-pulse mb-6" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-3">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-28 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
           ))}
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-28 bg-zinc-900 rounded-xl border border-white/[0.06] animate-pulse" />
           ))}
@@ -95,9 +98,25 @@ export function Dashboard() {
   }
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6 max-w-6xl">
+      {/* Page header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-lg font-semibold text-zinc-100">Dashboard</h1>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          </p>
+        </div>
+        <Link
+          to="/finder"
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium text-sm rounded-lg transition-colors glow-orange"
+        >
+          <Search className="w-4 h-4" /> Find Leads
+        </Link>
+      </div>
+
       {/* KPI Cards — Row 1: Lead Gen Health */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-3">
         {/* Leads Found This Week — hero card */}
         <div className="relative overflow-hidden bg-gradient-to-br from-orange-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
           <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-orange-500/10 blur-2xl pointer-events-none" />
@@ -180,8 +199,8 @@ export function Dashboard() {
       </div>
 
       {/* KPI Cards — Row 2: Pipeline */}
-      <p className="text-overline text-zinc-700 mb-3">Pipeline</p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <p className="text-overline text-zinc-500 mt-2 mb-3">Pipeline</p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
         {/* Pipeline Value */}
         <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
           <div className="flex items-start justify-between mb-4">
@@ -236,8 +255,8 @@ export function Dashboard() {
       </div>
 
       {/* KPI Cards — Row 3: Revenue */}
-      <p className="text-overline text-zinc-700 mb-3">Revenue</p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <p className="text-overline text-zinc-500 mt-2 mb-3">Revenue</p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
         <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
           <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
           <div className="flex items-start justify-between mb-4">
@@ -524,7 +543,7 @@ export function Dashboard() {
 
       {/* Quick action CTA when no leads */}
       {(stats?.total_leads ?? 0) === 0 && (
-        <div className="mt-6 bg-orange-950/30 border border-orange-800/40 rounded-xl p-6 text-center">
+        <div className="mt-6 bg-orange-950/30 border border-orange-800/40 rounded-xl p-8 text-center">
           <div className="w-14 h-14 rounded-2xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center mx-auto mb-4">
             <Flame className="w-7 h-7 text-orange-400" />
           </div>
@@ -534,7 +553,7 @@ export function Dashboard() {
           </p>
           <Link
             to="/finder"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium text-sm rounded-lg transition-colors shadow-[0_0_20px_-6px_rgba(249,115,22,0.6)] hover:shadow-[0_0_24px_-4px_rgba(249,115,22,0.8)]"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-500 hover:bg-orange-400 text-white font-medium text-sm rounded-lg transition-colors glow-orange"
           >
             <Search className="w-4 h-4" /> Start Finding Leads
             <ChevronRight className="w-4 h-4" />

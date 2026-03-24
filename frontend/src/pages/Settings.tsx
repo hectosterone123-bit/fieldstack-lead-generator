@@ -27,6 +27,9 @@ export function Settings() {
   const [replyToEmail, setReplyToEmail] = useState('');
   const [defaultSequenceId, setDefaultSequenceId] = useState('');
   const [digestEmail, setDigestEmail] = useState('');
+  const [alertPhone, setAlertPhone] = useState('');
+  const [dailySendLimit, setDailySendLimit] = useState('20');
+  const [warmupStartDate, setWarmupStartDate] = useState('');
 
   const { data: sequences } = useQuery({
     queryKey: ['sequences'],
@@ -45,6 +48,9 @@ export function Settings() {
       setReplyToEmail(settings.reply_to_email || '');
       setDefaultSequenceId(settings.default_sequence_id || '');
       setDigestEmail(settings.digest_email || '');
+      setAlertPhone(settings.alert_phone || '');
+      setDailySendLimit(settings.daily_send_limit || '20');
+      setWarmupStartDate(settings.warmup_start_date || '');
     }
   }, [settings]);
 
@@ -74,6 +80,9 @@ export function Settings() {
       { key: 'review_request_enabled', value: reviewEnabled ? 'true' : 'false' },
       { key: 'default_sequence_id', value: defaultSequenceId },
       { key: 'digest_email', value: digestEmail },
+      { key: 'alert_phone', value: alertPhone },
+      { key: 'daily_send_limit', value: dailySendLimit },
+      { key: 'warmup_start_date', value: warmupStartDate },
     ]);
   }
 
@@ -223,6 +232,64 @@ export function Settings() {
               />
               <p className="text-[10px] text-zinc-600 mt-1">
                 7 AM daily: how many Loom videos are due + overnight send stats.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Hot Lead Alert Phone</label>
+              <input
+                type="tel"
+                value={alertPhone}
+                onChange={e => setAlertPhone(e.target.value)}
+                placeholder="+15125551234"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Get an SMS when a prospect opens your email 2+ times.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Daily Email Limit</label>
+              <input
+                type="number"
+                min={1}
+                max={500}
+                value={dailySendLimit}
+                onChange={e => setDailySendLimit(e.target.value)}
+                placeholder="20"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Max emails sent per day across all sequences. Start low (5-20) on a new domain.
+              </p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-zinc-400">Domain Warmup</label>
+                <button
+                  type="button"
+                  onClick={() => setWarmupStartDate(warmupStartDate ? '' : new Date().toISOString().split('T')[0])}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                    warmupStartDate ? 'bg-orange-500' : 'bg-zinc-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      warmupStartDate ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                    }`}
+                  />
+                </button>
+              </div>
+              {warmupStartDate && (() => {
+                const dayNum = Math.floor((Date.now() - new Date(warmupStartDate).getTime()) / 86400000) + 1;
+                const effectiveLimit = dayNum <= 3 ? 5 : dayNum <= 7 ? 15 : dayNum <= 14 ? 30 : dayNum <= 21 ? 50 : parseInt(dailySendLimit) || 50;
+                return (
+                  <p className="text-xs text-orange-400 mb-1">
+                    Day {dayNum} of warmup — sending up to {effectiveLimit} emails/day
+                  </p>
+                );
+              })()}
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Auto-ramps sending volume: 5/day → 15 → 30 → 50 over 3 weeks.
               </p>
             </div>
           </div>

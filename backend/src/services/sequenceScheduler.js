@@ -7,12 +7,40 @@ const { recomputeHeatScore } = require('./heatScoreService');
 
 const MAX_SENDS_PER_TICK = 20;
 
+function getWarmupLimit(startDate) {
+  const dayNum = Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1;
+  if (dayNum <= 3) return 5;
+  if (dayNum <= 7) return 15;
+  if (dayNum <= 14) return 30;
+  if (dayNum <= 21) return 50;
+  return Infinity;
+}
+
+function getRemainingBudget() {
+  const limitSetting = db.get("SELECT value FROM settings WHERE key = 'daily_send_limit'");
+  const warmupDate = db.get("SELECT value FROM settings WHERE key = 'warmup_start_date'");
+
+  let dailyLimit = parseInt(limitSetting?.value) || 50;
+
+  if (warmupDate?.value) {
+    const warmupLimit = getWarmupLimit(warmupDate.value);
+    dailyLimit = Math.min(dailyLimit, warmupLimit);
+  }
+
+  const sent = db.get("SELECT COUNT(*) as count FROM activities WHERE type = 'email_sent' AND created_at >= date('now')");
+  const remaining = Math.max(0, dailyLimit - (sent?.count || 0));
+  return { remaining, dailyLimit, sentToday: sent?.count || 0 };
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 function startSequenceScheduler() {
   // Run every 15 minutes during Central business hours (13-22 UTC = 8am-5pm CDT / 7am-4pm CST)
   cron.schedule('*/15 13-22 * * 1-5', async () => {
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
+      await autoFlushOverdueItems();
       await sendScheduledEmails();
       logPendingCount();
     } catch (err) {
@@ -75,18 +103,23 @@ async function autoSendDueItems() {
       AND (s.auto_send = 1 OR ls.auto_send = 1
            OR (s.auto_send_after_step > 0 AND ls.current_step > s.auto_send_after_step))
       AND (l.unsubscribed_at IS NULL)
+      AND (l.email_invalid_at IS NULL)
   `);
 
   if (enrollments.length === 0) return;
+
+  let { remaining } = getRemainingBudget();
+  if (remaining <= 0) { console.log('[scheduler] daily send limit reached, skipping auto-send'); return; }
 
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
   let sent = 0;
   let failed = 0;
+  const tickLimit = Math.min(MAX_SENDS_PER_TICK, remaining);
 
   for (const enrollment of enrollments) {
-    if (sent >= MAX_SENDS_PER_TICK) break;
+    if (sent >= tickLimit) break;
 
     let steps;
     try { steps = JSON.parse(enrollment.sequence_steps); } catch { continue; }
@@ -109,9 +142,12 @@ async function autoSendDueItems() {
         if (!enrollment.email) { failed++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
 
+        // Jitter: random 0-10 min delay to spread sends
+        await sleep(Math.floor(Math.random() * 10 * 60 * 1000));
+
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
-        const result = await emailService.sendEmail(enrollment.email, subject, body);
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
 
         if (!result.success) {
           console.error(`[Scheduler] Email failed for enrollment ${enrollment.id}: ${result.error}`);
@@ -192,6 +228,151 @@ async function autoSendDueItems() {
   }
 }
 
+async function autoFlushOverdueItems() {
+  // Auto-send overdue items from sequences with auto_flush_overdue=1
+  // These are items that would normally sit in the manual queue
+  const enrollments = db.all(`
+    SELECT ls.*, s.steps as sequence_steps, s.name as sequence_name,
+           s.auto_send, s.auto_send_after_step,
+           l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
+           l.city, l.state, l.service_type, l.status as lead_status,
+           l.has_website, l.website_live, l.rating, l.review_count,
+           l.contact_count, l.estimated_value, l.website
+    FROM lead_sequences ls
+    JOIN sequences s ON ls.sequence_id = s.id
+    JOIN leads l ON ls.lead_id = l.id
+    WHERE ls.status = 'active'
+      AND s.auto_flush_overdue = 1
+      AND (s.auto_send IS NULL OR s.auto_send = 0)
+      AND (ls.auto_send IS NULL OR ls.auto_send = 0)
+      AND (s.auto_send_after_step IS NULL OR s.auto_send_after_step = 0
+           OR ls.current_step <= s.auto_send_after_step)
+      AND (l.unsubscribed_at IS NULL)
+      AND (l.email_invalid_at IS NULL)
+  `);
+
+  if (enrollments.length === 0) return;
+
+  let { remaining } = getRemainingBudget();
+  if (remaining <= 0) { console.log('[scheduler] daily send limit reached, skipping auto-flush'); return; }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let sent = 0;
+  let failed = 0;
+  const tickLimit = Math.min(MAX_SENDS_PER_TICK, remaining);
+
+  for (const enrollment of enrollments) {
+    if (sent >= tickLimit) break;
+
+    let steps;
+    try { steps = JSON.parse(enrollment.sequence_steps); } catch { continue; }
+
+    const step = steps.find(s => s.order === enrollment.current_step);
+    if (!step) continue;
+
+    // Only auto-flush email and sms channels — loom/call stay manual
+    if (step.channel !== 'email' && step.channel !== 'sms') continue;
+
+    const enrolledAt = new Date(enrollment.enrolled_at);
+    const dueDate = new Date(enrolledAt);
+    dueDate.setDate(dueDate.getDate() + step.delay_days);
+    dueDate.setHours(0, 0, 0, 0);
+
+    if (dueDate > now) continue; // not overdue yet
+
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+    if (!template) continue;
+
+    try {
+      if (step.channel === 'email') {
+        if (!enrollment.email) { failed++; continue; }
+        if (!emailService.isConfigured()) { failed++; continue; }
+
+        // Jitter: random 0-10 min delay to spread sends
+        await sleep(Math.floor(Math.random() * 10 * 60 * 1000));
+
+        const subject = renderTemplate(template.subject, enrollment);
+        const body = renderTemplate(template.body, enrollment);
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
+
+        if (!result.success) {
+          console.error(`[Scheduler] Flush email failed for enrollment ${enrollment.id}: ${result.error}`);
+          failed++;
+          continue;
+        }
+
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`,
+           JSON.stringify({ resend_message_id: result.messageId })]
+        );
+      } else if (step.channel === 'sms') {
+        if (!enrollment.phone) { failed++; continue; }
+        if (!smsService.isConfigured()) { failed++; continue; }
+
+        const body = renderTemplate(template.body, enrollment);
+        const result = await smsService.sendSms(enrollment.phone, body);
+
+        if (!result.success) {
+          console.error(`[Scheduler] Flush SMS failed for enrollment ${enrollment.id}: ${result.error}`);
+          failed++;
+          continue;
+        }
+
+        db.run(
+          `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+           VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
+          [enrollment.lead_id, process.env.TWILIO_PHONE_NUMBER, smsService.normalizePhone(enrollment.phone), body, result.sid, result.status]
+        );
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid })]
+        );
+      }
+
+      // Update lead contact tracking
+      db.run(
+        'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [enrollment.lead_id]
+      );
+
+      // Recompute heat score
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+      if (lead) {
+        const newScore = recomputeHeatScore(lead);
+        if (newScore !== lead.heat_score) {
+          db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, enrollment.lead_id]);
+        }
+      }
+
+      // Advance enrollment
+      const nextStep = enrollment.current_step + 1;
+      if (nextStep > steps.length) {
+        db.run(
+          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          [nextStep, enrollment.id]
+        );
+      } else {
+        db.run(
+          'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [nextStep, enrollment.id]
+        );
+      }
+
+      sent++;
+    } catch (err) {
+      console.error(`[Scheduler] Flush error for enrollment ${enrollment.id}:`, err.message);
+      failed++;
+    }
+  }
+
+  if (sent > 0 || failed > 0) {
+    console.log(`[Scheduler] Auto-flush overdue: ${sent} sent, ${failed} failed`);
+  }
+}
+
 async function sendScheduledEmails() {
   if (!emailService.isConfigured()) return;
 
@@ -214,7 +395,7 @@ async function sendScheduledEmails() {
 
       const subject = renderTemplate(row.template_subject || row.template_name, lead);
       const body = renderTemplate(row.template_body, lead);
-      const result = await emailService.sendEmail(lead.email, subject, body);
+      const result = await emailService.sendEmail(lead.email, subject, body, { leadId: lead.id });
 
       if (result.success) {
         db.run(`UPDATE scheduled_emails SET sent_at = CURRENT_TIMESTAMP WHERE id = ?`, [row.id]);
@@ -323,4 +504,115 @@ function logPendingCount() {
   }
 }
 
-module.exports = { startSequenceScheduler };
+// On-demand flush: sends all overdue email/SMS items from manual queues right now
+async function flushOverdueNow() {
+  const enrollments = db.all(`
+    SELECT ls.*, s.steps as sequence_steps, s.name as sequence_name,
+           l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
+           l.city, l.state, l.service_type, l.status as lead_status,
+           l.has_website, l.website_live, l.rating, l.review_count,
+           l.contact_count, l.estimated_value, l.website
+    FROM lead_sequences ls
+    JOIN sequences s ON ls.sequence_id = s.id
+    JOIN leads l ON ls.lead_id = l.id
+    WHERE ls.status = 'active'
+      AND (s.auto_send IS NULL OR s.auto_send = 0)
+      AND (ls.auto_send IS NULL OR ls.auto_send = 0)
+      AND (l.unsubscribed_at IS NULL)
+      AND (l.email_invalid_at IS NULL)
+  `);
+
+  if (enrollments.length === 0) return { sent: 0, failed: 0, skipped: 0 };
+
+  let { remaining } = getRemainingBudget();
+  if (remaining <= 0) return { sent: 0, failed: 0, skipped: 0, limitReached: true };
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const tickLimit = Math.min(MAX_SENDS_PER_TICK, remaining);
+
+  for (const enrollment of enrollments) {
+    if (sent >= tickLimit) break;
+
+    let steps;
+    try { steps = JSON.parse(enrollment.sequence_steps); } catch { continue; }
+
+    const step = steps.find(s => s.order === enrollment.current_step);
+    if (!step) continue;
+
+    if (step.channel !== 'email' && step.channel !== 'sms') { skipped++; continue; }
+
+    const enrolledAt = new Date(enrollment.enrolled_at);
+    const dueDate = new Date(enrolledAt);
+    dueDate.setDate(dueDate.getDate() + step.delay_days);
+    dueDate.setHours(0, 0, 0, 0);
+
+    if (dueDate > now) { skipped++; continue; }
+
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+    if (!template) { skipped++; continue; }
+
+    try {
+      if (step.channel === 'email') {
+        if (!enrollment.email || !emailService.isConfigured()) { failed++; continue; }
+        const subject = renderTemplate(template.subject, enrollment);
+        const body = renderTemplate(template.body, enrollment);
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
+        if (!result.success) { failed++; continue; }
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `On-demand flush: ${enrollment.sequence_name}`,
+           JSON.stringify({ resend_message_id: result.messageId })]
+        );
+      } else if (step.channel === 'sms') {
+        if (!enrollment.phone || !smsService.isConfigured()) { failed++; continue; }
+        const body = renderTemplate(template.body, enrollment);
+        const result = await smsService.sendSms(enrollment.phone, body);
+        if (!result.success) { failed++; continue; }
+        db.run(
+          `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+           VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
+          [enrollment.lead_id, process.env.TWILIO_PHONE_NUMBER, smsService.normalizePhone(enrollment.phone), body, result.sid, result.status]
+        );
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `On-demand flush: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid })]
+        );
+      }
+
+      db.run(
+        'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [enrollment.lead_id]
+      );
+
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+      if (lead) {
+        const newScore = recomputeHeatScore(lead);
+        if (newScore !== lead.heat_score) {
+          db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, enrollment.lead_id]);
+        }
+      }
+
+      const nextStep = enrollment.current_step + 1;
+      if (nextStep > steps.length) {
+        db.run("UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [nextStep, enrollment.id]);
+      } else {
+        db.run('UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStep, enrollment.id]);
+      }
+
+      sent++;
+    } catch (err) {
+      console.error(`[FlushNow] Error for enrollment ${enrollment.id}:`, err.message);
+      failed++;
+    }
+  }
+
+  console.log(`[FlushNow] ${sent} sent, ${failed} failed, ${skipped} skipped`);
+  return { sent, failed, skipped };
+}
+
+module.exports = { startSequenceScheduler, flushOverdueNow, getRemainingBudget };

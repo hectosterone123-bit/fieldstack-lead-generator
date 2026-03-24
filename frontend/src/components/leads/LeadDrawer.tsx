@@ -3,7 +3,7 @@ import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
-  FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock,
+  FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
@@ -38,6 +38,7 @@ const ACTIVITY_ICONS: Record<string, React.ElementType> = {
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
+  email_replied: Reply,
 };
 
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -49,6 +50,7 @@ const ACTIVITY_COLORS: Record<string, string> = {
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
+  email_replied: 'text-emerald-400',
 };
 
 function getInitials(name: string): string {
