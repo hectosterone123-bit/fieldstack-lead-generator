@@ -268,4 +268,39 @@ router.post('/import', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /scrape-emails — bulk scrape websites for emails
+router.post('/scrape-emails', async (req, res) => {
+  try {
+    const { urls } = req.body;
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ success: false, error: 'urls array is required' });
+    }
+
+    const { scrapeWebsite } = require('../services/scrapeService');
+    const CONCURRENCY = 5;
+    const results = [];
+
+    for (let i = 0; i < urls.length; i += CONCURRENCY) {
+      const batch = urls.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (url) => {
+          try {
+            const data = await scrapeWebsite(url);
+            return { url, emails: data.emails || [], team_names: data.team_names || [] };
+          } catch {
+            return { url, emails: [], team_names: [] };
+          }
+        })
+      );
+      for (const r of batchResults) {
+        results.push(r.status === 'fulfilled' ? r.value : { url: batch[0], emails: [], team_names: [] });
+      }
+    }
+
+    res.json({ success: true, data: results });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

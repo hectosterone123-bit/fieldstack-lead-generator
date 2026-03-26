@@ -294,6 +294,54 @@ async function initDb() {
   // Migration: fix loom link placeholders + improve copy across steps 2-7
   migrateTemplatesV3();
 
+  // Migration: add cold call sales scripts (Sandler, Challenger, etc.)
+  migrateColdCallScripts();
+
+  // Migration: smart re-queue settings + requeue_count column
+  try { db.run('ALTER TABLE leads ADD COLUMN requeue_count INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('requeue_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('requeue_delay_days', '30')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('requeue_sequence_id', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('requeue_max_times', '2')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('cockpit_monthly_goal', '5')"); } catch(e) {}
+
+  // Migration: AI Cold Caller (VAPI) tables + settings
+  db.run(`CREATE TABLE IF NOT EXISTS calls (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id          INTEGER NOT NULL,
+    template_id      INTEGER,
+    vapi_call_id     TEXT UNIQUE,
+    status           TEXT NOT NULL DEFAULT 'queued',
+    duration_seconds INTEGER,
+    outcome          TEXT,
+    transcript       TEXT,
+    summary          TEXT,
+    recording_url    TEXT,
+    started_at       DATETIME,
+    ended_at         DATETIME,
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+  )`);
+  db.run('CREATE INDEX IF NOT EXISTS idx_calls_lead_id ON calls(lead_id)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_calls_vapi_call_id ON calls(vapi_call_id)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status)');
+
+  db.run(`CREATE TABLE IF NOT EXISTS call_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id     INTEGER NOT NULL,
+    template_id INTEGER NOT NULL,
+    position    INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+  )`);
+
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_phone_number_id', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_voice_id', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_fallback_phone', '')"); } catch(e) {}
+  try { db.run('ALTER TABLE calls ADD COLUMN monitor_listen_url TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE calls ADD COLUMN monitor_control_url TEXT'); } catch(e) {}
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 
@@ -302,6 +350,9 @@ async function initDb() {
 
   // Migration: seed cold outreach templates + sequence
   seedColdOutreachSequence();
+
+  // Migration: seed 5-step auto outreach sequence
+  seedAutoOutreachSequence();
 
   saveDb();
   return db;
@@ -904,6 +955,242 @@ Interested?
 Fieldstack`);
 }
 
+function migrateColdCallScripts() {
+  const existing = get("SELECT id FROM templates WHERE name = 'Cold Call — The Lost Lead' AND is_default = 1 LIMIT 1");
+  if (existing) return;
+  console.log('[DB] Adding cold call sales scripts...');
+
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)";
+  const templates = getColdCallScriptTemplates();
+  templates.forEach(t => db.run(stmt, [t.name, t.step_order, t.body]));
+}
+
+function getColdCallScriptTemplates() {
+  return [
+    {
+      name: 'Cold Call — Objection Handling & Pre-Call Checklist',
+      step_order: 0,
+      body: `OBJECTION HANDLING — MASTER REFERENCE CARD
+
+"I'm not interested"
+→ "Totally fair — most guys say that before they see it. What if I just send you a 2-min video and you decide from there?"
+
+"Send me an email"
+→ "For sure. Quick question so I send the right thing — are you getting website leads right now, or is it mostly referrals?"
+
+"I'm busy"
+→ "I know you are, that's literally why this exists. What's a better time — before 8 AM or after 5?"
+
+"How much?"
+→ "Depends on volume, but the guarantee is the real answer — 5 booked quotes or you don't pay. Worth seeing how it works?"
+
+"I already have something for that"
+→ "Nice — what are you using? (listen) Got it. Does it respond to leads at 10 PM on a Saturday?"
+
+"Is this AI? I don't trust that"
+→ "That's the most common thing I hear. Then I show them a screenshot of an actual conversation and they can't tell it's not a person. Can I send you one?"
+
+"We're good on leads"
+→ "Good to hear. So you're responding to every single one within 5 minutes? Because that's the bar — anything slower and homeowners move on."
+
+"I need to think about it"
+→ "For sure. Real quick though — how many leads came in this week you didn't get back to same day? That's the money sitting on the table."
+
+---
+
+PRE-CALL CHECKLIST
+
+1. Look up their website. Do they have a contact form? → "I saw your website, you've got a form... what happens when someone fills it out?"
+2. Check Google reviews. 50+ reviews and 4.8 rating = busy and probably missing leads. 5 reviews = needs more leads.
+3. Note their trade and city. Use it in the opener. "{service_type} contractors in {city}" hits different than "contractors."
+4. Have your calendar open. When they say yes, book it immediately. Don't say "I'll send you a link." Say "How's Thursday at 4?"
+5. Set a number goal, not a time goal. "I'm making 15 calls" beats "I'm calling for an hour."
+
+---
+
+VOICEMAIL SCRIPT (15 seconds max):
+"Hey {first_name}, Hector here, quick message for you — I'll shoot you an email right now."
+
+Then immediately email:
+Subject: Just tried calling you
+"Hey {first_name}, just left you a quick voicemail. I help {service_type} contractors stop losing website leads. Got a 2-min video if you're curious. No pressure."
+
+---
+
+MINDSET:
+• They need you more than you need them. A $15K job lost because nobody texted back — that's real money they bleed every week.
+• Rejection is data. Track which objection you hear most and adjust.
+• Call in batches. 10-15 calls per block. First 3 are warmup. Stride hits at call 5.
+• Stand up when you call. Your voice changes — more energy, more confidence.`,
+    },
+    {
+      name: 'Cold Call — The Lost Lead',
+      step_order: 1,
+      body: `GOAL: Book a 10-minute demo by making them feel the pain of lost leads.
+
+OPENING:
+"Hey {first_name}, this is {sender_name}. I know you're probably on a job site so I'll be quick — do you have 30 seconds?"
+
+HOOK:
+"I work with {service_type} contractors here in Texas, and the number one thing I hear is website leads come in but nobody can get back to them fast enough. By the time you call back, they already hired someone else. Sound familiar?"
+
+PITCH:
+"We built an AI assistant called Sam that responds to your leads within 60 seconds — texts them, qualifies them, books the estimate. Works 24/7, even when you're on a roof or under a house."
+
+CLOSE:
+"Here's the deal — if Sam doesn't book you 5 qualified quotes this month, you don't pay. Can I show you how it works? Takes 10 minutes."
+
+OBJECTION HANDLING:
+
+"I'm too busy right now"
+→ "Totally get it. That's exactly why this exists — you're too busy to chase leads. When's a good 10 minutes this week? I can call you after 5."
+
+"I already have a girl/guy answering phones"
+→ "That's great for business hours. What happens at 9 PM on a Tuesday when someone fills out your website form? Sam catches those."
+
+"How much is it?"
+→ "Depends on volume, but the guarantee is what matters — 5 booked quotes or you don't pay. Worth a 10-minute look?"`,
+    },
+    {
+      name: 'Cold Call — The Competitor Proof',
+      step_order: 1,
+      body: `GOAL: Book a demo by proving this already works for someone nearby.
+
+OPENING:
+"Hey {first_name}, {sender_name} here. Quick question before I take any of your time — are you getting leads from your website right now?"
+
+IF YES:
+"How fast are you getting back to them? Be honest."
+
+IF NO:
+"Got it. That's a different problem." [End call or pivot.]
+
+HOOK (after they admit slow response):
+"Yeah, that's what I hear from every contractor I talk to. You're running crews, you're on job sites, and some homeowner fills out a form at 2 PM and doesn't hear back until the next morning. By then they called three other guys."
+
+PITCH:
+"I set up AI assistants for contractors that text leads back in under a minute. It sounds like a real person — asks what they need, qualifies the job, books the estimate on your calendar. One of my guys in {city} went from closing 2 jobs a month off web leads to 7, just because he stopped ghosting people."
+
+CLOSE:
+"If it doesn't book you 5 qualified quotes this month, you pay nothing. Can I walk you through it Wednesday or Thursday?"
+
+OBJECTION HANDLING:
+
+"Sounds like a robot"
+→ "That's the first thing everyone says. I'll send you a screenshot of an actual conversation Sam had. People don't know. They think it's a receptionist."
+
+"I don't trust AI with my customers"
+→ "You're not handing over your business — Sam just handles the first 2-3 texts to qualify and book. You take over from there. Think of it like a really fast receptionist who never misses a message."`,
+    },
+    {
+      name: 'Cold Call — The Math Problem',
+      step_order: 1,
+      body: `GOAL: Make them calculate their own lost revenue out loud.
+
+OPENING:
+"Hey {first_name}, this is {sender_name}. I'll be real quick — I help contractors stop losing money on leads they already paid for. Got 30 seconds?"
+
+HOOK:
+"Let me ask you something. What's your average job worth?"
+[Let them answer — $5K, $8K, $15K, etc.]
+
+"OK so if you're losing even 2-3 leads a month because you couldn't text back fast enough, that's [do the math out loud] — $15K, $20K just walking out the door. And you already paid for those leads."
+
+PITCH:
+"I built a system that responds to every single lead in under a minute. Day, night, weekends. It texts them like a real person, asks what they need, and books them on your calendar. You just show up to the estimate."
+
+CLOSE:
+"And I guarantee it — if we don't book you at least 5 qualified estimates this month, you pay zero. Can I show you how it works? 10 minutes, that's it."
+
+OBJECTION HANDLING:
+
+"I get my leads from referrals, not the website"
+→ "Referrals are great, but they don't scale. What happens when you want to add a crew or hit a slow month? This makes your website leads actually convert instead of sitting there."
+
+"Let me think about it"
+→ "For sure. But real quick — how many leads came in this week that you didn't get back to same-day? That's the money we're talking about. Let me send you a 2-minute video and we can talk Friday."`,
+    },
+    {
+      name: 'Cold Call — The Permission Opener',
+      step_order: 1,
+      body: `GOAL: Lowest-pressure opener. Use when nervous — you're asking them to tell you to stop.
+
+OPENING:
+"Hey {first_name}, this is {sender_name}. I help {service_type} contractors with lead follow-up. I have no idea if this is relevant to you — can I take 30 seconds to explain and you tell me if it's worth talking about?"
+
+[They almost always say "yeah go ahead" because you gave them the exit.]
+
+PITCH:
+"When contractors I work with get a website lead, it usually sits in their inbox for a few hours because they're on a job. By then the homeowner called someone else. I built a system that responds in under a minute and books the estimate for you. Is that a problem you're running into, or are you pretty good on response time?"
+
+IF YES, IT'S A PROBLEM:
+"When's a good 10 minutes this week to show you how it works?"
+
+IF NO:
+"Fair enough. If it ever becomes one, I'm easy to find. Have a good one."
+
+WHY THIS WORKS:
+You gave them an exit. Most people won't take it — but knowing they can makes them listen. This is the Sandler "upfront contract." The key is you're not selling, you're asking if they have a problem. If they do, you offer to show the solution. If they don't, you leave gracefully.
+
+IF THEY SAY "WHO ARE YOU WITH?":
+"My name's {sender_name}, I'm local here in Texas. I work with {service_type} contractors on their lead follow-up. I literally just had a 30-second question — is now OK or should I call back?"`,
+    },
+    {
+      name: 'Cold Call — The Teaching Call',
+      step_order: 1,
+      body: `GOAL: Lead with data that reframes their problem as urgent. Position yourself as expert, not salesperson.
+
+OPENING:
+"Hey {first_name}, {sender_name} here — quick question. Do you know what your average response time is on website leads?"
+
+[They'll say "uh, couple hours maybe" or "I don't know."]
+
+TEACH:
+"Yeah, most contractors tell me the same thing. Here's the thing though — there's a Harvard study that says if you respond to a lead within 5 minutes, you're 100x more likely to actually get them on the phone than if you wait 30 minutes. After an hour, it's basically over. And most contractors are on a roof or under a house, so it's not like you can text back instantly."
+
+[Let them react. They'll usually say "yeah, that's true."]
+
+PITCH:
+"That's why I built this — it's an AI that responds to your leads in under 60 seconds. Sounds like a real person, qualifies the job, books the estimate. And if it doesn't book you 5 qualified quotes this month, you don't pay anything. Can I show you how it works? Takes 10 minutes."
+
+WHY THIS WORKS:
+You led with data, not a pitch. You taught them something (100x stat) that makes their problem feel urgent. Now your product is the obvious solution to a problem they just learned is worse than they thought.
+
+IF THEY SEEM SKEPTICAL:
+"Look, I get it. I'm not asking you to buy anything right now. I'm asking for 10 minutes to show you what your leads look like from the homeowner's side. If it's not useful, I'll never call again."`,
+    },
+    {
+      name: 'Cold Call — The Neighbor Script',
+      step_order: 1,
+      body: `GOAL: Trigger competitive instinct by referencing a nearby contractor.
+
+OPENING:
+"Hey {first_name}, this is {sender_name}. I work with a {service_type} contractor over in {city} — they were losing a ton of website leads because they couldn't respond fast enough. Sounded familiar so I figured I'd reach out to you. Got 30 seconds?"
+
+[If "who are you with?" or "yeah go ahead":]
+
+PITCH:
+"I built an AI lead responder specifically for {service_type} contractors. It texts back every website lead in under a minute, qualifies the job, books the estimate. My guy in {city} went from maybe 2 jobs a month off his website to 7, just by not ghosting people. Are you getting website leads right now?"
+
+IF YES:
+"How fast are you typically getting back to them?"
+
+IF NO:
+"Got it — that's a different conversation. Appreciate your time."
+
+AFTER THEY ADMIT IT'S SLOW:
+"Yeah, that's the gap. Can I show you how the system works? 10 minutes, and if it's not relevant I'll never call again."
+
+WHY THIS WORKS:
+"A contractor near you" triggers competitive instinct. They don't want to be the one losing business while their competitor figured it out. The "2 jobs to 7" number is concrete and believable.
+
+IF THEY'RE CLEARLY ANNOYED:
+"Hey I can tell I caught you at a bad time. I'll email you what this is about — takes 10 seconds to read. Sound fair?"
+Then email: Subject "Just tried calling you" with a 3-line pitch and booking link.`,
+    },
+  ];
+}
+
 function getNewLoomScripts() {
   return [
     {
@@ -1218,6 +1505,16 @@ AFTER THE CALL:
 
 This data becomes the centerpiece of Step 2.`,
     },
+
+    // --- Cold Call Sales Scripts (from getColdCallScriptTemplates) ---
+    ...getColdCallScriptTemplates().map(t => ({
+      name: t.name,
+      channel: 'call_script',
+      status_stage: 'new',
+      step_order: t.step_order,
+      subject: null,
+      body: t.body,
+    })),
 
     // ═══════════════════════════════════════════════════════════════════════
     // STEP 2: PROBLEM REVEAL — LOOM VIDEO TEASE (status: contacted)
@@ -2085,6 +2382,123 @@ FieldStack`,
     [
       'Cold Outreach (3-Step)',
       'Top-of-funnel cold email sequence: hook → proof → breakup. Auto-sends all 3 steps. Replies feed into Loom workflow.',
+      JSON.stringify(steps),
+    ]
+  );
+}
+
+function seedAutoOutreachSequence() {
+  const existing = get("SELECT id FROM sequences WHERE name = 'Auto Outreach (5-Step)'");
+  if (existing) return;
+
+  console.log('[DB] Seeding 5-step auto outreach templates + sequence...');
+
+  const t1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Auto Outreach — Hook',
+      'email',
+      'new',
+      1,
+      'question for {business_name}',
+      `Hey {first_name},
+
+Quick question — when a homeowner fills out your contact form at 7pm on a Tuesday, how fast does {business_name} follow up?
+
+Most {service_type} contractors take 12–47 hours. By that time, the homeowner has called two other companies.
+
+I built an AI that texts back every new lead within 90 seconds, books the appointment, and works 24/7 while you're on job sites. Worth a 15-minute call this week?
+
+— {sender_name}
+FieldStack`,
+    ]
+  );
+
+  const t2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Auto Outreach — Proof',
+      'email',
+      'new',
+      2,
+      'Re: question for {business_name}',
+      `{first_name}, following up —
+
+One of my {service_type} clients in Texas was leaving roughly $8,000/month on the table from unanswered web leads. We turned on the AI response system and they booked 6 extra jobs the first month — same website traffic, zero extra ad spend.
+
+Happy to show you what that looks like for {business_name}: {booking_link}
+
+— {sender_name}`,
+    ]
+  );
+
+  const t3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Auto Outreach — Audit',
+      'email',
+      'new',
+      3,
+      'free lead-response audit for {business_name}',
+      `{first_name}, different ask this time —
+
+I'll run a free lead-response audit for {business_name}. I'll test your contact form, measure the response time, and show you exactly how many leads you're likely losing per week.
+
+Takes 10 minutes to set up, no pitch. Want me to run it?
+
+— {sender_name}
+FieldStack`,
+    ]
+  );
+
+  const t4 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Auto Outreach — Scarcity',
+      'email',
+      'new',
+      4,
+      'one spot left in {city}',
+      `{first_name}, I keep my contractor count small by market so results stay strong.
+
+I have one open spot for {city} this month. If {business_name} wants it before another {service_type} company grabs it: {booking_link}
+
+If not, no hard feelings.
+
+— {sender_name}`,
+    ]
+  );
+
+  const t5 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    [
+      'Auto Outreach — Breakup',
+      'email',
+      'new',
+      5,
+      'closing your file',
+      `{first_name}, I'll stop reaching out after this.
+
+If {business_name} ever decides to stop losing jobs to slow response times, I'm one reply away.
+
+— {sender_name}
+FieldStack`,
+    ]
+  );
+
+  const steps = [
+    { order: 1, delay_days: 0, channel: 'email', template_id: Number(t1.lastInsertRowid), label: 'Hook' },
+    { order: 2, delay_days: 3, channel: 'email', template_id: Number(t2.lastInsertRowid), label: 'Social Proof' },
+    { order: 3, delay_days: 7, channel: 'email', template_id: Number(t3.lastInsertRowid), label: 'Free Audit' },
+    { order: 4, delay_days: 14, channel: 'email', template_id: Number(t4.lastInsertRowid), label: 'Scarcity' },
+    { order: 5, delay_days: 21, channel: 'email', template_id: Number(t5.lastInsertRowid), label: 'Breakup' },
+  ];
+
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue) VALUES (?, ?, ?, 1, 1, 0, 1)",
+    [
+      'Auto Outreach (5-Step)',
+      'Fully automated 5-email sequence: hook → proof → audit offer → scarcity → breakup. All steps auto-send over 21 days. No Loom or manual setup required.',
       JSON.stringify(steps),
     ]
   );

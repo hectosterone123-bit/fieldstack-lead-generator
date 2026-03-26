@@ -143,4 +143,94 @@ router.post('/email-inbound', (req, res) => {
   res.json({ ok: true, lead_id: leadId });
 });
 
+// POST /api/webhooks/vapi — VAPI call event webhooks
+router.post('/vapi', async (req, res) => {
+  const { message } = req.body || {};
+  if (!message) return res.json({ ok: true });
+
+  const vapiCallId = message.call?.id;
+
+  if (message.type === 'end-of-call-report') {
+    const callRecord = db.get('SELECT * FROM calls WHERE vapi_call_id = ?', [vapiCallId]);
+    if (!callRecord) return res.json({ ok: true });
+
+    const transcript = message.transcript || message.artifact?.transcript || null;
+    const summary = message.summary || message.artifact?.summary || null;
+    const recordingUrl = message.recordingUrl || message.artifact?.recordingUrl || null;
+    const duration = message.call?.duration || message.durationSeconds || null;
+
+    // Determine outcome from summary
+    let outcome = 'no_answer';
+    if (summary) {
+      const lower = summary.toLowerCase();
+      if (lower.includes('interested') || lower.includes('quote') || lower.includes('schedule') || lower.includes('appointment')) {
+        outcome = 'interested';
+      } else if (lower.includes('callback') || lower.includes('call back') || lower.includes('call me back')) {
+        outcome = 'callback_requested';
+      } else if (lower.includes('not interested') || lower.includes('no thanks') || lower.includes('don\'t call')) {
+        outcome = 'not_interested';
+      } else if (lower.includes('voicemail') || lower.includes('leave a message')) {
+        outcome = 'voicemail';
+      } else if (lower.includes('wrong number')) {
+        outcome = 'wrong_number';
+      } else if (lower.includes('transfer')) {
+        outcome = 'transferred';
+      } else {
+        outcome = 'not_interested';
+      }
+    }
+
+    db.run(
+      `UPDATE calls SET status = 'completed', duration_seconds = ?, outcome = ?,
+       transcript = ?, summary = ?, recording_url = ?, ended_at = CURRENT_TIMESTAMP
+       WHERE vapi_call_id = ?`,
+      [duration, outcome, typeof transcript === 'string' ? transcript : JSON.stringify(transcript), summary, recordingUrl, vapiCallId]
+    );
+
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, 'call_attempt', ?, ?, ?)`,
+      [
+        callRecord.lead_id,
+        `AI call — ${outcome.replace(/_/g, ' ')}`,
+        summary || 'AI cold call completed',
+        JSON.stringify({ vapi_call_id: vapiCallId, duration, outcome, recording_url: recordingUrl }),
+      ]
+    );
+
+    db.run(
+      `UPDATE leads SET contact_count = contact_count + 1,
+       last_contacted_at = CURRENT_TIMESTAMP,
+       first_contacted_at = COALESCE(first_contacted_at, CURRENT_TIMESTAMP),
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [callRecord.lead_id]
+    );
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [callRecord.lead_id]);
+    if (lead) {
+      const newScore = recomputeHeatScore(lead);
+      if (newScore !== lead.heat_score) {
+        db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, lead.id]);
+      }
+    }
+
+    // Auto-pause sequences if interested
+    if (outcome === 'interested' || outcome === 'callback_requested') {
+      db.run(
+        "UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
+        [callRecord.lead_id]
+      );
+    }
+  }
+
+  if (message.type === 'status-update') {
+    const status = message.status;
+    if (vapiCallId && status) {
+      const mapped = status === 'in-progress' ? 'in_progress' : status;
+      db.run('UPDATE calls SET status = ? WHERE vapi_call_id = ?', [mapped, vapiCallId]);
+    }
+  }
+
+  res.json({ ok: true });
+});
+
 module.exports = router;

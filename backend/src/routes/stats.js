@@ -111,6 +111,123 @@ router.get('/', (req, res, next) => {
       `SELECT COUNT(*) as count, COALESCE(SUM(proposal_amount), 0) as total FROM leads WHERE status = 'proposal_sent' AND proposal_amount IS NOT NULL`
     );
 
+    // Outreach performance summary
+    const total_emails_sent = db.get(
+      `SELECT COUNT(*) as count FROM activities WHERE type = 'email_sent'`
+    )?.count || 0;
+
+    const total_opens = db.get(
+      `SELECT COUNT(*) as count FROM leads WHERE email_opened_at IS NOT NULL`
+    )?.count || 0;
+
+    const total_replies = db.get(
+      `SELECT COUNT(*) as count FROM activities WHERE type = 'email_replied'`
+    )?.count || 0;
+
+    const active_enrollments = db.get(
+      `SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'active'`
+    )?.count || 0;
+
+    const completed_enrollments = db.get(
+      `SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'completed'`
+    )?.count || 0;
+
+    const outreach_summary = {
+      total_emails_sent,
+      total_opens,
+      total_replies,
+      open_rate: total_emails_sent > 0 ? Math.round((total_opens / total_emails_sent) * 100) : 0,
+      reply_rate: total_emails_sent > 0 ? Math.round((total_replies / total_emails_sent) * 100) : 0,
+      active_enrollments,
+      completed_enrollments,
+    };
+
+    // Per-step performance: parse sequence steps JSON, join with activities
+    let step_performance = [];
+    try {
+      const sequences_raw = db.all(`SELECT id, name, steps FROM sequences WHERE is_active = 1`);
+      for (const seq of sequences_raw) {
+        const steps = JSON.parse(seq.steps || '[]');
+        const stepStats = [];
+        for (const step of steps) {
+          const stepNum = step.order;
+          // Count sends for this step by matching activity title pattern "Step N" or step label
+          const sent = db.get(
+            `SELECT COUNT(*) as count FROM activities a
+             JOIN lead_sequences ls ON ls.lead_id = a.lead_id AND ls.sequence_id = ?
+             WHERE a.type = 'email_sent' AND a.title LIKE ?`,
+            [seq.id, `%Step ${stepNum}%`]
+          )?.count || 0;
+
+          const opened = db.get(
+            `SELECT COUNT(*) as count FROM leads l
+             JOIN lead_sequences ls ON ls.lead_id = l.id AND ls.sequence_id = ?
+             WHERE ls.current_step > ? AND l.email_opened_at IS NOT NULL`,
+            [seq.id, stepNum]
+          )?.count || 0;
+
+          const replied = db.get(
+            `SELECT COUNT(*) as count FROM activities a
+             JOIN lead_sequences ls ON ls.lead_id = a.lead_id AND ls.sequence_id = ?
+             WHERE a.type = 'email_replied' AND a.title LIKE ?`,
+            [seq.id, `%Step ${stepNum}%`]
+          )?.count || 0;
+
+          stepStats.push({
+            step: stepNum,
+            label: step.label || `Step ${stepNum}`,
+            channel: step.channel,
+            sent,
+            opened,
+            replied,
+            open_rate: sent > 0 ? Math.round((opened / sent) * 100) : 0,
+            reply_rate: sent > 0 ? Math.round((replied / sent) * 100) : 0,
+          });
+        }
+        step_performance.push({
+          sequence_id: seq.id,
+          sequence_name: seq.name,
+          steps: stepStats,
+        });
+      }
+    } catch (e) {
+      // step_performance stays empty if sequences table doesn't exist yet
+    }
+
+    // Re-queue eligible count
+    const requeue_settings = db.get("SELECT value FROM settings WHERE key = 'requeue_enabled'");
+    const requeue_delay = db.get("SELECT value FROM settings WHERE key = 'requeue_delay_days'");
+    const requeue_max = db.get("SELECT value FROM settings WHERE key = 'requeue_max_times'");
+    const rqEnabled = requeue_settings?.value === '1';
+    const rqDelay = parseInt(requeue_delay?.value) || 30;
+    const rqMax = parseInt(requeue_max?.value) || 2;
+
+    let requeue_eligible = 0;
+    try {
+      requeue_eligible = db.get(`
+        SELECT COUNT(DISTINCT l.id) as count FROM leads l
+        LEFT JOIN lead_sequences ls_active ON ls_active.lead_id = l.id AND ls_active.status IN ('active', 'paused')
+        WHERE ls_active.id IS NULL
+          AND (l.unsubscribed_at IS NULL OR l.unsubscribed_at = '')
+          AND l.status NOT IN ('lost', 'closed_won', 'booked')
+          AND COALESCE(l.requeue_count, 0) < ?
+          AND (
+            EXISTS (
+              SELECT 1 FROM lead_sequences ls2
+              WHERE ls2.lead_id = l.id AND ls2.status = 'completed'
+              AND ls2.completed_at < datetime('now', '-' || ? || ' days')
+            )
+            OR (
+              l.status IN ('contacted', 'qualified')
+              AND l.last_contacted_at IS NOT NULL
+              AND l.last_contacted_at < datetime('now', '-' || ? || ' days')
+            )
+          )
+      `, [rqMax, rqDelay, rqDelay])?.count || 0;
+    } catch (e) {
+      // requeue_count column may not exist yet
+    }
+
     const ghost_count = db.get(`
       SELECT COUNT(*) as count FROM leads
       WHERE status IN ('contacted', 'qualified')
@@ -157,6 +274,9 @@ router.get('/', (req, res, next) => {
         proposals_open_value: proposals_open?.total || 0,
         ghost_count,
         ghost_leads,
+        outreach_summary,
+        step_performance,
+        requeue_eligible,
       }
     });
   } catch (err) { next(err); }

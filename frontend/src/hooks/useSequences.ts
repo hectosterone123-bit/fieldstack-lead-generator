@@ -270,7 +270,7 @@ export function useFlushOverdue() {
     mutationFn: flushOverdue,
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['queue'] });
-      qc.invalidateQueries({ queryKey: ['queue-stats'] });
+      qc.invalidateQueries({ queryKey: ['queue', 'stats'] });
       toast(`Flushed ${data.sent} overdue item(s)`);
     },
     onError: (err: Error) => toast(err.message, 'error'),

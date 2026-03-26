@@ -542,6 +542,7 @@ router.post('/', (req, res, next) => {
     );
 
     const lead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
+    if (!lead) return res.status(500).json({ success: false, error: 'Failed to create lead' });
 
     // Auto-enroll into default sequence
     const defaultSeqId = getDefaultSequenceId();

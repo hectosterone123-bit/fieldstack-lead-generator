@@ -8,6 +8,9 @@ import { Sequences } from './pages/Sequences';
 import { Campaigns } from './pages/Campaigns';
 import { SmsInbox } from './pages/SmsInbox';
 import { Settings } from './pages/Settings';
+import { Scraper } from './pages/Scraper';
+import { Cockpit } from './pages/Cockpit';
+import { Caller } from './pages/Caller';
 
 function App() {
   return (
@@ -15,12 +18,15 @@ function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/cockpit" element={<Cockpit />} />
           <Route path="/finder" element={<Finder />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/templates" element={<Templates />} />
           <Route path="/sequences" element={<Sequences />} />
           <Route path="/sms" element={<SmsInbox />} />
+          <Route path="/scraper" element={<Scraper />} />
+          <Route path="/caller" element={<Caller />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { searchBusinesses, importLeads, batchSearchBusinesses, type FinderSearch } from '../lib/api';
+import { searchBusinesses, importLeads, batchSearchBusinesses, scrapeFinderEmails, type FinderSearch } from '../lib/api';
 import type { FinderResult, ImportOptions, BatchSearchParams } from '../types';
 
 export function useFinderSearch() {
@@ -11,6 +11,12 @@ export function useFinderSearch() {
 export function useBatchSearch() {
   return useMutation({
     mutationFn: (params: BatchSearchParams) => batchSearchBusinesses(params),
+  });
+}
+
+export function useScrapeEmails() {
+  return useMutation({
+    mutationFn: (urls: string[]) => scrapeFinderEmails(urls),
   });
 }
 

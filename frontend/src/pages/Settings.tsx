@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -30,6 +30,13 @@ export function Settings() {
   const [alertPhone, setAlertPhone] = useState('');
   const [dailySendLimit, setDailySendLimit] = useState('20');
   const [warmupStartDate, setWarmupStartDate] = useState('');
+  const [requeueEnabled, setRequeueEnabled] = useState(false);
+  const [requeueDelayDays, setRequeueDelayDays] = useState('30');
+  const [requeueSequenceId, setRequeueSequenceId] = useState('');
+  const [requeueMaxTimes, setRequeueMaxTimes] = useState('2');
+  const [vapiPhoneNumberId, setVapiPhoneNumberId] = useState('');
+  const [vapiVoiceId, setVapiVoiceId] = useState('');
+  const [vapiFallbackPhone, setVapiFallbackPhone] = useState('');
 
   const { data: sequences } = useQuery({
     queryKey: ['sequences'],
@@ -51,6 +58,13 @@ export function Settings() {
       setAlertPhone(settings.alert_phone || '');
       setDailySendLimit(settings.daily_send_limit || '20');
       setWarmupStartDate(settings.warmup_start_date || '');
+      setRequeueEnabled(settings.requeue_enabled === '1');
+      setRequeueDelayDays(settings.requeue_delay_days || '30');
+      setRequeueSequenceId(settings.requeue_sequence_id || '');
+      setRequeueMaxTimes(settings.requeue_max_times || '2');
+      setVapiPhoneNumberId(settings.vapi_phone_number_id || '');
+      setVapiVoiceId(settings.vapi_voice_id || '');
+      setVapiFallbackPhone(settings.vapi_fallback_phone || '');
     }
   }, [settings]);
 
@@ -83,6 +97,13 @@ export function Settings() {
       { key: 'alert_phone', value: alertPhone },
       { key: 'daily_send_limit', value: dailySendLimit },
       { key: 'warmup_start_date', value: warmupStartDate },
+      { key: 'requeue_enabled', value: requeueEnabled ? '1' : '0' },
+      { key: 'requeue_delay_days', value: requeueDelayDays },
+      { key: 'requeue_sequence_id', value: requeueSequenceId },
+      { key: 'requeue_max_times', value: requeueMaxTimes },
+      { key: 'vapi_phone_number_id', value: vapiPhoneNumberId },
+      { key: 'vapi_voice_id', value: vapiVoiceId },
+      { key: 'vapi_fallback_phone', value: vapiFallbackPhone },
     ]);
   }
 
@@ -295,6 +316,78 @@ export function Settings() {
           </div>
         </div>
 
+        {/* Smart Re-Queue */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Repeat className="w-4 h-4 text-orange-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Smart Re-Queue</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRequeueEnabled(!requeueEnabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                requeueEnabled ? 'bg-orange-500' : 'bg-zinc-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                  requeueEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                }`}
+              />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">
+            Automatically re-enroll leads that completed a sequence or went silent after a configurable delay. Runs daily at 7am.
+          </p>
+          {requeueEnabled && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-zinc-400 mb-1 block">Re-engagement Sequence</label>
+                <div className="relative">
+                  <select
+                    value={requeueSequenceId}
+                    onChange={e => setRequeueSequenceId(e.target.value)}
+                    className="w-full appearance-none bg-zinc-800 border border-white/[0.06] rounded-lg pl-3 pr-8 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark] cursor-pointer"
+                  >
+                    <option value="">Select a sequence...</option>
+                    {sequences?.filter((s: any) => s.is_active).map((s: any) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Delay (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={requeueDelayDays}
+                    onChange={e => setRequeueDelayDays(e.target.value)}
+                    className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                  />
+                  <p className="text-[10px] text-zinc-600 mt-1">Days after last activity before re-queuing</p>
+                </div>
+                <div>
+                  <label className="text-xs text-zinc-400 mb-1 block">Max re-queues</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={requeueMaxTimes}
+                    onChange={e => setRequeueMaxTimes(e.target.value)}
+                    className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                  />
+                  <p className="text-[10px] text-zinc-600 mt-1">Max times a lead can be auto re-queued</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Review Request Automation */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center justify-between mb-3">
@@ -373,6 +466,45 @@ export function Settings() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* AI Cold Caller (VAPI) */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <PhoneOutgoing className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-sm font-medium text-zinc-200">AI Cold Caller</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">VAPI-powered AI voice agent for outbound calls. Set VAPI_API_KEY and VAPI_PUBLIC_KEY in your .env file.</p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">VAPI Phone Number ID</label>
+              <input
+                value={vapiPhoneNumberId}
+                onChange={e => setVapiPhoneNumberId(e.target.value)}
+                placeholder="e.g. abc123-def456..."
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">ElevenLabs Voice ID</label>
+              <input
+                value={vapiVoiceId}
+                onChange={e => setVapiVoiceId(e.target.value)}
+                placeholder="e.g. rachel, drew, or custom voice ID"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Fallback Phone (for transfers)</label>
+              <input
+                value={vapiFallbackPhone}
+                onChange={e => setVapiFallbackPhone(e.target.value)}
+                placeholder="e.g. +15125550123"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Your phone number — AI transfers here when you click "Jump In" or it can't handle the conversation</p>
+            </div>
+          </div>
         </div>
 
         {/* Save */}

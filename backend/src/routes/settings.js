@@ -8,6 +8,10 @@ router.get('/', (req, res, next) => {
     const rows = db.all('SELECT key, value FROM settings');
     const settings = {};
     rows.forEach(r => { settings[r.key] = r.value; });
+    // Expose VAPI public key from env (safe to send to frontend)
+    if (process.env.VAPI_PUBLIC_KEY) {
+      settings.vapi_public_key = process.env.VAPI_PUBLIC_KEY;
+    }
     res.json({ success: true, data: settings });
   } catch (err) { next(err); }
 });

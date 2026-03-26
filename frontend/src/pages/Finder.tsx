@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
-import { Search, MapPin, Globe, Phone, CheckSquare, Square, ExternalLink, Loader2, CheckCircle, Wrench, ChevronDown, Star, Zap, LayoutList, LayoutGrid, X, Sparkles, ListChecks } from 'lucide-react';
+import { Search, MapPin, Globe, Phone, CheckSquare, Square, ExternalLink, Loader2, CheckCircle, Wrench, ChevronDown, Star, Zap, LayoutList, LayoutGrid, X, Sparkles, ListChecks, Mail, Copy, Check } from 'lucide-react';
 import type { FinderResult, ImportOptions, Sequence } from '../types';
 import { SERVICE_LABELS } from '../types';
 import { HeatScore } from '../components/shared/HeatScore';
 import { cn } from '../lib/utils';
-import { useFinderSearch, useBatchSearch, useImportLeads } from '../hooks/useFinder';
+import { useFinderSearch, useBatchSearch, useImportLeads, useScrapeEmails } from '../hooks/useFinder';
 import { useSequences } from '../hooks/useSequences';
 import { EmptyState } from '../components/shared/EmptyState';
 import { useNavigate } from 'react-router-dom';
@@ -218,9 +218,13 @@ export function Finder() {
   const search = useFinderSearch();
   const batchSearch = useBatchSearch();
   const importLeads = useImportLeads();
+  const scrapeEmails = useScrapeEmails();
   const { data: sequences = [] } = useSequences();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const [scrapedEmails, setScrapedEmails] = useState<Record<string, string[]>>({});
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
   const activeStates = form.country === 'MX' ? MX_STATES : US_STATES;
   const activeBatchStates = batchCountry === 'MX' ? MX_STATES : US_STATES;
@@ -325,6 +329,36 @@ export function Finder() {
         },
       }
     );
+  }
+
+  function handleScrapeEmails() {
+    const urls = results
+      .filter(r => r.website && r.website_live)
+      .map(r => r.website!);
+    if (urls.length === 0) {
+      toast('No live websites to scrape', 'error');
+      return;
+    }
+    scrapeEmails.mutate(urls, {
+      onSuccess: (data) => {
+        const emailMap: Record<string, string[]> = {};
+        for (const item of data) {
+          if (item.emails.length > 0) {
+            emailMap[item.url] = item.emails;
+          }
+        }
+        setScrapedEmails(emailMap);
+        const found = Object.keys(emailMap).length;
+        toast(`Found emails on ${found} of ${urls.length} websites`);
+      },
+    });
+  }
+
+  function copyEmail(email: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    setTimeout(() => setCopiedEmail(null), 2000);
   }
 
   const filteredResults = useMemo(() =>
@@ -647,6 +681,14 @@ export function Finder() {
               </div>
 
               <div className="flex items-center gap-3">
+                <button
+                  onClick={handleScrapeEmails}
+                  disabled={scrapeEmails.isPending || results.filter(r => r.website && r.website_live).length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-white/[0.06] bg-zinc-800/60 text-zinc-400 hover:text-orange-400 hover:border-orange-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {scrapeEmails.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Mail className="w-3 h-3" />}
+                  {scrapeEmails.isPending ? 'Scraping...' : 'Scrape Emails'}
+                </button>
                 {imported && (
                   <div className="flex items-center gap-1.5 text-emerald-400 text-sm">
                     <CheckCircle className="w-4 h-4" /> Imported! Redirecting...
@@ -757,6 +799,18 @@ export function Finder() {
                           >
                             Maps <ExternalLink className="w-2.5 h-2.5" />
                           </a>
+                        )}
+                        {result.website && scrapedEmails[result.website]?.map(email => (
+                          <span key={email} className="flex items-center gap-1 text-xs text-orange-400">
+                            <Mail className="w-2.5 h-2.5" />
+                            <a href={`mailto:${email}`} onClick={e => e.stopPropagation()} className="hover:text-orange-300 transition-colors">{email}</a>
+                            <button onClick={e => copyEmail(email, e)} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+                              {copiedEmail === email ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5" />}
+                            </button>
+                          </span>
+                        ))}
+                        {result.website && scrapedEmails[result.website] === undefined && Object.keys(scrapedEmails).length > 0 && result.website_live && (
+                          <span className="text-[10px] text-zinc-600">No email found</span>
                         )}
                       </div>
                     </div>

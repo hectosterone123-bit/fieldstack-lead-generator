@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
-  Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply,
+  Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
+  ChevronDown,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -50,6 +52,131 @@ const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
   enrichment: 'text-amber-400',
   email_replied: 'text-emerald-400',
 };
+
+interface OutreachSummary {
+  total_emails_sent: number;
+  total_opens: number;
+  total_replies: number;
+  open_rate: number;
+  reply_rate: number;
+  active_enrollments: number;
+  completed_enrollments: number;
+}
+
+interface StepPerf {
+  step: number;
+  label: string;
+  channel: string;
+  sent: number;
+  opened: number;
+  replied: number;
+  open_rate: number;
+  reply_rate: number;
+}
+
+interface SeqPerf {
+  sequence_id: number;
+  sequence_name: string;
+  steps: StepPerf[];
+}
+
+function OutreachPerformance({ summary, stepPerformance, requeueEligible }: {
+  summary: OutreachSummary;
+  stepPerformance: SeqPerf[];
+  requeueEligible: number;
+}) {
+  const [expandedSeq, setExpandedSeq] = useState<number | null>(null);
+
+  const pills = [
+    { label: 'Emails Sent', value: summary.total_emails_sent, icon: Mail, color: 'text-violet-400', bg: 'bg-violet-500/10' },
+    { label: 'Open Rate', value: `${summary.open_rate}%`, icon: Eye, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+    { label: 'Reply Rate', value: `${summary.reply_rate}%`, icon: MessageCircle, color: summary.reply_rate >= 20 ? 'text-emerald-400' : summary.reply_rate >= 10 ? 'text-amber-400' : 'text-red-400', bg: summary.reply_rate >= 20 ? 'bg-emerald-500/10' : summary.reply_rate >= 10 ? 'bg-amber-500/10' : 'bg-red-500/10' },
+    { label: 'Active Sequences', value: summary.active_enrollments, icon: Repeat, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+  ];
+
+  return (
+    <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+        <BarChart3 className="w-4 h-4 text-orange-400" />
+        <h2 className="text-zinc-300 font-medium text-sm">Outreach Performance</h2>
+        {requeueEligible > 0 && (
+          <span className="ml-auto text-xs bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full font-medium">
+            {requeueEligible} eligible for re-queue
+          </span>
+        )}
+      </div>
+
+      {/* Mini KPI pills */}
+      <div className="grid grid-cols-4 gap-3 px-5 py-4">
+        {pills.map(p => (
+          <div key={p.label} className="flex items-center gap-2.5">
+            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0', p.bg)}>
+              <p.icon className={cn('w-3.5 h-3.5', p.color)} />
+            </div>
+            <div>
+              <p className="text-lg font-bold font-data text-white leading-none">{p.value}</p>
+              <p className="text-[10px] text-zinc-500 mt-0.5">{p.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-sequence step breakdown */}
+      {stepPerformance.length > 0 && (
+        <div className="border-t border-white/[0.04]">
+          {stepPerformance.map(seq => {
+            const isExpanded = expandedSeq === seq.sequence_id;
+            const totalSent = seq.steps.reduce((s, st) => s + st.sent, 0);
+            if (totalSent === 0) return null;
+            return (
+              <div key={seq.sequence_id}>
+                <button
+                  onClick={() => setExpandedSeq(isExpanded ? null : seq.sequence_id)}
+                  className="w-full flex items-center gap-2 px-5 py-3 text-left hover:bg-white/[0.02] transition-colors"
+                >
+                  <ChevronDown className={cn('w-3 h-3 text-zinc-500 transition-transform', isExpanded && 'rotate-180')} />
+                  <span className="text-xs font-medium text-zinc-300">{seq.sequence_name}</span>
+                  <span className="text-[10px] text-zinc-600 ml-auto">{totalSent} sent</span>
+                </button>
+                {isExpanded && (
+                  <div className="px-5 pb-4 space-y-2">
+                    {seq.steps.filter(s => s.sent > 0).map(step => (
+                      <div key={step.step} className="flex items-center gap-3">
+                        <span className="text-[10px] text-zinc-500 w-24 truncate flex-shrink-0">{step.label}</span>
+                        <div className="flex-1 flex items-center gap-2">
+                          {/* Open rate bar */}
+                          <div className="flex-1 h-1.5 bg-zinc-800/60 rounded-full overflow-hidden" title={`${step.open_rate}% open rate`}>
+                            <div className="h-full bg-emerald-500/60 rounded-full" style={{ width: `${step.open_rate}%` }} />
+                          </div>
+                          {/* Reply rate bar */}
+                          <div className="flex-1 h-1.5 bg-zinc-800/60 rounded-full overflow-hidden" title={`${step.reply_rate}% reply rate`}>
+                            <div className={cn(
+                              'h-full rounded-full',
+                              step.reply_rate >= 20 ? 'bg-emerald-500' : step.reply_rate >= 10 ? 'bg-amber-500' : 'bg-red-500/60',
+                            )} style={{ width: `${Math.min(step.reply_rate, 100)}%` }} />
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-zinc-600 font-data w-16 text-right">{step.sent} sent</span>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-4 pt-1">
+                      <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500/60" /> Open rate
+                      </span>
+                      <span className="flex items-center gap-1 text-[10px] text-zinc-600">
+                        <span className="w-2 h-2 rounded-full bg-amber-500" /> Reply rate
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Dashboard() {
   const { data: stats, isLoading } = useQuery({
@@ -308,6 +435,15 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Outreach Performance */}
+      {stats?.outreach_summary && stats.outreach_summary.total_emails_sent > 0 && (
+        <OutreachPerformance
+          summary={stats.outreach_summary}
+          stepPerformance={stats.step_performance || []}
+          requeueEligible={stats.requeue_eligible || 0}
+        />
+      )}
+
       {/* Today's Follow-ups */}
       {followups && (
         <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">
@@ -417,7 +553,7 @@ export function Dashboard() {
             <span className="text-xs text-zinc-600 ml-auto">contacted 7+ days ago, no reply</span>
           </div>
           <div className="divide-y divide-white/[0.03]">
-            {stats.ghost_leads.map(ghost => {
+            {(stats.ghost_leads || []).map(ghost => {
               const daysSince = Math.floor(
                 (Date.now() - new Date(ghost.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24)
               );
@@ -514,7 +650,7 @@ export function Dashboard() {
                 {/* Vertical timeline line */}
                 <div className="absolute left-[15px] top-4 bottom-0 w-px bg-gradient-to-b from-zinc-700 via-zinc-800 to-transparent" />
                 <div className="space-y-4">
-                  {stats.recent_activities.slice(0, 8).map(a => {
+                  {(stats.recent_activities || []).slice(0, 8).map(a => {
                     const ActivityIcon = ACTIVITY_ICONS[a.type as ActivityType] ?? RefreshCw;
                     const iconColor = ACTIVITY_ICON_COLORS[a.type as ActivityType] ?? 'text-zinc-400';
                     return (

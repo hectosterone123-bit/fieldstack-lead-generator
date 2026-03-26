@@ -194,6 +194,30 @@ export interface Stats {
     phone: string | null;
     service_type: ServiceType;
   }>;
+  outreach_summary: {
+    total_emails_sent: number;
+    total_opens: number;
+    total_replies: number;
+    open_rate: number;
+    reply_rate: number;
+    active_enrollments: number;
+    completed_enrollments: number;
+  };
+  step_performance: Array<{
+    sequence_id: number;
+    sequence_name: string;
+    steps: Array<{
+      step: number;
+      label: string;
+      channel: string;
+      sent: number;
+      opened: number;
+      replied: number;
+      open_rate: number;
+      reply_rate: number;
+    }>;
+  }>;
+  requeue_eligible: number;
 }
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -406,4 +430,42 @@ export interface ReviewStats {
   negative_count: number;
   google_reviews_directed: number;
   avg_rating: number;
+}
+
+// ─── AI Cold Caller ──────────────────────────────────────────────────────────
+
+export type CallStatus = 'queued' | 'ringing' | 'in_progress' | 'completed' | 'failed' | 'no_answer' | 'voicemail';
+export type CallOutcome = 'interested' | 'callback_requested' | 'not_interested' | 'no_answer' | 'voicemail' | 'wrong_number' | 'transferred';
+
+export interface Call {
+  id: number;
+  lead_id: number;
+  template_id: number | null;
+  vapi_call_id: string;
+  status: CallStatus;
+  duration_seconds: number | null;
+  outcome: CallOutcome | null;
+  transcript: string | null;
+  summary: string | null;
+  recording_url: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  business_name?: string;
+  phone?: string;
+  city?: string;
+  state?: string;
+  service_type?: string;
+}
+
+export interface CallQueueItem {
+  id: number;
+  lead_id: number;
+  template_id: number;
+  position: number;
+  status: string;
+  business_name?: string;
+  phone?: string;
+  city?: string;
+  state?: string;
 }

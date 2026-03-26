@@ -1,18 +1,21 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 const navGroups = [
   {
     items: [
+      { to: '/cockpit', icon: Crosshair, label: 'Cockpit' },
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/finder', icon: Search, label: 'Find Leads' },
+      { to: '/scraper', icon: Mail, label: 'Email Scraper' },
       { to: '/leads', icon: Users, label: 'Pipeline' },
     ],
   },
   {
     label: 'Outreach',
     items: [
+      { to: '/caller', icon: PhoneOutgoing, label: 'AI Caller' },
       { to: '/campaigns', icon: Target, label: 'Campaigns' },
       { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
       { to: '/sequences', icon: Repeat, label: 'Sequences' },

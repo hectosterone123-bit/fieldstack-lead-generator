@@ -3,7 +3,7 @@ import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
-  FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply,
+  FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply, Bot,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
@@ -916,6 +916,15 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               >
                 <PhoneCall className="w-4 h-4" />
               </button>
+              {lead.phone && (
+                <a
+                  href={`/caller?lead=${lead.id}`}
+                  className="px-3 py-2.5 rounded-lg text-sm font-medium bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/20 transition-colors flex items-center gap-2"
+                  title="Start AI Call"
+                >
+                  <Bot className="w-4 h-4" />
+                </a>
+              )}
               {lead.website && (
                 <a
                   href={lead.website}

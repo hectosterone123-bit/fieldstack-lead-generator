@@ -8,6 +8,7 @@ import { cn } from '../../lib/utils';
 
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Dashboard',
+  '/cockpit': 'Daily Cockpit',
   '/finder': 'Find Leads',
   '/leads': 'Pipeline',
   '/campaigns': 'Campaigns',

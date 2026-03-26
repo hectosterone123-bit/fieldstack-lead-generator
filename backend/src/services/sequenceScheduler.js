@@ -48,10 +48,11 @@ function startSequenceScheduler() {
     }
   });
 
-  // Daily digest at 7am
+  // Daily digest + re-queue at 7am
   cron.schedule('0 7 * * *', async () => {
     try {
       await sendDailyDigest();
+      autoRequeueStaleLeads();
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
     }
@@ -95,7 +96,7 @@ async function autoSendDueItems() {
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website
+           l.contact_count, l.estimated_value, l.website, l.loom_url
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -142,8 +143,8 @@ async function autoSendDueItems() {
         if (!enrollment.email) { failed++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
 
-        // Jitter: random 0-10 min delay to spread sends
-        await sleep(Math.floor(Math.random() * 10 * 60 * 1000));
+        // Jitter: random 30-90s delay between sends to avoid bulk-send fingerprint
+        await sleep(30000 + Math.floor(Math.random() * 60000));
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
@@ -237,7 +238,7 @@ async function autoFlushOverdueItems() {
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website
+           l.contact_count, l.estimated_value, l.website, l.loom_url
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -290,8 +291,8 @@ async function autoFlushOverdueItems() {
         if (!enrollment.email) { failed++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
 
-        // Jitter: random 0-10 min delay to spread sends
-        await sleep(Math.floor(Math.random() * 10 * 60 * 1000));
+        // Jitter: random 30-90s delay between sends to avoid bulk-send fingerprint
+        await sleep(30000 + Math.floor(Math.random() * 60000));
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
@@ -382,6 +383,7 @@ async function sendScheduledEmails() {
      JOIN leads l ON l.id = se.lead_id
      JOIN templates t ON t.id = se.template_id
      WHERE se.scheduled_at <= datetime('now') AND se.sent_at IS NULL AND se.cancelled_at IS NULL
+       AND (l.unsubscribed_at IS NULL OR l.unsubscribed_at = '')
      LIMIT 20`
   );
 
@@ -430,7 +432,7 @@ async function sendDailyDigest() {
 
   // Loom videos due today (step 2 = manual Loom step)
   const loomDue = db.all(`
-    SELECT ls.id, l.business_name, l.city, l.state, s.steps as sequence_steps, ls.current_step
+    SELECT ls.id, ls.enrolled_at, l.business_name, l.city, l.state, s.steps as sequence_steps, ls.current_step
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -511,7 +513,7 @@ async function flushOverdueNow() {
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website
+           l.contact_count, l.estimated_value, l.website, l.loom_url
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -613,6 +615,81 @@ async function flushOverdueNow() {
 
   console.log(`[FlushNow] ${sent} sent, ${failed} failed, ${skipped} skipped`);
   return { sent, failed, skipped };
+}
+
+function autoRequeueStaleLeads() {
+  try {
+    const enabled = db.get("SELECT value FROM settings WHERE key = 'requeue_enabled'");
+    if (enabled?.value !== '1') return;
+
+    const delayDays = parseInt(db.get("SELECT value FROM settings WHERE key = 'requeue_delay_days'")?.value) || 30;
+    const seqId = parseInt(db.get("SELECT value FROM settings WHERE key = 'requeue_sequence_id'")?.value);
+    const maxTimes = parseInt(db.get("SELECT value FROM settings WHERE key = 'requeue_max_times'")?.value) || 2;
+
+    if (!seqId) {
+      console.log('[ReQueue] No re-queue sequence configured, skipping');
+      return;
+    }
+
+    // Check sequence exists and is active
+    const seq = db.get('SELECT id, steps FROM sequences WHERE id = ? AND is_active = 1', [seqId]);
+    if (!seq) {
+      console.log('[ReQueue] Configured sequence not found or inactive');
+      return;
+    }
+
+    // Find eligible leads: completed sequence or ghost, no active enrollment, not maxed out
+    const eligible = db.all(`
+      SELECT DISTINCT l.id, l.business_name FROM leads l
+      LEFT JOIN lead_sequences ls_active ON ls_active.lead_id = l.id AND ls_active.status IN ('active', 'paused')
+      WHERE ls_active.id IS NULL
+        AND (l.unsubscribed_at IS NULL OR l.unsubscribed_at = '')
+        AND l.status NOT IN ('lost', 'closed_won', 'booked')
+        AND COALESCE(l.requeue_count, 0) < ?
+        AND (
+          EXISTS (
+            SELECT 1 FROM lead_sequences ls2
+            WHERE ls2.lead_id = l.id AND ls2.status = 'completed'
+            AND ls2.completed_at < datetime('now', '-' || ? || ' days')
+          )
+          OR (
+            l.status IN ('contacted', 'qualified')
+            AND l.last_contacted_at IS NOT NULL
+            AND l.last_contacted_at < datetime('now', '-' || ? || ' days')
+          )
+        )
+    `, [maxTimes, delayDays, delayDays]);
+
+    if (eligible.length === 0) {
+      console.log('[ReQueue] No leads eligible for re-queue');
+      return;
+    }
+
+    let enrolled = 0;
+    for (const lead of eligible) {
+      try {
+        db.run(
+          `INSERT INTO lead_sequences (lead_id, sequence_id, current_step, status) VALUES (?, ?, 1, 'active')`,
+          [lead.id, seqId]
+        );
+        db.run(
+          `UPDATE leads SET requeue_count = COALESCE(requeue_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [lead.id]
+        );
+        db.run(
+          `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Auto re-queued', ?)`,
+          [lead.id, `Re-enrolled into sequence after ${delayDays} days of inactivity`]
+        );
+        enrolled++;
+      } catch (e) {
+        console.error(`[ReQueue] Failed to re-queue lead ${lead.id}:`, e.message);
+      }
+    }
+
+    console.log(`[ReQueue] Re-queued ${enrolled} of ${eligible.length} eligible leads into sequence #${seqId}`);
+  } catch (err) {
+    console.error('[ReQueue] Error:', err.message);
+  }
 }
 
 module.exports = { startSequenceScheduler, flushOverdueNow, getRemainingBudget };

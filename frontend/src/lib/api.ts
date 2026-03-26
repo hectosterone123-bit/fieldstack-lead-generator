@@ -1,4 +1,4 @@
-import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ReviewStats, ImportOptions, BatchSearchParams, BatchSearchMeta } from '../types';
+import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ReviewStats, ImportOptions, BatchSearchParams, BatchSearchMeta, Call, CallQueueItem } from '../types';
 
 const BASE = '/api';
 
@@ -417,6 +417,142 @@ export async function fetchReviewSettings(): Promise<ReviewRequestSettings> {
 
 export async function fetchReviewStats(): Promise<ReviewStats> {
   return request('/sms/review-stats');
+}
+
+// ─── Scraper ──────────────────────────────────────────────────────────────────
+
+export interface ScrapeResult {
+  emails: string[];
+  team_names: string[];
+  services: string[];
+  tech_stack: string[];
+  has_contact_form: boolean;
+  scraped_at: string;
+}
+
+export async function scrapeUrl(url: string): Promise<ScrapeResult> {
+  return request('/scraper/scrape', { method: 'POST', body: JSON.stringify({ url }) });
+}
+
+export async function scrapeFinderEmails(urls: string[]): Promise<{ url: string; emails: string[]; team_names: string[] }[]> {
+  return request('/finder/scrape-emails', { method: 'POST', body: JSON.stringify({ urls }) });
+}
+
+// ─── Cockpit ──────────────────────────────────────────────────────────────────
+
+export interface CockpitMetrics {
+  calls_today: number;
+  emails_today: number;
+  sms_today: number;
+  leads_added_today: number;
+  demos_booked_today: number;
+  demos_this_month: number;
+  followups_completed_today: number;
+  status_changes_today: number;
+  enriched_today: number;
+  followups_due: number;
+  followups_overdue: number;
+}
+
+export interface CockpitTargets {
+  calls: number;
+  emails: number;
+  demos: number;
+  leads: number;
+  monthly_goal: number;
+}
+
+export interface HotLead {
+  id: number;
+  business_name: string;
+  phone: string;
+  city: string | null;
+  state: string | null;
+  service_type: string;
+  heat_score: number;
+  status: string;
+  last_contacted_at: string | null;
+}
+
+export interface CockpitAlerts {
+  hot_replies: Array<{
+    id: number;
+    created_at: string;
+    lead_id: number;
+    business_name: string;
+    phone: string | null;
+    status: string;
+  }>;
+  upcoming_demos: Array<{
+    id: number;
+    business_name: string;
+    phone: string | null;
+    city: string | null;
+    service_type: string;
+    next_followup_at: string;
+  }>;
+}
+
+export async function fetchCockpitToday(): Promise<CockpitMetrics> {
+  return request('/cockpit/today');
+}
+
+export async function fetchCockpitTargets(): Promise<CockpitTargets> {
+  return request('/cockpit/targets');
+}
+
+export async function updateCockpitTargets(targets: Partial<CockpitTargets>): Promise<CockpitTargets> {
+  return request('/cockpit/targets', { method: 'PUT', body: JSON.stringify(targets) });
+}
+
+export async function fetchCockpitHotLeads(): Promise<HotLead[]> {
+  return request('/cockpit/hot-leads');
+}
+
+export async function fetchCockpitAlerts(): Promise<CockpitAlerts> {
+  return request('/cockpit/alerts');
+}
+
+// ─── AI Cold Caller ──────────────────────────────────────────────────────────
+
+export async function startAiCall(lead_id: number, template_id: number): Promise<{ id: number; vapi_call_id: string; status: string }> {
+  return request('/calls/start', { method: 'POST', body: JSON.stringify({ lead_id, template_id }) });
+}
+
+export async function fetchActiveCalls(): Promise<Call[]> {
+  return request('/calls/active');
+}
+
+export async function fetchCallHistory(): Promise<Call[]> {
+  return request('/calls/history');
+}
+
+export async function fetchCall(callId: number): Promise<Call> {
+  return request(`/calls/${callId}`);
+}
+
+export async function endAiCall(callId: number): Promise<{ id: number; status: string }> {
+  return request(`/calls/${callId}/end`, { method: 'POST' });
+}
+
+export async function setCallQueue(lead_ids: number[], template_id: number): Promise<{ queued: number }> {
+  return request('/calls/queue', { method: 'POST', body: JSON.stringify({ lead_ids, template_id }) });
+}
+
+export async function fetchCallQueue(): Promise<CallQueueItem[]> {
+  return request('/calls/queue');
+}
+
+export async function callNextInQueue(): Promise<{ id: number; vapi_call_id: string; status: string } | null> {
+  return request('/calls/queue/next', { method: 'POST' });
+}
+
+export async function clearCallQueue(): Promise<void> {
+  return request('/calls/queue', { method: 'DELETE' });
+}
+
+export async function takeoverCall(callId: number): Promise<{ message: string; contractor_phone: string | null; contractor_name: string | null; control_available: boolean }> {
+  return request(`/calls/${callId}/takeover`, { method: 'POST' });
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

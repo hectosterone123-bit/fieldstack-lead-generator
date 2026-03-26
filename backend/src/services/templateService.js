@@ -234,11 +234,6 @@ function renderTemplate(text, lead) {
       if (key === 'estimated_value') return `$${Number(value).toLocaleString()}`;
       return String(value);
     }
-    if (key === 'loom_url') {
-      const url = lead.loom_url;
-      if (url) return url;
-      return mapping ? mapping.fallback : '[LOOM LINK]';
-    }
     if (key === 'sender_name') {
       return getSettingValue('sender_name') || 'FieldStack';
     }

@@ -17,6 +17,9 @@ if (!process.env.RESEND_API_KEY) {
 if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_PHONE_NUMBER) {
   console.warn('[Warning] Twilio not configured — SMS sending will be unavailable. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER in .env');
 }
+if (!process.env.VAPI_API_KEY) {
+  console.warn('[Warning] VAPI not configured — AI Cold Caller will be unavailable. Set VAPI_API_KEY in .env');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -38,9 +41,13 @@ async function start() {
   const smsRouter = require('./routes/sms');
   const settingsRouter = require('./routes/settings');
   const webhooksRouter = require('./routes/webhooks');
+  const scraperRouter = require('./routes/scraper');
+  const cockpitRouter = require('./routes/cockpit');
+  const callsRouter = require('./routes/calls');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
+  app.use('/api/scraper', scraperRouter);
   app.use('/api/stats', statsRouter);
   app.use('/api/templates', templatesRouter);
   app.use('/api/chat', chatRouter);
@@ -48,6 +55,8 @@ async function start() {
   app.use('/api/sms', smsRouter);
   app.use('/api/settings', settingsRouter);
   app.use('/api/webhooks', webhooksRouter);
+  app.use('/api/cockpit', cockpitRouter);
+  app.use('/api/calls', callsRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
