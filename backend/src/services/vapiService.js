@@ -44,7 +44,7 @@ async function startCall(lead, renderedScript) {
     },
   };
 
-  if (settings.voiceId) {
+  if (settings.voiceId && settings.voiceId.length > 10) {
     assistantConfig.voice = {
       provider: '11labs',
       voiceId: settings.voiceId,
