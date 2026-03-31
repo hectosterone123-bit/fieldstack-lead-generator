@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchActiveCalls, fetchCallHistory, fetchCallQueue,
-  startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue,
+  startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
+  bulkUpdateCallOutcomes,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -86,7 +87,13 @@ export function useCallNextInQueue() {
         toast('Queue is empty', 'error');
       }
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err: Error) => {
+      if (err.message === 'outside_window') {
+        toast('Outside calling window — try 8–10 AM or 4–6 PM local time', 'error');
+      } else {
+        toast(err.message, 'error');
+      }
+    },
   });
 }
 
@@ -98,6 +105,34 @@ export function useClearCallQueue() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['call-queue'] });
       toast('Queue cleared');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useUpdateCallOutcome() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ callId, outcome }: { callId: number; outcome: string }) =>
+      updateCallOutcome(callId, outcome),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['call-history'] });
+      toast('Outcome updated');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useBulkUpdateCallOutcomes() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ callIds, outcome }: { callIds: number[]; outcome: string }) =>
+      bulkUpdateCallOutcomes(callIds, outcome),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['call-history'] });
+      toast(`${data.updated} calls updated`);
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });

@@ -58,7 +58,62 @@ function startSequenceScheduler() {
     }
   });
 
-  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 8am-5pm CT + daily digest 7am)');
+  // Campaign mode — auto-dial from queue every 5 min during business hours
+  cron.schedule('*/5 13-22 * * 1-5', async () => {
+    try {
+      const enabled = db.get("SELECT value FROM settings WHERE key = 'vapi_campaign_enabled'")?.value;
+      if (enabled !== '1') return;
+      // No overlap — skip if a call is already active
+      const active = db.get("SELECT COUNT(*) as c FROM calls WHERE status IN ('queued','ringing','in_progress')");
+      if (active?.c > 0) return;
+      // Daily cap check
+      const cap = parseInt(db.get("SELECT value FROM settings WHERE key = 'vapi_campaign_calls_per_day'")?.value) || 0;
+      if (cap > 0) {
+        const today = db.get("SELECT COUNT(*) as c FROM calls WHERE date(created_at) = date('now')");
+        if ((today?.c || 0) >= cap) return;
+      }
+      // Check queue has items
+      const next = db.get("SELECT id FROM call_queue WHERE status = 'pending' AND (scheduled_for IS NULL OR scheduled_for <= datetime('now')) LIMIT 1");
+      if (!next) return;
+      // Trigger via internal HTTP call — reuses all existing queue/next logic
+      const fetch = require('node-fetch');
+      await fetch('http://localhost:' + (process.env.PORT || 3001) + '/api/calls/queue/next', { method: 'POST' });
+      console.log('[Campaign] Auto-dialed next in queue');
+    } catch (err) {
+      console.error('[Campaign] Error:', err.message);
+    }
+  });
+
+  // Callback alarm — every 5 minutes, alert on imminent callbacks
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const alertPhone = db.get("SELECT value FROM settings WHERE key = 'alert_phone'")?.value;
+      if (!alertPhone || !smsService.isConfigured()) return;
+
+      const now = new Date();
+      const windowEnd = new Date(now.getTime() + 15 * 60 * 1000);
+      const upcoming = db.all(
+        `SELECT id, business_name, phone, next_followup_at FROM leads
+         WHERE next_followup_at BETWEEN ? AND ?
+         AND callback_alerted_at IS NULL
+         AND next_followup_at IS NOT NULL`,
+        [now.toISOString(), windowEnd.toISOString()]
+      );
+
+      for (const lead of upcoming) {
+        const timeStr = new Date(lead.next_followup_at).toLocaleTimeString('en-US', {
+          hour: 'numeric', minute: '2-digit', hour12: true,
+        });
+        const msg = `Callback due at ${timeStr}: ${lead.business_name} — ${lead.phone || 'no phone'}`;
+        await smsService.sendSms(alertPhone, msg);
+        db.run('UPDATE leads SET callback_alerted_at = CURRENT_TIMESTAMP WHERE id = ?', [lead.id]);
+      }
+    } catch (err) {
+      console.error('[Scheduler] Callback alarm error:', err.message);
+    }
+  });
+
+  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 8am-5pm CT + daily digest 7am + callback alarm every 5 min)');
 }
 
 function autoCompleteEnrollments() {

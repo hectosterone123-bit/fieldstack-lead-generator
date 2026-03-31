@@ -261,10 +261,18 @@ async function initDb() {
   try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_phone', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_website', 'fieldstack.co')"); } catch(e) {}
 
   // Migration: email bounce tracking + hot lead alert phone
   try { db.run('ALTER TABLE leads ADD COLUMN email_invalid_at DATETIME'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('alert_phone', '')"); } catch(e) {}
+
+  // Migration: DNC (Do Not Call) flag
+  try { db.run('ALTER TABLE leads ADD COLUMN dnc_at DATETIME'); } catch(e) {}
+
+  // Migration: callback alarm dedup
+  try { db.run('ALTER TABLE leads ADD COLUMN callback_alerted_at DATETIME'); } catch(e) {}
 
   // Migration: daily send limits + domain warmup
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_send_limit', '20')"); } catch(e) {}
@@ -305,6 +313,16 @@ async function initDb() {
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('requeue_max_times', '2')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('cockpit_monthly_goal', '5')"); } catch(e) {}
 
+  // Migration: voicemail drop, best time windows, local presence dialing
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_voicemail_message', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_best_time_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_local_numbers', '{}')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_max_duration_seconds', '180')"); } catch(e) {}
+
+  // Migration: AI call report — next step + key intel from reportOutcome tool
+  try { db.run('ALTER TABLE calls ADD COLUMN ai_next_step TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE calls ADD COLUMN ai_key_intel TEXT'); } catch(e) {}
+
   // Migration: AI Cold Caller (VAPI) tables + settings
   db.run(`CREATE TABLE IF NOT EXISTS calls (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -342,6 +360,20 @@ async function initDb() {
   try { db.run('ALTER TABLE calls ADD COLUMN monitor_listen_url TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE calls ADD COLUMN monitor_control_url TEXT'); } catch(e) {}
 
+  // Migration: configurable AI first message + no-answer retry cap + scheduled retry queue
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_first_message', 'Hey, is this {business_name}?')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_max_no_answer_attempts', '3')"); } catch(e) {}
+  try { db.run('ALTER TABLE call_queue ADD COLUMN scheduled_for DATETIME'); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_call_goal', '50')"); } catch(e) {}
+
+  // Migration: speed-to-lead, phone validation, campaign mode
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('speed_to_lead_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('speed_to_lead_template_id', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_campaign_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_campaign_calls_per_day', '0')"); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN phone_valid INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN phone_line_type TEXT DEFAULT NULL'); } catch(e) {}
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 
@@ -353,6 +385,13 @@ async function initDb() {
 
   // Migration: seed 5-step auto outreach sequence
   seedAutoOutreachSequence();
+
+  // Migration: seed post-call email follow-up templates
+  migratePostCallEmailTemplates();
+  migratePostCallEmailSignatures();
+
+  // Migration: seed post-call SMS follow-up templates
+  migratePostCallSmsTemplates();
 
   saveDb();
   return db;
@@ -2502,6 +2541,92 @@ FieldStack`,
       JSON.stringify(steps),
     ]
   );
+}
+
+function migratePostCallEmailTemplates() {
+  const existing = get("SELECT id FROM templates WHERE name = 'Post-Call — Voicemail Follow-Up' AND is_default = 1 LIMIT 1");
+  if (existing) return;
+  console.log('[DB] Adding post-call email follow-up templates...');
+
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'post_call', ?, ?, ?, 1)";
+
+  db.run(stmt, [
+    'Post-Call — Voicemail Follow-Up',
+    1,
+    'Just tried reaching you',
+    `Hey {first_name},
+
+Tried calling {business_name} just now but didn't want to leave a long voicemail.
+
+Quick version: I help {service_type} contractors in {city} make sure every website lead gets a text back within 90 seconds — even at 10 PM on a Saturday.
+
+Worth a 2-minute look?
+
+{sender_name}
+FieldStack | {sender_website}
+{sender_phone}`,
+  ]);
+
+  db.run(stmt, [
+    'Post-Call — Callback Requested',
+    2,
+    'Following up — {business_name}',
+    `Hey {first_name},
+
+We just spoke briefly — you mentioned catching up at a better time. Here's the short version:
+
+I help {service_type} contractors in {city} stop losing website leads to slow response times. The system texts every new lead within 90 seconds. Guarantee: 5 booked quotes in 30 days or you don't pay.
+
+What day and time works best for a quick 10-minute call?
+
+{sender_name}
+FieldStack | {sender_website}
+{sender_phone}`,
+  ]);
+
+  db.run(stmt, [
+    'Post-Call — Interest Follow-Up',
+    3,
+    'Next steps — {business_name}',
+    `Hey {first_name},
+
+Great speaking with you just now.
+
+The system texts every new lead within 90 seconds, handles the back-and-forth, and books the appointment — while you're on the job site. Guarantee: 5 booked quotes in 30 days or you don't pay.
+
+Book a 15-minute call to see it live: {booking_link}
+
+Talk soon,
+{sender_name}
+FieldStack | {sender_website}
+{sender_phone}`,
+  ]);
+}
+
+function migratePostCallEmailSignatures() {
+  // Patch existing post-call templates to include phone + website in signature
+  const voicemail = get("SELECT id, body FROM templates WHERE name = 'Post-Call — Voicemail Follow-Up' LIMIT 1");
+  if (voicemail && !voicemail.body.includes('{sender_website}')) {
+    db.run("UPDATE templates SET body = replace(body, '{sender_name}\nFieldStack', '{sender_name}\nFieldStack | {sender_website}\n{sender_phone}') WHERE name LIKE 'Post-Call%'");
+    // Handle the "Talk soon," variant in Interest Follow-Up
+    db.run("UPDATE templates SET body = replace(body, 'Talk soon,\n{sender_name}\nFieldStack | {sender_website}', 'Talk soon,\n{sender_name}\nFieldStack | {sender_website}') WHERE name = 'Post-Call — Interest Follow-Up'");
+    console.log('[DB] Updated post-call email signatures with phone + website');
+  }
+}
+
+function migratePostCallSmsTemplates() {
+  const existing = get("SELECT id FROM templates WHERE name = 'Post-Call SMS — No Answer' LIMIT 1");
+  if (existing) return;
+  console.log('[DB] Adding post-call SMS templates...');
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'post_call', ?, NULL, ?, 1)";
+  db.run(stmt, [
+    'Post-Call SMS — No Answer', 1,
+    "Hey {first_name}, I just tried calling {business_name} — didn't want to leave a voicemail. Do you have 2 minutes to connect this week?",
+  ]);
+  db.run(stmt, [
+    'Post-Call SMS — Voicemail', 2,
+    "Hey {first_name}, just left a voicemail for {business_name}. Quick version: I help {service_type} contractors get back to every website lead in 90 seconds. Worth a call this week?",
+  ]);
 }
 
 function saveDb() {

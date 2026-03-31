@@ -550,6 +550,14 @@ router.post('/', (req, res, next) => {
       autoEnrollLeads([lead.id], defaultSeqId);
     }
 
+    // Speed-to-lead: auto-queue new lead for immediate calling
+    const speedEnabled = db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_enabled'")?.value === '1';
+    const speedTemplateId = parseInt(db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_template_id'")?.value);
+    if (speedEnabled && speedTemplateId && lead.phone && !lead.dnc_at) {
+      db.run("UPDATE call_queue SET position = position + 1 WHERE status = 'pending'");
+      db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, 1, 'pending')", [lead.id, speedTemplateId]);
+    }
+
     res.status(201).json({ success: true, data: lead });
   } catch (err) { next(err); }
 });
@@ -560,7 +568,7 @@ router.put('/:id', (req, res, next) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [req.params.id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at'];
+    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at','dnc_at'];
     const updates = [];
     const params = [];
 
@@ -721,6 +729,33 @@ router.patch('/:id/snooze', (req, res, next) => {
 
     const updated = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/validate-phone — Twilio Lookup v2
+router.post('/:id/validate-phone', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!lead.phone) return res.status(400).json({ success: false, error: 'Lead has no phone number' });
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) {
+      return res.status(500).json({ success: false, error: 'Twilio credentials not configured' });
+    }
+
+    const phone = lead.phone.replace(/[^\d+]/g, '');
+    const e164 = phone.startsWith('+') ? phone : '+1' + phone.replace(/^1/, '');
+
+    const client = require('twilio')(accountSid, authToken);
+    const lookup = await client.lookups.v2.phoneNumbers(e164).fetch({ fields: 'line_type_intelligence' });
+    const lineType = lookup.lineTypeIntelligence?.type || null;
+    const valid = lookup.valid !== false && !['voip', 'nonFixedVoip'].includes(lineType);
+
+    db.run('UPDATE leads SET phone_valid = ?, phone_line_type = ? WHERE id = ?', [valid ? 1 : 0, lineType, lead.id]);
+
+    res.json({ success: true, data: { phone_valid: valid, phone_line_type: lineType } });
   } catch (err) { next(err); }
 });
 

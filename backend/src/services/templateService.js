@@ -237,6 +237,12 @@ function renderTemplate(text, lead) {
     if (key === 'sender_name') {
       return getSettingValue('sender_name') || 'FieldStack';
     }
+    if (key === 'sender_phone') {
+      return getSettingValue('sender_phone') || '';
+    }
+    if (key === 'sender_website') {
+      return getSettingValue('sender_website') || 'fieldstack.co';
+    }
     if (key === 'booking_link') {
       return getSettingValue('booking_link') || '[Set booking link in Settings]';
     }

@@ -222,6 +222,17 @@ router.post('/import', (req, res, next) => {
         );
       }
 
+      // Speed-to-lead: auto-queue for immediate calling
+      if (newLead) {
+        const speedEnabled = db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_enabled'")?.value === '1';
+        const speedTemplateId = parseInt(db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_template_id'")?.value);
+        const fullLead = db.get('SELECT * FROM leads WHERE id = ?', [newLead.id]);
+        if (speedEnabled && speedTemplateId && fullLead?.phone && !fullLead?.dnc_at) {
+          db.run("UPDATE call_queue SET position = position + 1 WHERE status = 'pending'");
+          db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, 1, 'pending')", [newLead.id, speedTemplateId]);
+        }
+      }
+
       imported++;
     }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences } from '../lib/api';
+import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
 import { useToast } from '../lib/toast';
 
 export function Settings() {
@@ -21,6 +21,8 @@ export function Settings() {
   const [resendFrom, setResendFrom] = useState('');
   const [appUrl, setAppUrl] = useState('');
   const [senderName, setSenderName] = useState('');
+  const [senderPhone, setSenderPhone] = useState('');
+  const [senderWebsite, setSenderWebsite] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [googleReviewLink, setGoogleReviewLink] = useState('');
   const [reviewEnabled, setReviewEnabled] = useState(false);
@@ -37,6 +39,22 @@ export function Settings() {
   const [vapiPhoneNumberId, setVapiPhoneNumberId] = useState('');
   const [vapiVoiceId, setVapiVoiceId] = useState('');
   const [vapiFallbackPhone, setVapiFallbackPhone] = useState('');
+  const [vapiVoicemailMessage, setVapiVoicemailMessage] = useState('');
+  const [vapiBestTimeEnabled, setVapiBestTimeEnabled] = useState(false);
+  const [vapiLocalNumbers, setVapiLocalNumbers] = useState('{}');
+  const [vapiMaxDuration, setVapiMaxDuration] = useState('180');
+  const [vapiFirstMessage, setVapiFirstMessage] = useState('');
+  const [vapiMaxNoAnswer, setVapiMaxNoAnswer] = useState('3');
+  const [dailyCallGoal, setDailyCallGoal] = useState('50');
+  const [speedToLeadEnabled, setSpeedToLeadEnabled] = useState(false);
+  const [speedToLeadTemplateId, setSpeedToLeadTemplateId] = useState('');
+  const [vapiCampaignEnabled, setVapiCampaignEnabled] = useState(false);
+  const [vapiCampaignCallsPerDay, setVapiCampaignCallsPerDay] = useState('0');
+
+  const { data: callScripts } = useQuery({
+    queryKey: ['call-scripts'],
+    queryFn: () => fetchTemplates({ channel: 'call_script' }),
+  });
 
   const { data: sequences } = useQuery({
     queryKey: ['sequences'],
@@ -49,6 +67,8 @@ export function Settings() {
       setResendFrom(settings.resend_from || '');
       setAppUrl(settings.app_url || '');
       setSenderName(settings.sender_name || '');
+      setSenderPhone(settings.sender_phone || '');
+      setSenderWebsite(settings.sender_website || '');
       setCompanyName(settings.company_name || '');
       setGoogleReviewLink(settings.google_review_link || '');
       setReviewEnabled(settings.review_request_enabled === 'true');
@@ -65,6 +85,17 @@ export function Settings() {
       setVapiPhoneNumberId(settings.vapi_phone_number_id || '');
       setVapiVoiceId(settings.vapi_voice_id || '');
       setVapiFallbackPhone(settings.vapi_fallback_phone || '');
+      setVapiVoicemailMessage(settings.vapi_voicemail_message || '');
+      setVapiBestTimeEnabled(settings.vapi_best_time_enabled === '1');
+      setVapiLocalNumbers(settings.vapi_local_numbers || '{}');
+      setVapiMaxDuration(settings.vapi_max_duration_seconds || '180');
+      setVapiFirstMessage(settings.vapi_first_message || '');
+      setVapiMaxNoAnswer(settings.vapi_max_no_answer_attempts || '3');
+      setDailyCallGoal(settings.daily_call_goal || '50');
+      setSpeedToLeadEnabled(settings.speed_to_lead_enabled === '1');
+      setSpeedToLeadTemplateId(settings.speed_to_lead_template_id || '');
+      setVapiCampaignEnabled(settings.vapi_campaign_enabled === '1');
+      setVapiCampaignCallsPerDay(settings.vapi_campaign_calls_per_day || '0');
     }
   }, [settings]);
 
@@ -89,6 +120,8 @@ export function Settings() {
       { key: 'reply_to_email', value: replyToEmail },
       { key: 'app_url', value: appUrl },
       { key: 'sender_name', value: senderName },
+      { key: 'sender_phone', value: senderPhone },
+      { key: 'sender_website', value: senderWebsite },
       { key: 'company_name', value: companyName },
       { key: 'google_review_link', value: googleReviewLink },
       { key: 'review_request_enabled', value: reviewEnabled ? 'true' : 'false' },
@@ -104,6 +137,17 @@ export function Settings() {
       { key: 'vapi_phone_number_id', value: vapiPhoneNumberId },
       { key: 'vapi_voice_id', value: vapiVoiceId },
       { key: 'vapi_fallback_phone', value: vapiFallbackPhone },
+      { key: 'vapi_voicemail_message', value: vapiVoicemailMessage },
+      { key: 'vapi_best_time_enabled', value: vapiBestTimeEnabled ? '1' : '0' },
+      { key: 'vapi_local_numbers', value: vapiLocalNumbers },
+      { key: 'vapi_max_duration_seconds', value: vapiMaxDuration },
+      { key: 'vapi_first_message', value: vapiFirstMessage },
+      { key: 'vapi_max_no_answer_attempts', value: vapiMaxNoAnswer },
+      { key: 'daily_call_goal', value: dailyCallGoal },
+      { key: 'speed_to_lead_enabled', value: speedToLeadEnabled ? '1' : '0' },
+      { key: 'speed_to_lead_template_id', value: speedToLeadTemplateId },
+      { key: 'vapi_campaign_enabled', value: vapiCampaignEnabled ? '1' : '0' },
+      { key: 'vapi_campaign_calls_per_day', value: vapiCampaignCallsPerDay },
     ]);
   }
 
@@ -123,22 +167,47 @@ export function Settings() {
       </div>
 
       <div className="space-y-6">
-        {/* Sender Name */}
+        {/* Sender Identity */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-3">
             <User className="w-4 h-4 text-zinc-400" />
-            <h2 className="text-sm font-medium text-zinc-200">Sender Name</h2>
+            <h2 className="text-sm font-medium text-zinc-200">Sender Identity</h2>
           </div>
           <p className="text-xs text-zinc-500 mb-3">
-            Used in email templates as {'{sender_name}'} and auto-prefixed to your From address (e.g. "Hector &lt;you@domain.com&gt;").
+            Appears in email signatures as plain text. Used as {'{sender_name}'}, {'{sender_phone}'}, {'{sender_website}'}.
           </p>
-          <input
-            type="text"
-            value={senderName}
-            onChange={e => setSenderName(e.target.value)}
-            placeholder="Hector"
-            className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
-          />
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Name</label>
+              <input
+                type="text"
+                value={senderName}
+                onChange={e => setSenderName(e.target.value)}
+                placeholder="Hector"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Phone</label>
+              <input
+                type="tel"
+                value={senderPhone}
+                onChange={e => setSenderPhone(e.target.value)}
+                placeholder="(512) 555-0100"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Website</label>
+              <input
+                type="text"
+                value={senderWebsite}
+                onChange={e => setSenderWebsite(e.target.value)}
+                placeholder="fieldstack.co"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Booking Link */}
@@ -504,6 +573,161 @@ export function Settings() {
               />
               <p className="text-[10px] text-zinc-600 mt-1">Your phone number — AI transfers here when you click "Jump In" or it can't handle the conversation</p>
             </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Voicemail Drop Message</label>
+              <textarea
+                rows={3}
+                value={vapiVoicemailMessage}
+                onChange={e => setVapiVoicemailMessage(e.target.value)}
+                placeholder="Hey, this is [your name] with FieldStack. I'll keep this short — I had a quick idea for your business I wanted to share. I'll send you a text with the details. Have a great day."
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 resize-none [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Spoken automatically when the call hits an answering machine. Leave blank to use the AI agent for voicemail too.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">First Message (AI Opener)</label>
+              <textarea
+                rows={2}
+                value={vapiFirstMessage}
+                onChange={e => setVapiFirstMessage(e.target.value)}
+                placeholder="Hey, is this {business_name}?"
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 resize-none [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">First thing the AI says when the lead picks up. Use {'{business_name}'} for their name. Leave blank to have AI wait for lead to speak first.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Local Numbers (by state)</label>
+              <textarea
+                rows={4}
+                value={vapiLocalNumbers}
+                onChange={e => setVapiLocalNumbers(e.target.value)}
+                placeholder={'{\n  "TX": "your-tx-phone-id",\n  "CA": "your-ca-phone-id"\n}'}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 placeholder:text-zinc-600 resize-none font-mono [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Map state abbreviations to VAPI phone number IDs for local presence dialing. Falls back to the default number above.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Max Call Duration (seconds)</label>
+              <input
+                type="number"
+                min={30}
+                max={600}
+                value={vapiMaxDuration}
+                onChange={e => setVapiMaxDuration(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Hard cap per call. 180 = 3 min. Prevents runaway calls from burning VAPI minutes.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Max No-Answer Attempts (Auto-DNC)</label>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                value={vapiMaxNoAnswer}
+                onChange={e => setVapiMaxNoAnswer(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Automatically mark lead as Do Not Call after this many no-answer or voicemail outcomes. Set to 0 to disable.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Daily Call Goal</label>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={dailyCallGoal}
+                onChange={e => setDailyCallGoal(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">Shows a progress bar in the Caller page. Set to 0 to hide.</p>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs text-zinc-400">Best Time Windows</label>
+                <p className="text-[10px] text-zinc-600 mt-0.5">Only call during 8–10 AM and 4–6 PM in the lead's local timezone.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVapiBestTimeEnabled(!vapiBestTimeEnabled)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  vapiBestTimeEnabled ? 'bg-orange-500' : 'bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    vapiBestTimeEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs text-zinc-400">Speed-to-Lead Auto-Dial</label>
+                <p className="text-[10px] text-zinc-600 mt-0.5">Auto-queue new leads for immediate calling when imported or created.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSpeedToLeadEnabled(!speedToLeadEnabled)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  speedToLeadEnabled ? 'bg-orange-500' : 'bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    speedToLeadEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
+            {speedToLeadEnabled && (
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Speed-to-Lead Script</label>
+                <select
+                  value={speedToLeadTemplateId}
+                  onChange={e => setSpeedToLeadTemplateId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+                >
+                  <option value="">Select a call script...</option>
+                  {callScripts?.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs text-zinc-400">Campaign Mode</label>
+                <p className="text-[10px] text-zinc-600 mt-0.5">Auto-dial from queue every 5 min during business hours. No overlap.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVapiCampaignEnabled(!vapiCampaignEnabled)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  vapiCampaignEnabled ? 'bg-orange-500' : 'bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                    vapiCampaignEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                  }`}
+                />
+              </button>
+            </div>
+            {vapiCampaignEnabled && (
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Daily Call Cap</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={vapiCampaignCallsPerDay}
+                  onChange={e => setVapiCampaignCallsPerDay(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+                />
+                <p className="text-[10px] text-zinc-600 mt-1">Max calls per day in campaign mode. 0 = unlimited.</p>
+              </div>
+            )}
           </div>
         </div>
 

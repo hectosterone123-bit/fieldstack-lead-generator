@@ -456,6 +456,21 @@ export interface Call {
   city?: string;
   state?: string;
   service_type?: string;
+  website?: string | null;
+  rating?: number | null;
+  review_count?: number | null;
+  notes?: string | null;
+  contact_count?: number;
+  last_contacted_at?: string | null;
+  heat_score?: number;
+  google_maps_url?: string | null;
+  dnc_at?: string | null;
+  phone_valid?: number | null;
+  phone_line_type?: string | null;
+  ai_next_step?: string | null;
+  ai_key_intel?: string | null;
+  monitor_listen_url?: string | null;
+  monitor_control_url?: string | null;
 }
 
 export interface CallQueueItem {
@@ -468,4 +483,6 @@ export interface CallQueueItem {
   phone?: string;
   city?: string;
   state?: string;
+  scheduled_for?: string | null;
+  contact_count?: number;
 }

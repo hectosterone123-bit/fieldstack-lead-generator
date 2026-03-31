@@ -555,6 +555,22 @@ export async function takeoverCall(callId: number): Promise<{ message: string; c
   return request(`/calls/${callId}/takeover`, { method: 'POST' });
 }
 
+export async function updateCallOutcome(callId: number, outcome: string): Promise<{ id: number; outcome: string }> {
+  return request(`/calls/${callId}/outcome`, { method: 'PATCH', body: JSON.stringify({ outcome }) });
+}
+
+export async function whisperCall(callId: number, message: string): Promise<{ sent: boolean }> {
+  return request(`/calls/${callId}/whisper`, { method: 'POST', body: JSON.stringify({ message }) });
+}
+
+export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string): Promise<{ updated: number }> {
+  return request('/calls/bulk/outcome', { method: 'PATCH', body: JSON.stringify({ call_ids: callIds, outcome }) });
+}
+
+export async function validateLeadPhone(id: number): Promise<{ phone_valid: boolean; phone_line_type: string | null }> {
+  return request(`/leads/${id}/validate-phone`, { method: 'POST' });
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function fetchSettings(): Promise<Record<string, string>> {
