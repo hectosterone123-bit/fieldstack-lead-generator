@@ -222,49 +222,54 @@ function SprintTimer({ callsToday }: { callsToday: number }) {
   );
 }
 
-// ─── Call Outcome Logger ──────────────────────────────────────────────────────
+// ─── Call Outcomes (live from DB) ────────────────────────────────────────────
 
-function OutcomeLogger() {
-  const [outcomes, setOutcomes] = useState<{ dials: number; pickups: number; interested: number }>(() => {
-    try {
-      const raw = localStorage.getItem(dateKey('cockpit-outcomes'));
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return { dials: 0, pickups: 0, interested: 0 };
-  });
+const OUTCOME_ROWS = [
+  { key: 'interested', label: 'Interested', textColor: 'text-emerald-400', barColor: 'bg-emerald-500' },
+  { key: 'callback_requested', label: 'Callback', textColor: 'text-amber-400', barColor: 'bg-amber-500' },
+  { key: 'no_answer', label: 'No Answer', textColor: 'text-zinc-400', barColor: 'bg-zinc-600' },
+  { key: 'voicemail', label: 'Voicemail', textColor: 'text-zinc-500', barColor: 'bg-zinc-700' },
+  { key: 'not_interested', label: 'Not Interested', textColor: 'text-red-400', barColor: 'bg-red-500' },
+  { key: 'wrong_number', label: 'Wrong #', textColor: 'text-zinc-600', barColor: 'bg-zinc-800' },
+] as const;
 
-  function update(field: keyof typeof outcomes, delta: number) {
-    setOutcomes(prev => {
-      const next = { ...prev, [field]: Math.max(0, prev[field] + delta) };
-      localStorage.setItem(dateKey('cockpit-outcomes'), JSON.stringify(next));
-      return next;
-    });
-  }
-
-  const pickupRate = outcomes.dials > 0 ? Math.round((outcomes.pickups / outcomes.dials) * 100) : 0;
-  const intRate = outcomes.pickups > 0 ? Math.round((outcomes.interested / outcomes.pickups) * 100) : 0;
+function CallOutcomesCard({ outcomes }: { outcomes: Partial<Record<string, number>> }) {
+  const total = Object.values(outcomes).reduce<number>((a, b) => a + (b ?? 0), 0);
+  const pickups = ['interested', 'callback_requested', 'not_interested', 'transferred']
+    .reduce<number>((s, k) => s + (outcomes[k] ?? 0), 0);
+  const pickupRate = total > 0 ? Math.round((pickups / total) * 100) : 0;
 
   return (
     <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <BarChart2 className="w-4 h-4 text-zinc-500" />
-        <span className="text-sm font-medium text-zinc-300">Call Outcomes</span>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <BarChart2 className="w-4 h-4 text-zinc-500" />
+          <span className="text-sm font-medium text-zinc-300">Call Outcomes</span>
+        </div>
+        {total > 0 && (
+          <span className="text-xs text-zinc-500 font-data">{total} calls · {pickupRate}% pickup</span>
+        )}
       </div>
-      <div className="space-y-2.5">
-        {([
-          { field: 'dials' as const, label: 'Dials', rate: null },
-          { field: 'pickups' as const, label: 'Pickups', rate: outcomes.dials > 0 ? `${pickupRate}%` : null },
-          { field: 'interested' as const, label: 'Interested', rate: outcomes.pickups > 0 ? `${intRate}%` : null },
-        ]).map(({ field, label, rate }) => (
-          <div key={field} className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500 w-16 flex-shrink-0">{label}</span>
-            <button onClick={() => update(field, -1)} className="w-5 h-5 flex items-center justify-center rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm leading-none transition-colors">−</button>
-            <span className="w-7 text-center text-sm font-data font-medium text-zinc-200">{outcomes[field]}</span>
-            <button onClick={() => update(field, 1)} className="w-5 h-5 flex items-center justify-center rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm leading-none transition-colors">+</button>
-            {rate && <span className="ml-1 text-xs text-zinc-600 font-data">{rate}</span>}
-          </div>
-        ))}
-      </div>
+      {total === 0 ? (
+        <p className="text-xs text-zinc-600 text-center py-4">No AI calls completed today.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {OUTCOME_ROWS.map(({ key, label, textColor, barColor }) => {
+            const count = outcomes[key] ?? 0;
+            if (count === 0) return null;
+            const pct = Math.round((count / total) * 100);
+            return (
+              <div key={key} className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500 w-24 flex-shrink-0">{label}</span>
+                <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className={cn('h-full rounded-full', barColor)} style={{ width: `${pct}%` }} />
+                </div>
+                <span className={cn('text-sm font-data font-medium w-5 text-right flex-shrink-0', textColor)}>{count}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -554,6 +559,7 @@ export function Cockpit() {
     calls_today: 0, emails_today: 0, sms_today: 0, leads_added_today: 0,
     demos_booked_today: 0, demos_this_month: 0, followups_completed_today: 0,
     status_changes_today: 0, enriched_today: 0, followups_due: 0, followups_overdue: 0,
+    call_outcomes_today: {} as Partial<Record<string, number>>,
   };
   const t = targets ?? { calls: 40, emails: 20, demos: 1, leads: 40, monthly_goal: 5 };
   const safeAlerts = alerts ?? { hot_replies: [], upcoming_demos: [] };
@@ -622,7 +628,7 @@ export function Cockpit() {
       {/* Sprint Timer + Call Outcomes */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <SprintTimer callsToday={m.calls_today} />
-        <OutcomeLogger />
+        <CallOutcomesCard outcomes={m.call_outcomes_today ?? {}} />
       </div>
 
       {/* Target Cards */}

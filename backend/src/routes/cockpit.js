@@ -49,6 +49,12 @@ router.get('/today', (req, res, next) => {
       `SELECT COUNT(*) as count FROM leads WHERE next_followup_at < date('now') AND next_followup_at IS NOT NULL AND status NOT IN ('lost', 'closed_won')`
     )?.count || 0;
 
+    const outcome_rows = db.all(
+      `SELECT outcome, COUNT(*) as count FROM calls WHERE date(created_at) = date('now') AND outcome IS NOT NULL GROUP BY outcome`
+    );
+    const call_outcomes_today = {};
+    for (const row of outcome_rows) call_outcomes_today[row.outcome] = row.count;
+
     res.json({
       success: true,
       data: {
@@ -63,6 +69,7 @@ router.get('/today', (req, res, next) => {
         enriched_today,
         followups_due,
         followups_overdue,
+        call_outcomes_today,
       },
     });
   } catch (err) { next(err); }

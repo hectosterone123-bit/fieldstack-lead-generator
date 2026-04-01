@@ -452,6 +452,7 @@ export interface CockpitMetrics {
   enriched_today: number;
   followups_due: number;
   followups_overdue: number;
+  call_outcomes_today: Partial<Record<'interested' | 'callback_requested' | 'not_interested' | 'no_answer' | 'voicemail' | 'wrong_number' | 'transferred', number>>;
 }
 
 export interface CockpitTargets {
@@ -569,6 +570,10 @@ export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string)
 
 export async function validateLeadPhone(id: number): Promise<{ phone_valid: boolean; phone_line_type: string | null }> {
   return request(`/leads/${id}/validate-phone`, { method: 'POST' });
+}
+
+export async function coachCall(lead_id: number | null, objection: string, script_body?: string): Promise<{ suggestion: string }> {
+  return request('/calls/coach', { method: 'POST', body: JSON.stringify({ lead_id, objection, script_body }) });
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────

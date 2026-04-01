@@ -385,6 +385,48 @@ router.patch('/:callId/outcome', async (req, res) => {
   res.json({ success: true, data: { id: call.id, outcome } });
 });
 
+// POST /api/calls/coach — AI objection coaching for manual callers
+router.post('/coach', async (req, res, next) => {
+  try {
+    const { lead_id, objection, script_body } = req.body;
+    if (!objection?.trim()) return res.status(400).json({ success: false, error: 'objection required' });
+    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ success: false, error: 'ANTHROPIC_API_KEY not set' });
+
+    const lead = lead_id ? db.get('SELECT business_name, city, state, service_type FROM leads WHERE id = ?', [lead_id]) : null;
+    const contextLine = lead
+      ? `Business: ${lead.business_name || 'Unknown'} in ${[lead.city, lead.state].filter(Boolean).join(', ')} — ${lead.service_type || 'general'}.`
+      : 'Business: unknown contractor.';
+    const scriptLine = script_body?.trim() ? `\n\nCall script:\n${script_body.slice(0, 800)}` : '';
+    const userMessage = `${contextLine}${scriptLine}\n\nObjection: "${objection.trim()}"\n\nWhat do I say right now?`;
+
+    const fetch = require('node-fetch');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        system: `You are a battle-hardened sales coach. A rep is on a LIVE cold call right now selling AI lead response software to home service contractors.
+Give 1-2 sentences the rep can say OUT LOUD right now to handle the objection.
+Rules: Direct and confident. Focus on pain (missed leads, lost revenue) not features. No opener phrases like "Great question". Output ONLY the response — nothing else.`,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      return res.status(500).json({ success: false, error: errData.error?.message || 'AI request failed' });
+    }
+    const data = await response.json();
+    const suggestion = data.content?.[0]?.text?.trim() || '';
+    res.json({ success: true, data: { suggestion } });
+  } catch (err) { next(err); }
+});
+
 // GET /api/calls/:callId — single call detail
 router.get('/:callId', (req, res) => {
   const call = db.get(`

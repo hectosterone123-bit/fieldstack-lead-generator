@@ -3,6 +3,7 @@ import {
   PhoneOutgoing, PhoneOff, Mic, MicOff, Play,
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
+  Bot, Zap,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -11,7 +12,7 @@ import {
   useBulkUpdateCallOutcomes,
 } from '../hooks/useCalls';
 import { useUpdateLead } from '../hooks/useLeads';
-import { fetchLeads, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone } from '../lib/api';
+import { fetchLeads, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus } from '../lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Template, Lead, Call } from '../types';
 import { cn } from '../lib/utils';
@@ -93,6 +94,19 @@ export function Caller() {
   // Phone validation
   const [validating, setValidating] = useState(false);
   const queryClient = useQueryClient();
+
+  // Manual caller mode
+  const [callerMode, setCallerMode] = useState<'ai' | 'manual'>('ai');
+  const [manualLead, setManualLead] = useState<Lead | null>(null);
+  const [manualLeadSearch, setManualLeadSearch] = useState('');
+  const [manualLeads, setManualLeads] = useState<Lead[]>([]);
+  const [manualScriptBody, setManualScriptBody] = useState('');
+  const [manualObjection, setManualObjection] = useState('');
+  const [coaching, setCoaching] = useState('');
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [manualOutcome, setManualOutcome] = useState('');
+  const [manualNote, setManualNote] = useState('');
+  const [loggingCall, setLoggingCall] = useState(false);
 
   // Feature 6: Call notes
   const [callNote, setCallNote] = useState('');
@@ -366,6 +380,85 @@ export function Caller() {
     queryClient.invalidateQueries({ queryKey: ['call-queue'] });
   };
 
+  // Reload rendered script when lead or template changes (manual mode)
+  useEffect(() => {
+    if (manualLead && selectedScript) {
+      previewTemplate(selectedScript, manualLead.id)
+        .then(p => setManualScriptBody(p.rendered_body || ''))
+        .catch(() => setManualScriptBody(''));
+    }
+  }, [selectedScript, manualLead?.id]);
+
+  const handleManualLeadSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setManualLeadSearch(val);
+    setManualLead(null);
+    setCoaching('');
+    if (val.length < 2) { setManualLeads([]); return; }
+    try {
+      const r = await fetchLeads({ search: val, limit: 20 });
+      setManualLeads((r.leads || []).filter((l: Lead) => l.phone));
+    } catch { /* ignore */ }
+  };
+
+  const selectManualLead = async (lead: Lead) => {
+    setManualLead(lead);
+    setManualLeadSearch('');
+    setManualLeads([]);
+    setCoaching('');
+    setManualOutcome('');
+    if (selectedScript) {
+      try {
+        const preview = await previewTemplate(selectedScript, lead.id);
+        setManualScriptBody(preview.rendered_body || '');
+      } catch { setManualScriptBody(''); }
+    }
+  };
+
+  const handleCoach = async (objection: string) => {
+    if (!objection.trim()) return;
+    setCoachLoading(true);
+    setCoaching('');
+    try {
+      const result = await coachCall(manualLead?.id ?? null, objection, manualScriptBody || undefined);
+      setCoaching(result.suggestion);
+    } catch {
+      toast('AI coach failed', 'error');
+    } finally {
+      setCoachLoading(false);
+      setManualObjection('');
+    }
+  };
+
+  const handleLogManualCall = async () => {
+    if (!manualLead) return;
+    setLoggingCall(true);
+    try {
+      const desc = [
+        manualOutcome && `Outcome: ${OUTCOME_LABELS[manualOutcome]?.label || manualOutcome}`,
+        manualNote.trim(),
+      ].filter(Boolean).join('\n');
+      await logActivity(manualLead.id, {
+        type: 'call_attempt',
+        title: `Manual call${manualOutcome ? ` — ${OUTCOME_LABELS[manualOutcome]?.label || manualOutcome}` : ''}`,
+        description: desc || undefined,
+      } as any);
+      if (manualOutcome === 'interested') {
+        await patchLeadStatus(manualLead.id, 'qualified');
+      } else if (manualOutcome && !['no_answer', 'voicemail'].includes(manualOutcome)) {
+        await patchLeadStatus(manualLead.id, 'contacted');
+      }
+      toast('Call logged');
+      setManualOutcome('');
+      setManualNote('');
+      setCoaching('');
+    } catch {
+      toast('Failed to log call', 'error');
+    } finally {
+      setLoggingCall(false);
+    }
+  };
+
   // Call timer
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -400,42 +493,87 @@ export function Caller() {
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100">AI Cold Caller</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">VAPI-powered outbound calls with live monitoring</p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-100">Cold Caller</h1>
+            <p className="text-sm text-zinc-500 mt-0.5">
+              {callerMode === 'ai' ? 'VAPI-powered AI calls with live monitoring' : 'You call — AI coaches objections in real time'}
+            </p>
+          </div>
+          {/* Mode toggle */}
+          <div className="flex items-center p-1 rounded-xl bg-zinc-800 border border-white/[0.06]">
+            <button
+              onClick={() => setCallerMode('ai')}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                callerMode === 'ai' ? 'bg-violet-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+              )}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              AI Auto
+            </button>
+            <button
+              onClick={() => setCallerMode('manual')}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                callerMode === 'manual' ? 'bg-emerald-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+              )}
+            >
+              <Phone className="w-3.5 h-3.5" />
+              Manual + Coach
+            </button>
+          </div>
         </div>
-        {dailyGoal > 0 && (
-          <div className="flex items-center gap-3">
-            <div className="w-48 h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className={cn('h-full rounded-full transition-all', totalCalls >= dailyGoal ? 'bg-emerald-500' : 'bg-orange-500')}
-                style={{ width: `${Math.min(100, (totalCalls / dailyGoal) * 100)}%` }}
-              />
+
+        {callerMode === 'ai' && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {dailyGoal > 0 && (
+              <div className="flex items-center gap-3">
+                <div className="w-48 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all', totalCalls >= dailyGoal ? 'bg-emerald-500' : 'bg-orange-500')}
+                    style={{ width: `${Math.min(100, (totalCalls / dailyGoal) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-data text-zinc-400">{totalCalls}/{dailyGoal}</span>
+              </div>
+            )}
+            {campaignActive && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Campaign
+              </div>
+            )}
+            <button
+              onClick={() => { setAutoAdvance(v => !v); setCountdown(null); }}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                autoAdvance
+                  ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                  : 'bg-zinc-800 border-white/[0.06] text-zinc-500'
+              )}
+            >
+              <SkipForward className="w-3.5 h-3.5" />
+              Auto-advance {autoAdvance ? 'on' : 'off'}
+            </button>
+            <select
+              value={selectedScript || ''}
+              onChange={e => setSelectedScript(Number(e.target.value))}
+              className="px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 [color-scheme:dark]"
+            >
+              <option value="">Select Script</option>
+              {scripts.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <div className="px-3 py-1.5 rounded-full bg-zinc-800 border border-white/[0.06] text-xs font-data text-zinc-400">
+              Queue: {queue.length}
             </div>
-            <span className="text-xs font-data text-zinc-400">{totalCalls}/{dailyGoal}</span>
           </div>
         )}
-        <div className="flex items-center gap-3">
-          {campaignActive && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Campaign
-            </div>
-          )}
-          {/* Auto-advance toggle */}
-          <button
-            onClick={() => { setAutoAdvance(v => !v); setCountdown(null); }}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
-              autoAdvance
-                ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
-                : 'bg-zinc-800 border-white/[0.06] text-zinc-500'
-            )}
-          >
-            <SkipForward className="w-3.5 h-3.5" />
-            Auto-advance {autoAdvance ? 'on' : 'off'}
-          </button>
+
+        {callerMode === 'manual' && (
           <select
             value={selectedScript || ''}
             onChange={e => setSelectedScript(Number(e.target.value))}
@@ -446,10 +584,7 @@ export function Caller() {
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
-          <div className="px-3 py-1.5 rounded-full bg-zinc-800 border border-white/[0.06] text-xs font-data text-zinc-400">
-            Queue: {queue.length}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Auto-advance countdown banner */}
@@ -470,7 +605,200 @@ export function Caller() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* ── Manual Caller Mode ──────────────────────────────────────────── */}
+      {callerMode === 'manual' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Lead selector + Script + Log */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Lead selector */}
+            <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Select Lead</p>
+              {manualLead ? (
+                <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/[0.06] border border-emerald-500/20">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-100">{manualLead.business_name}</p>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      {manualLead.phone}{manualLead.city ? ` · ${manualLead.city}, ${manualLead.state}` : ''}{manualLead.service_type ? ` · ${manualLead.service_type}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => { setManualLead(null); setManualScriptBody(''); setCoaching(''); }}
+                    className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Search by name or city..."
+                    value={manualLeadSearch}
+                    onChange={handleManualLeadSearch}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-emerald-500/50 [color-scheme:dark]"
+                  />
+                  {manualLeads.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.06] bg-zinc-800/50 divide-y divide-white/[0.04]">
+                      {manualLeads.map(l => (
+                        <button
+                          key={l.id}
+                          onClick={() => selectManualLead(l)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-700/50 transition-colors text-left"
+                        >
+                          <div>
+                            <p className="text-sm text-zinc-200">{l.business_name}</p>
+                            <p className="text-xs text-zinc-500">{l.phone}{l.city ? ` · ${l.city}` : ''}</p>
+                          </div>
+                          <span className="text-xs font-data text-zinc-600">{l.heat_score}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {manualLeadSearch.length >= 2 && manualLeads.length === 0 && (
+                    <p className="text-xs text-zinc-600 px-1">No leads with a phone found.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Script panel */}
+            {manualLead && (
+              <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Script</p>
+                {manualScriptBody ? (
+                  <div className="bg-zinc-950 rounded-lg border border-white/[0.04] p-4 max-h-80 overflow-y-auto">
+                    <pre className="text-sm text-zinc-200 whitespace-pre-wrap font-sans leading-relaxed">{manualScriptBody}</pre>
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-600 py-4 text-center">
+                    {selectedScript ? 'Loading script...' : 'Select a script at the top to see it here.'}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Log call */}
+            {manualLead && (
+              <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Log This Call</p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { outcome: 'interested', label: 'Interested', cls: 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/20' },
+                      { outcome: 'callback_requested', label: 'Callback', cls: 'border-amber-500/30 text-amber-400 hover:bg-amber-500/20' },
+                      { outcome: 'voicemail', label: 'Voicemail', cls: 'border-white/[0.06] text-zinc-400 hover:bg-zinc-700' },
+                      { outcome: 'no_answer', label: 'No Answer', cls: 'border-white/[0.06] text-zinc-400 hover:bg-zinc-700' },
+                      { outcome: 'not_interested', label: 'Not Interested', cls: 'border-red-500/30 text-red-400 hover:bg-red-600/20' },
+                    ] as const).map(({ outcome, label, cls }) => (
+                      <button
+                        key={outcome}
+                        onClick={() => setManualOutcome(o => o === outcome ? '' : outcome)}
+                        className={cn(
+                          'px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors',
+                          cls,
+                          manualOutcome === outcome ? 'ring-1 ring-offset-1 ring-offset-zinc-900' : ''
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={manualNote}
+                    onChange={e => setManualNote(e.target.value)}
+                    placeholder="Notes from the call..."
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 resize-none outline-none focus:border-orange-500/50 [color-scheme:dark]"
+                  />
+                  <button
+                    onClick={handleLogManualCall}
+                    disabled={loggingCall}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors disabled:opacity-50"
+                  >
+                    {loggingCall ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    Log Call
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right: AI Coach */}
+          <div className="space-y-4">
+            <div className="bg-zinc-900 rounded-xl border border-orange-500/20 p-5 sticky top-6">
+              <div className="flex items-center gap-2 mb-1">
+                <Zap className="w-4 h-4 text-orange-400" />
+                <h2 className="text-sm font-semibold text-orange-400">AI Coach</h2>
+              </div>
+              <p className="text-xs text-zinc-600 mb-4">Tap an objection — get a response to say right now</p>
+
+              {!manualLead && (
+                <p className="text-xs text-zinc-600 py-6 text-center">Select a lead to activate coaching</p>
+              )}
+
+              {manualLead && (
+                <>
+                  <div className="space-y-1.5 mb-4">
+                    {([
+                      'Not interested',
+                      'I already have someone for that',
+                      "We're too busy right now",
+                      'Call me back in a few months',
+                      'How much does it cost?',
+                      'Just send me an email',
+                      "We don't have the budget",
+                      'Is this spam / a robot?',
+                    ]).map(obj => (
+                      <button
+                        key={obj}
+                        onClick={() => handleCoach(obj)}
+                        disabled={coachLoading}
+                        className="w-full text-left px-3 py-2 rounded-lg text-xs text-zinc-300 bg-zinc-800/60 hover:bg-zinc-700/80 border border-white/[0.04] hover:border-orange-500/20 transition-colors disabled:opacity-40"
+                      >
+                        "{obj}"
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      value={manualObjection}
+                      onChange={e => setManualObjection(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleCoach(manualObjection)}
+                      placeholder="Or type what they said..."
+                      className="flex-1 px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-orange-500/50 [color-scheme:dark]"
+                    />
+                    <button
+                      onClick={() => handleCoach(manualObjection)}
+                      disabled={!manualObjection.trim() || coachLoading}
+                      className="px-3 py-2 rounded-lg bg-orange-500/20 border border-orange-500/30 text-orange-400 hover:bg-orange-500/30 transition-colors disabled:opacity-30"
+                    >
+                      {coachLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {coaching && (
+                    <div className="mt-4 p-4 rounded-lg bg-orange-500/[0.08] border border-orange-500/20">
+                      <p className="text-[10px] font-medium text-orange-500/70 uppercase tracking-wide mb-2">Say this</p>
+                      <p className="text-sm font-medium text-orange-100 leading-relaxed">{coaching}</p>
+                    </div>
+                  )}
+
+                  {coachLoading && !coaching && (
+                    <div className="mt-4 flex items-center gap-2 text-xs text-zinc-600">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Coaching...
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── AI Caller Mode ──────────────────────────────────────────────── */}
+      {callerMode === 'ai' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Active Call */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
@@ -982,7 +1310,7 @@ export function Caller() {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Add Leads Modal */}
       {showAddLeads && (
