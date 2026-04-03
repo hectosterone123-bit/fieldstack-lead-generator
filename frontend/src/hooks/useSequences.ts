@@ -4,7 +4,7 @@ import {
   enrollLeads, fetchEnrollments, pauseEnrollment, resumeEnrollment, cancelEnrollment, skipEnrollmentStep,
   fetchOutreachQueue, fetchQueueStats, markQueueItemSent, markQueueItemReplied, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
-  setEnrollmentAutoSend, flushOverdue,
+  setEnrollmentAutoSend, flushOverdue, fetchAutopilotStatus, setAutopilot,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -275,4 +275,24 @@ export function useFlushOverdue() {
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });
+}
+
+export function useAutopilot() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const status = useQuery({
+    queryKey: ['autopilot', 'status'],
+    queryFn: fetchAutopilotStatus,
+    refetchInterval: 60_000,
+  });
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => setAutopilot(enabled),
+    onSuccess: (data, enabled) => {
+      qc.invalidateQueries({ queryKey: ['autopilot'] });
+      qc.invalidateQueries({ queryKey: ['queue'] });
+      toast(enabled ? `Autopilot ON — ${data.enrollments_updated} enrollment(s) will auto-send` : 'Autopilot OFF');
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+  return { status, toggle };
 }

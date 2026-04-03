@@ -4,7 +4,7 @@ import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
-  ChevronDown,
+  ChevronDown, MousePointerClick, MailX, ShieldAlert,
 } from 'lucide-react';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
@@ -33,11 +33,14 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   call_attempt: Phone,
   email_sent: Mail,
   email_opened: MailOpen,
+  email_clicked: MousePointerClick,
+  email_bounced: MailX,
+  email_complained: ShieldAlert,
+  email_replied: Reply,
   sms_sent: MessageSquareIcon,
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
-  email_replied: Reply,
 };
 
 const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
@@ -45,12 +48,15 @@ const ACTIVITY_ICON_COLORS: Record<ActivityType, string> = {
   note: 'text-zinc-400',
   call_attempt: 'text-green-400',
   email_sent: 'text-violet-400',
-  email_opened: 'text-emerald-400',
+  email_opened: 'text-violet-400',
+  email_clicked: 'text-violet-500',
+  email_bounced: 'text-red-400',
+  email_complained: 'text-red-500',
+  email_replied: 'text-emerald-400',
   sms_sent: 'text-emerald-400',
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
-  email_replied: 'text-emerald-400',
 };
 
 interface OutreachSummary {

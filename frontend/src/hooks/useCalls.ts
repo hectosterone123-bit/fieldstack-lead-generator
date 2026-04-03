@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchActiveCalls, fetchCallHistory, fetchCallQueue,
   startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
-  bulkUpdateCallOutcomes,
+  bulkUpdateCallOutcomes, autoLoadQueue,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -133,6 +133,20 @@ export function useBulkUpdateCallOutcomes() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['call-history'] });
       toast(`${data.updated} calls updated`);
+    },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useAutoLoadQueue() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ serviceType, count, templateId }: { serviceType?: string; count?: number; templateId: number }) =>
+      autoLoadQueue(serviceType, count, templateId),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['call-queue'] });
+      toast(`${data.queued} leads queued`);
     },
     onError: (err: Error) => toast(err.message, 'error'),
   });

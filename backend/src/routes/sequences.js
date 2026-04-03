@@ -178,6 +178,46 @@ router.get('/queue/stats', (req, res) => {
   res.json({ success: true, data: { overdue, due_today, upcoming, sends_remaining: budget.remaining, daily_limit: budget.dailyLimit, sent_today: budget.sentToday } });
 });
 
+// GET /api/sequences/autopilot/status
+router.get('/autopilot/status', (req, res) => {
+  const anySeqOn = db.get("SELECT 1 FROM sequences WHERE is_active = 1 AND auto_send = 1 LIMIT 1");
+  const anyEnrollOn = db.get("SELECT 1 FROM lead_sequences WHERE status = 'active' AND auto_send = 1 LIMIT 1");
+  const enabled = !!(anySeqOn || anyEnrollOn);
+
+  const activeEnrollments = db.get("SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'active'")?.count || 0;
+
+  const enrollments = db.all(`
+    SELECT ls.current_step, ls.enrolled_at, s.steps as sequence_steps
+    FROM lead_sequences ls JOIN sequences s ON ls.sequence_id = s.id
+    WHERE ls.status = 'active'
+  `);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  let due_now = 0;
+  for (const e of enrollments) {
+    const steps = parseSteps({ steps: e.sequence_steps });
+    const step = steps.find(s => s.order === e.current_step);
+    if (!step) continue;
+    const dueDate = new Date(e.enrolled_at);
+    dueDate.setDate(dueDate.getDate() + step.delay_days);
+    dueDate.setHours(0, 0, 0, 0);
+    if (dueDate <= now) due_now++;
+  }
+
+  const budget = getRemainingBudget();
+  const emailConfigured = emailService.isConfigured();
+
+  res.json({ success: true, data: { enabled, active_enrollments: activeEnrollments, due_now, sends_remaining: budget.remaining, email_configured: emailConfigured } });
+});
+
+// POST /api/sequences/autopilot — bulk enable/disable auto_send on all active sequences + enrollments
+router.post('/autopilot', (req, res) => {
+  const { enabled } = req.body;
+  const val = enabled ? 1 : 0;
+  const seqResult = db.run("UPDATE sequences SET auto_send = ? WHERE is_active = 1", [val]);
+  const enrollResult = db.run("UPDATE lead_sequences SET auto_send = ? WHERE status = 'active'", [val]);
+  res.json({ success: true, data: { sequences_updated: seqResult.changes ?? 0, enrollments_updated: enrollResult.changes ?? 0 } });
+});
+
 router.post('/queue/:enrollmentId/mark-sent', (req, res) => {
   const { enrollmentId } = req.params;
   const enrollment = db.get('SELECT * FROM lead_sequences WHERE id = ?', [enrollmentId]);

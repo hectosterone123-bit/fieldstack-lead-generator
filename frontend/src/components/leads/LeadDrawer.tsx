@@ -4,6 +4,7 @@ import {
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
   FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply, Bot,
+  MailOpen, MousePointerClick, MailX, ShieldAlert,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
@@ -34,11 +35,15 @@ const ACTIVITY_ICONS: Record<string, React.ElementType> = {
   note: FileText,
   call_attempt: Phone,
   email_sent: Mail,
+  email_opened: MailOpen,
+  email_clicked: MousePointerClick,
+  email_bounced: MailX,
+  email_complained: ShieldAlert,
+  email_replied: Reply,
   sms_sent: MessageSquare,
   heat_update: Thermometer,
   import: Download,
   enrichment: Sparkles,
-  email_replied: Reply,
 };
 
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -46,11 +51,15 @@ const ACTIVITY_COLORS: Record<string, string> = {
   note: 'text-zinc-400',
   call_attempt: 'text-green-400',
   email_sent: 'text-violet-400',
+  email_opened: 'text-violet-400',
+  email_clicked: 'text-violet-500',
+  email_bounced: 'text-red-400',
+  email_complained: 'text-red-500',
+  email_replied: 'text-emerald-400',
   sms_sent: 'text-emerald-400',
   heat_update: 'text-orange-400',
   import: 'text-zinc-400',
   enrichment: 'text-amber-400',
-  email_replied: 'text-emerald-400',
 };
 
 function getInitials(name: string): string {
@@ -383,6 +392,36 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Contact Intel */}
+              <div className="px-5 py-4 border-b border-white/[0.04] space-y-3">
+                <p className="text-overline text-zinc-600">Contact Intel</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-zinc-600 block mb-1">Owner Name</label>
+                    <input
+                      type="text"
+                      defaultValue={(lead as any).owner_name || ''}
+                      onBlur={e => { if (e.target.value !== ((lead as any).owner_name || '')) updateLead.mutate({ id: lead.id, data: { owner_name: e.target.value || null } as any }); }}
+                      placeholder="e.g. John"
+                      className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-600 block mb-1">Direct / Mobile</label>
+                    <input
+                      type="tel"
+                      defaultValue={(lead as any).direct_phone || ''}
+                      onBlur={e => { if (e.target.value !== ((lead as any).direct_phone || '')) updateLead.mutate({ id: lead.id, data: { direct_phone: e.target.value || null } as any }); }}
+                      placeholder="Owner's direct line"
+                      className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+                {(lead as any).gatekeeper_count > 0 && (
+                  <p className="text-[10px] text-violet-400">Gatekeeper hit {(lead as any).gatekeeper_count}× — fill in owner name to get personalized scripts</p>
+                )}
               </div>
 
               {/* Outreach Tracking */}

@@ -8,7 +8,8 @@ export type LeadStatus =
 
 export type ActivityType =
   | 'status_change' | 'note' | 'call_attempt'
-  | 'email_sent' | 'email_opened' | 'email_replied' | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
+  | 'email_sent' | 'email_opened' | 'email_clicked' | 'email_bounced' | 'email_complained' | 'email_replied'
+  | 'sms_sent' | 'heat_update' | 'import' | 'enrichment';
 
 export type TemplateChannel = 'email' | 'sms' | 'call_script' | 'loom_script';
 
@@ -78,6 +79,9 @@ export interface Lead {
   next_followup_at: string | null;
   tags: string | null;
   notes: string | null;
+  owner_name: string | null;
+  direct_phone: string | null;
+  gatekeeper_count: number;
   enrichment_data: string | null;
   enriched_at: string | null;
   proposal_amount: number | null;
@@ -435,7 +439,7 @@ export interface ReviewStats {
 // ─── AI Cold Caller ──────────────────────────────────────────────────────────
 
 export type CallStatus = 'queued' | 'ringing' | 'in_progress' | 'completed' | 'failed' | 'no_answer' | 'voicemail';
-export type CallOutcome = 'interested' | 'callback_requested' | 'not_interested' | 'no_answer' | 'voicemail' | 'wrong_number' | 'transferred';
+export type CallOutcome = 'interested' | 'callback_requested' | 'not_interested' | 'no_answer' | 'voicemail' | 'wrong_number' | 'transferred' | 'gatekeeper';
 
 export interface Call {
   id: number;
@@ -471,6 +475,7 @@ export interface Call {
   ai_key_intel?: string | null;
   monitor_listen_url?: string | null;
   monitor_control_url?: string | null;
+  source?: 'ai' | 'manual' | null;
 }
 
 export interface CallQueueItem {
@@ -485,4 +490,9 @@ export interface CallQueueItem {
   state?: string;
   scheduled_for?: string | null;
   contact_count?: number;
+  heat_score?: number;
+  last_contacted_at?: string | null;
+  owner_name?: string | null;
+  direct_phone?: string | null;
+  gatekeeper_count?: number;
 }

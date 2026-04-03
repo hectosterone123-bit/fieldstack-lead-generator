@@ -374,6 +374,15 @@ async function initDb() {
   try { db.run('ALTER TABLE leads ADD COLUMN phone_valid INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN phone_line_type TEXT DEFAULT NULL'); } catch(e) {}
 
+  // Migration: manual call source tracking
+  try { db.run("ALTER TABLE calls ADD COLUMN source TEXT DEFAULT 'ai'"); } catch(e) {}
+
+  // Migration: gatekeeper tracking — owner contact info + gatekeeper hit count
+  try { db.run('ALTER TABLE leads ADD COLUMN owner_name TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN direct_phone TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN gatekeeper_count INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_link', '')"); } catch(e) {}
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 

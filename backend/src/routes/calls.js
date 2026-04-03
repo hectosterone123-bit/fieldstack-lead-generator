@@ -47,15 +47,18 @@ router.get('/active', (req, res) => {
   res.json({ success: true, data: calls });
 });
 
-// GET /api/calls/queue — current call queue
+// GET /api/calls/queue — current call queue (optional ?limit param)
 router.get('/queue', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 10, 100); // Default 10, max 100
   const items = db.all(`
-    SELECT cq.*, l.business_name, l.phone, l.city, l.state, l.contact_count
+    SELECT cq.*, l.business_name, l.phone, l.city, l.state, l.contact_count, l.heat_score,
+           l.last_contacted_at, l.owner_name, l.direct_phone, l.gatekeeper_count
     FROM call_queue cq
     JOIN leads l ON l.id = cq.lead_id
     WHERE cq.status = 'pending'
     ORDER BY cq.position ASC
-  `);
+    LIMIT ?
+  `, [limit]);
   res.json({ success: true, data: items });
 });
 
@@ -156,6 +159,40 @@ router.post('/queue', (req, res) => {
       );
       queued++;
     }
+  }
+
+  res.json({ success: true, data: { queued } });
+});
+
+// POST /api/calls/queue/auto-load — auto-load top N new leads by heat_score
+router.post('/queue/auto-load', (req, res) => {
+  const { service_type, count = 10, template_id } = req.body;
+  if (!template_id) {
+    return res.status(400).json({ success: false, error: 'template_id required' });
+  }
+  const limitCount = Math.min(Math.max(parseInt(count) || 10, 1), 100); // 1–100, default 10
+
+  // Query: new leads with valid phones, sorted by heat_score DESC
+  const leads = db.all(`
+    SELECT id, phone, dnc_at, phone_valid
+    FROM leads
+    WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)
+    ${service_type ? 'AND service_type = ?' : ''}
+    ORDER BY heat_score DESC
+    LIMIT ?
+  `, service_type ? [service_type, limitCount] : [limitCount]);
+
+  // Clear existing queue
+  db.run("DELETE FROM call_queue WHERE status = 'pending'");
+
+  // Insert new items
+  let queued = 0;
+  for (let i = 0; i < leads.length; i++) {
+    db.run(
+      'INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, ?, ?)',
+      [leads[i].id, template_id, i + 1, 'pending']
+    );
+    queued++;
   }
 
   res.json({ success: true, data: { queued } });
@@ -323,7 +360,7 @@ router.post('/:callId/whisper', async (req, res, next) => {
 // PATCH /api/calls/:callId/outcome — manually set/override call outcome
 router.patch('/:callId/outcome', async (req, res) => {
   const { outcome } = req.body;
-  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred'];
+  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred', 'gatekeeper'];
   if (!valid.includes(outcome)) {
     return res.status(400).json({ success: false, error: 'Invalid outcome' });
   }
@@ -344,6 +381,24 @@ router.patch('/:callId/outcome', async (req, res) => {
        status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
        updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [followup, call.lead_id]
+    );
+  }
+
+  if (outcome === 'gatekeeper') {
+    // Increment gatekeeper count + schedule early morning callback (7:30 AM next business day)
+    db.run(
+      'UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [call.lead_id]
+    );
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() === 0) d.setDate(d.getDate() + 1); // skip Sunday
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2); // skip Saturday
+    const followup = d.toISOString().split('T')[0] + ' 07:30:00';
+    db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, call.lead_id]);
+    db.run(
+      "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'call_attempt', 'Gatekeeper hit', 'Reached secretary/receptionist. Scheduled callback before 8 AM.')",
+      [call.lead_id]
     );
   }
 
@@ -427,7 +482,197 @@ Rules: Direct and confident. Focus on pain (missed leads, lost revenue) not feat
   } catch (err) { next(err); }
 });
 
+// POST /api/calls/log-manual — log a manual call into the calls table (for cockpit + history)
+router.post('/log-manual', (req, res) => {
+  const { lead_id, outcome, duration_seconds, template_id } = req.body;
+  if (!lead_id) return res.status(400).json({ success: false, error: 'lead_id required' });
+
+  const lead = db.get('SELECT id FROM leads WHERE id = ?', [lead_id]);
+  if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+  const result = db.run(
+    `INSERT INTO calls (lead_id, template_id, status, outcome, duration_seconds, source, started_at, ended_at)
+     VALUES (?, ?, 'completed', ?, ?, 'manual', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [lead_id, template_id || null, outcome || null, duration_seconds || null]
+  );
+
+  // Update lead contact tracking
+  db.run(
+    `UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP,
+     first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END,
+     updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    [lead_id]
+  );
+
+  // Gatekeeper: increment count + schedule early morning callback
+  if (outcome === 'gatekeeper') {
+    db.run(
+      'UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [lead_id]
+    );
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+    const followup = d.toISOString().split('T')[0] + ' 07:30:00';
+    db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
+  }
+
+  res.json({ success: true, data: { call_id: result.lastInsertRowid } });
+});
+
+// POST /api/calls/outcome-sms — send SMS after manual call outcome (Phase 4)
+router.post('/outcome-sms', async (req, res) => {
+  try {
+    const { lead_id, outcome } = req.body;
+    if (!lead_id || !outcome) return res.status(400).json({ success: false, error: 'lead_id and outcome required' });
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    if (!lead || !lead.phone) return res.status(404).json({ success: false, error: 'Lead not found or no phone' });
+
+    // Check if SMS is configured
+    const smsService = require('../services/smsService');
+    if (!smsService.isConfigured()) return res.status(400).json({ success: false, error: 'SMS not configured' });
+
+    // Check for duplicate SMS in last 24h
+    const recentSms = db.get(
+      `SELECT id FROM activities WHERE lead_id = ? AND type = 'sms_sent' AND title LIKE 'Auto-SMS%' AND created_at > datetime('now', '-24 hours')`,
+      [lead_id]
+    );
+    if (recentSms) return res.json({ success: true, data: { skipped: true, reason: 'SMS already sent in last 24h' } });
+
+    // Build message based on outcome
+    const demoLink = process.env.DEMO_LINK || db.get("SELECT value FROM settings WHERE key = 'booking_link'")?.value || '';
+    const messages = {
+      interested: demoLink
+        ? `Hey, thanks for your time! Here's a link to book a quick demo: ${demoLink}`
+        : `Hey, thanks for your time! We'll follow up shortly with more details.`,
+      callback_requested: demoLink
+        ? `Great talking with you! Here's a link to pick a time that works: ${demoLink}`
+        : `Great talking with you! We'll call you back at the time we discussed.`,
+      voicemail: demoLink
+        ? `Hey, we just tried calling you. Feel free to book a time here: ${demoLink}`
+        : `Hey, we just tried calling you. We'll try again soon.`,
+      not_interested: `No worries at all. If things change down the road, feel free to reach back out.`,
+    };
+
+    const messageBody = messages[outcome];
+    if (!messageBody) return res.json({ success: true, data: { skipped: true, reason: 'No SMS for this outcome' } });
+
+    const result = await smsService.sendSms(lead.phone, messageBody);
+    if (!result.success) return res.status(500).json({ success: false, error: result.error });
+
+    // Log to activities
+    db.run(
+      'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+      [lead_id, 'sms_sent', `Auto-SMS (${outcome})`, messageBody, JSON.stringify({ outcome, twilio_sid: result.sid })]
+    );
+
+    res.json({ success: true, data: { sent: true, sid: result.sid } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/calls/schedule-callback — schedule a callback (Phase 9)
+router.post('/schedule-callback', async (req, res) => {
+  try {
+    const { lead_id, callback_datetime, notes } = req.body;
+    if (!lead_id || !callback_datetime) return res.status(400).json({ success: false, error: 'lead_id and callback_datetime required' });
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    // Update lead next_followup_at
+    db.run(
+      'UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [callback_datetime, lead_id]
+    );
+
+    // Log activity
+    db.run(
+      'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+      [lead_id, 'note', 'Callback scheduled', `Callback scheduled for ${callback_datetime}${notes ? `. ${notes}` : ''}`]
+    );
+
+    // Send confirmation SMS if phone + configured
+    let smsSent = false;
+    try {
+      const smsService = require('../services/smsService');
+      if (smsService.isConfigured() && lead.phone) {
+        const dt = new Date(callback_datetime);
+        const formatted = dt.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+        const msg = `Got it! We'll call you back on ${formatted}. Talk soon.`;
+        await smsService.sendSms(lead.phone, msg);
+        smsSent = true;
+      }
+    } catch { /* ignore SMS failure */ }
+
+    res.json({ success: true, data: { scheduled: true, sms_sent: smsSent } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/calls/:callId — single call detail
+// POST /api/calls/voice-note — record voice note, transcribe with Whisper, save activity
+router.post('/voice-note', async (req, res) => {
+  try {
+    const { lead_id, audio_base64, mime_type = 'audio/webm' } = req.body;
+    if (!lead_id || !audio_base64) {
+      return res.status(400).json({ success: false, error: 'lead_id and audio_base64 required' });
+    }
+
+    const lead = db.get('SELECT id FROM leads WHERE id = ?', [lead_id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not configured' });
+    }
+
+    // Decode base64 → Buffer
+    const audioBuffer = Buffer.from(audio_base64, 'base64');
+
+    // Build multipart form for Whisper
+    const FormData = require('form-data');
+    const formData = new FormData();
+    const ext = mime_type.includes('mp4') || mime_type.includes('m4a') ? 'm4a'
+      : mime_type.includes('ogg') ? 'ogg'
+      : mime_type.includes('mp3') ? 'mp3'
+      : 'webm';
+    formData.append('file', audioBuffer, { filename: `voice_note.${ext}`, contentType: mime_type });
+    formData.append('model', 'whisper-1');
+
+    const fetch = require('node-fetch');
+    const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        ...formData.getHeaders(),
+      },
+      body: formData,
+    });
+
+    if (!whisperRes.ok) {
+      const err = await whisperRes.json().catch(() => ({}));
+      return res.status(500).json({ success: false, error: err.error?.message || 'Whisper transcription failed' });
+    }
+
+    const whisperData = await whisperRes.json();
+    const transcription = whisperData.text?.trim() || '';
+
+    // Save as activity
+    db.run(
+      "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Voice note', ?)",
+      [lead_id, transcription]
+    );
+
+    res.json({ success: true, data: { transcription } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/:callId', (req, res) => {
   const call = db.get(`
     SELECT c.*, l.business_name, l.phone, l.city, l.state, l.service_type, l.email

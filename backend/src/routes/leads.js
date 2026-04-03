@@ -568,7 +568,7 @@ router.put('/:id', (req, res, next) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [req.params.id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at','dnc_at'];
+    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at','dnc_at','owner_name','direct_phone'];
     const updates = [];
     const params = [];
 

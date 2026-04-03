@@ -356,6 +356,22 @@ export async function flushOverdue(): Promise<{ sent: number; failed: number; sk
   return request('/sequences/flush-overdue', { method: 'POST' });
 }
 
+export interface AutopilotStatus {
+  enabled: boolean;
+  active_enrollments: number;
+  due_now: number;
+  sends_remaining: number;
+  email_configured: boolean;
+}
+
+export async function fetchAutopilotStatus(): Promise<AutopilotStatus> {
+  return request('/sequences/autopilot/status');
+}
+
+export async function setAutopilot(enabled: boolean): Promise<{ sequences_updated: number; enrollments_updated: number }> {
+  return request('/sequences/autopilot', { method: 'POST', body: JSON.stringify({ enabled }) });
+}
+
 export async function markQueueItemSent(enrollmentId: number): Promise<void> {
   return request(`/sequences/queue/${enrollmentId}/mark-sent`, { method: 'POST' });
 }
@@ -566,6 +582,26 @@ export async function whisperCall(callId: number, message: string): Promise<{ se
 
 export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string): Promise<{ updated: number }> {
   return request('/calls/bulk/outcome', { method: 'PATCH', body: JSON.stringify({ call_ids: callIds, outcome }) });
+}
+
+export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number): Promise<{ queued: number }> {
+  return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId }) });
+}
+
+export async function logManualCall(leadId: number, outcome?: string, durationSeconds?: number, templateId?: number): Promise<{ call_id: number }> {
+  return request('/calls/log-manual', { method: 'POST', body: JSON.stringify({ lead_id: leadId, outcome, duration_seconds: durationSeconds, template_id: templateId }) });
+}
+
+export async function sendOutcomeSms(leadId: number, outcome: string): Promise<{ sent?: boolean; skipped?: boolean; sid?: string }> {
+  return request('/calls/outcome-sms', { method: 'POST', body: JSON.stringify({ lead_id: leadId, outcome }) });
+}
+
+export async function scheduleCallback(leadId: number, callbackDatetime: string, notes?: string): Promise<{ scheduled: boolean; sms_sent: boolean }> {
+  return request('/calls/schedule-callback', { method: 'POST', body: JSON.stringify({ lead_id: leadId, callback_datetime: callbackDatetime, notes }) });
+}
+
+export async function uploadVoiceNote(leadId: number, audioBase64: string, mimeType: string): Promise<{ transcription: string }> {
+  return request('/calls/voice-note', { method: 'POST', body: JSON.stringify({ lead_id: leadId, audio_base64: audioBase64, mime_type: mimeType }) });
 }
 
 export async function validateLeadPhone(id: number): Promise<{ phone_valid: boolean; phone_line_type: string | null }> {

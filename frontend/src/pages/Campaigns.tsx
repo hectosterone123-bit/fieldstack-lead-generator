@@ -8,7 +8,7 @@ import { cn } from '../lib/utils';
 import {
   useOutreachQueue, useQueueStats, useMarkSent, useDismissQueueItem,
   useSendEmail, useSendSms, useEmailStatus, useSmsStatus,
-  useSetEnrollmentAutoSend, useSequences, useEnrollLeads, useFlushOverdue, useMarkReplied,
+  useSetEnrollmentAutoSend, useSequences, useEnrollLeads, useFlushOverdue, useMarkReplied, useAutopilot,
 } from '../hooks/useSequences';
 import { fetchLeads, type LeadsFilters } from '../lib/api';
 import { useQuery } from '@tanstack/react-query';
@@ -43,6 +43,8 @@ export function Campaigns() {
   const automateRest = useSetEnrollmentAutoSend();
   const enrollLeads = useEnrollLeads();
   const flushOverdue = useFlushOverdue();
+  const { status: autopilotQuery, toggle: toggleAutopilot } = useAutopilot();
+  const autopilot = autopilotQuery.data;
   const { toast } = useToast();
 
   const [previewItem, setPreviewItem] = useState<OutreachQueueItem | null>(null);
@@ -91,6 +93,60 @@ export function Campaigns() {
         </button>
       </div>
 
+      {/* Autopilot Banner */}
+      <div className={cn(
+        'px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between gap-4',
+        autopilot?.enabled ? 'bg-emerald-500/[0.06]' : 'bg-zinc-900/60'
+      )}>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={cn('p-1.5 rounded-lg', autopilot?.enabled ? 'bg-emerald-500/15' : 'bg-zinc-800')}>
+            <Zap className={cn('w-4 h-4', autopilot?.enabled ? 'text-emerald-400' : 'text-zinc-500')} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-zinc-100">Autopilot</span>
+              {autopilot?.enabled && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 uppercase tracking-wide">Running</span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500 truncate">
+              {!autopilot?.email_configured
+                ? '⚠ Email not configured — go to Settings'
+                : autopilot?.sends_remaining === 0
+                  ? '⚠ Daily send limit reached'
+                  : [
+                      `${autopilot?.active_enrollments ?? 0} enrolled`,
+                      `${autopilot?.due_now ?? 0} due now`,
+                      `${autopilot?.sends_remaining ?? 0} sends left today`,
+                      autopilot?.enabled ? 'Next run ~15 min' : '',
+                    ].filter(Boolean).join(' · ')
+              }
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => flushOverdue.mutate()}
+            disabled={flushOverdue.isPending || !emailConfigured}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 border border-white/[0.06] transition-colors disabled:opacity-40"
+          >
+            {flushOverdue.isPending ? 'Sending…' : 'Send Now'}
+          </button>
+          <button
+            onClick={() => toggleAutopilot.mutate(!autopilot?.enabled)}
+            disabled={toggleAutopilot.isPending || !autopilot?.email_configured}
+            className={cn(
+              'px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-40',
+              autopilot?.enabled
+                ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20'
+                : 'bg-orange-500 text-white hover:bg-orange-400'
+            )}
+          >
+            {toggleAutopilot.isPending ? '…' : autopilot?.enabled ? 'Turn Off' : 'Turn On'}
+          </button>
+        </div>
+      </div>
+
       {/* Stats Bar */}
       <div className="grid grid-cols-6 gap-3 px-5 py-4 border-b border-white/[0.04]">
         <StatCard
@@ -136,6 +192,22 @@ export function Campaigns() {
           bgColor={stats?.sends_remaining === 0 ? 'bg-red-500/10' : 'bg-blue-500/10'}
         />
       </div>
+
+      {/* Send Limit Warning */}
+      {emailConfigured && stats && stats.daily_limit > 0 && stats.sends_remaining <= 10 && (
+        <div className={cn(
+          'flex items-center gap-2 px-5 py-2.5 border-b border-white/[0.04] text-xs',
+          stats.sends_remaining === 0
+            ? 'bg-red-500/[0.06] text-red-400'
+            : 'bg-amber-500/[0.06] text-amber-400'
+        )}>
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {stats.sends_remaining === 0
+            ? 'Daily send limit reached — emails won\'t send until midnight.'
+            : `${stats.sends_remaining} email send${stats.sends_remaining === 1 ? '' : 's'} remaining today (${stats.sent_today}/${stats.daily_limit} used).`
+          }
+        </div>
+      )}
 
       {/* Active Sequences Summary */}
       {activeSequences.length > 0 && (

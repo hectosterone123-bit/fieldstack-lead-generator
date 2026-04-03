@@ -251,7 +251,7 @@ function CallOutcomesCard({ outcomes }: { outcomes: Partial<Record<string, numbe
         )}
       </div>
       {total === 0 ? (
-        <p className="text-xs text-zinc-600 text-center py-4">No AI calls completed today.</p>
+        <p className="text-xs text-zinc-600 text-center py-4">No calls logged today.</p>
       ) : (
         <div className="space-y-2.5">
           {OUTCOME_ROWS.map(({ key, label, textColor, barColor }) => {
