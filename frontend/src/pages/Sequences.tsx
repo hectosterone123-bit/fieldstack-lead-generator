@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import {
-  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail,
+  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
-import { useSequences, useCreateSequence, useUpdateSequence, useDeleteSequence, useToggleSequence } from '../hooks/useSequences';
+import { useSequences, useCreateSequence, useUpdateSequence, useDeleteSequence, useToggleSequence, useSequenceAnalytics } from '../hooks/useSequences';
 import type { SequenceStep } from '../types';
 
 export function Sequences() {
@@ -16,9 +16,12 @@ export function Sequences() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [activeTab, setActiveTab] = useState<'edit' | 'analytics'>('edit');
 
   const selectedSequence = sequences?.find(s => s.id === selectedId) || null;
   const showBuilder = creating || selectedId != null;
+
+  const { data: analytics } = useSequenceAnalytics(activeTab === 'analytics' ? selectedId : null);
 
   function handleSave(data: { name: string; description: string; steps: SequenceStep[]; auto_send?: boolean; auto_send_after_step?: number }) {
     if (creating) {
@@ -76,7 +79,7 @@ export function Sequences() {
               {sequences.map(seq => (
                 <div
                   key={seq.id}
-                  onClick={() => { setSelectedId(seq.id); setCreating(false); }}
+                  onClick={() => { setSelectedId(seq.id); setCreating(false); setActiveTab('edit'); }}
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors group',
                     selectedId === seq.id && 'bg-orange-500/[0.04] border-l-2 border-orange-500'
@@ -145,18 +148,118 @@ export function Sequences() {
           )}
         </div>
 
-        {/* Right: Builder/Editor */}
+        {/* Right: Builder/Editor or Analytics */}
         {showBuilder && (
-          <div className="flex-1 overflow-y-auto p-5">
-            <h2 className="text-sm font-medium text-zinc-300 mb-4">
-              {creating ? 'New Sequence' : `Edit: ${selectedSequence?.name}`}
-            </h2>
-            <SequenceBuilder
-              sequence={creating ? null : selectedSequence}
-              onSave={handleSave}
-              onCancel={handleCancel}
-              saving={createSequence.isPending || updateSequence.isPending}
-            />
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Tabs (only when editing existing, not creating) */}
+            {!creating && selectedId && (
+              <div className="flex items-center gap-1 px-5 pt-4 pb-0 border-b border-white/[0.04]">
+                <button
+                  onClick={() => setActiveTab('edit')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2 text-xs rounded-t-md transition-colors border-b-2 -mb-px',
+                    activeTab === 'edit' ? 'text-zinc-200 border-orange-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'
+                  )}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setActiveTab('analytics')}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2 text-xs rounded-t-md transition-colors border-b-2 -mb-px',
+                    activeTab === 'analytics' ? 'text-zinc-200 border-orange-500' : 'text-zinc-500 border-transparent hover:text-zinc-300'
+                  )}
+                >
+                  <BarChart2 className="w-3 h-3" /> Analytics
+                </button>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {(creating || activeTab === 'edit') ? (
+                <>
+                  {!creating && <h2 className="text-sm font-medium text-zinc-300 mb-4">{selectedSequence?.name}</h2>}
+                  {creating && <h2 className="text-sm font-medium text-zinc-300 mb-4">New Sequence</h2>}
+                  <SequenceBuilder
+                    sequence={creating ? null : selectedSequence}
+                    onSave={handleSave}
+                    onCancel={handleCancel}
+                    saving={createSequence.isPending || updateSequence.isPending}
+                  />
+                </>
+              ) : analytics ? (
+                <div className="space-y-5">
+                  {/* Totals */}
+                  <div className="grid grid-cols-4 gap-3">
+                    {[
+                      { label: 'Enrolled', value: analytics.totals.enrolled },
+                      { label: 'Active', value: analytics.totals.active },
+                      { label: 'Completed', value: analytics.totals.completed },
+                      { label: 'Cancelled', value: analytics.totals.cancelled },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="bg-zinc-800/50 rounded-lg p-3 text-center">
+                        <p className="text-lg font-semibold text-zinc-100 font-data">{value}</p>
+                        <p className="text-[10px] text-zinc-500 mt-0.5">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Per-step funnel */}
+                  <div>
+                    <p className="text-overline text-zinc-600 mb-3">Step Funnel</p>
+                    <div className="space-y-3">
+                      {analytics.steps.map(step => {
+                        const openRate = step.sent > 0 ? Math.round((step.opened / step.sent) * 100) : 0;
+                        const replyRate = step.sent > 0 ? Math.round((step.replied / step.sent) * 100) : 0;
+                        return (
+                          <div key={step.step} className="bg-zinc-800/50 rounded-lg p-3 border border-white/[0.04]">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-400 text-[10px] flex items-center justify-center font-medium">{step.step}</span>
+                                <span className="text-xs text-zinc-300">{step.label}</span>
+                              </div>
+                              <span className="text-xs text-zinc-500">{step.sent} sent</span>
+                            </div>
+                            {step.sent > 0 && (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-violet-500 rounded-full" style={{ width: `${openRate}%` }} />
+                                  </div>
+                                  <span className="text-[10px] text-zinc-400 w-20 text-right">{step.opened} opened ({openRate}%)</span>
+                                </div>
+                                {step.clicked > 0 && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.round((step.clicked / step.sent) * 100)}%` }} />
+                                    </div>
+                                    <span className="text-[10px] text-zinc-400 w-20 text-right">{step.clicked} clicked</span>
+                                  </div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${replyRate}%` }} />
+                                  </div>
+                                  <span className="text-[10px] text-zinc-400 w-20 text-right">{step.replied} replied ({replyRate}%)</span>
+                                </div>
+                                {step.bounced > 0 && (
+                                  <p className="text-[10px] text-red-400">{step.bounced} bounced</p>
+                                )}
+                              </div>
+                            )}
+                            {step.sent === 0 && (
+                              <p className="text-[10px] text-zinc-600">No sends yet</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-16 text-zinc-600 text-sm">Loading analytics...</div>
+              )}
+            </div>
           </div>
         )}
       </div>

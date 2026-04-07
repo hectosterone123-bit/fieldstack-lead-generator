@@ -102,6 +102,8 @@ export function Caller() {
   const [manualLead, setManualLead] = useState<Lead | null>(null);
   const [manualLeadSearch, setManualLeadSearch] = useState('');
   const [manualLeads, setManualLeads] = useState<Lead[]>([]);
+  const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
   const [manualScriptBody, setManualScriptBody] = useState('');
   const [manualObjection, setManualObjection] = useState('');
   const [coaching, setCoaching] = useState('');
@@ -428,15 +430,36 @@ export function Caller() {
     }
   }, [selectedScript, manualLead?.id]);
 
+  const handleManualLeadSearchFocus = async () => {
+    setSearchFocused(true);
+    if (recentLeads.length > 0) return;
+    try {
+      const r = await fetchLeads({ limit: 40, sort: 'last_contacted_at', order: 'desc' });
+      setRecentLeads((r.leads || []).filter((l: Lead) => l.phone));
+    } catch { /* ignore */ }
+  };
+
   const handleManualLeadSearch = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setManualLeadSearch(val);
     setManualLead(null);
     setCoaching('');
     if (val.length < 2) { setManualLeads([]); return; }
+    // Filter client-side first (instant)
+    const q = val.toLowerCase();
+    const local = recentLeads.filter(l =>
+      l.business_name?.toLowerCase().includes(q) ||
+      l.city?.toLowerCase().includes(q) ||
+      l.phone?.includes(q)
+    );
+    setManualLeads(local);
+    // Also fetch from API in case lead isn't in recent list
     try {
       const r = await fetchLeads({ search: val, limit: 20 });
-      setManualLeads((r.leads || []).filter((l: Lead) => l.phone));
+      const remote = (r.leads || []).filter((l: Lead) => l.phone);
+      // Merge: remote first, deduplicate by id
+      const seen = new Set(local.map((l: Lead) => l.id));
+      setManualLeads([...local, ...remote.filter((l: Lead) => !seen.has(l.id))]);
     } catch { /* ignore */ }
   };
 
@@ -444,6 +467,7 @@ export function Caller() {
     setManualLead(lead);
     setManualLeadSearch('');
     setManualLeads([]);
+    setSearchFocused(false);
     setCoaching('');
     setManualOutcome('');
     setWidgetExpanded(false);
@@ -1262,14 +1286,19 @@ export function Caller() {
                 <div className="space-y-2">
                   <input
                     type="text"
-                    placeholder="Search by name or city..."
+                    placeholder="Click to browse recent leads..."
                     value={manualLeadSearch}
                     onChange={handleManualLeadSearch}
+                    onFocus={handleManualLeadSearchFocus}
+                    onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
                     className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-emerald-500/50 [color-scheme:dark]"
                   />
-                  {manualLeads.length > 0 && (
+                  {(manualLeads.length > 0 || (searchFocused && manualLeadSearch.length < 2 && recentLeads.length > 0)) && (
                     <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.06] bg-zinc-800/50 divide-y divide-white/[0.04]">
-                      {manualLeads.map(l => (
+                      {manualLeadSearch.length < 2 && (
+                        <p className="px-3 py-1.5 text-[10px] text-zinc-600 uppercase tracking-wide">Recent leads</p>
+                      )}
+                      {(manualLeads.length > 0 ? manualLeads : recentLeads).map(l => (
                         <button
                           key={l.id}
                           onClick={() => selectManualLead(l)}

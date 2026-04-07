@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchSequences, fetchSequence, createSequence, updateSequence, deleteSequence, toggleSequence,
+  fetchSequences, fetchSequence, fetchSequenceAnalytics, createSequence, updateSequence, deleteSequence, toggleSequence,
   enrollLeads, fetchEnrollments, pauseEnrollment, resumeEnrollment, cancelEnrollment, skipEnrollmentStep,
   fetchOutreachQueue, fetchQueueStats, markQueueItemSent, markQueueItemReplied, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
@@ -18,6 +18,14 @@ export function useSequence(id: number | null) {
   return useQuery({
     queryKey: ['sequence', id],
     queryFn: () => fetchSequence(id!),
+    enabled: id != null,
+  });
+}
+
+export function useSequenceAnalytics(id: number | null) {
+  return useQuery({
+    queryKey: ['sequence-analytics', id],
+    queryFn: () => fetchSequenceAnalytics(id!),
     enabled: id != null,
   });
 }

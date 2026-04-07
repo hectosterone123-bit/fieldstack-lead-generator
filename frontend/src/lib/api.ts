@@ -300,6 +300,13 @@ export async function fetchSequence(id: number): Promise<Sequence> {
   return request(`/sequences/${id}`);
 }
 
+export async function fetchSequenceAnalytics(id: number): Promise<{
+  steps: { step: number; label: string; sent: number; opened: number; clicked: number; replied: number; bounced: number }[];
+  totals: { enrolled: number; active: number; completed: number; cancelled: number };
+}> {
+  return request(`/sequences/${id}/analytics`);
+}
+
 export async function createSequence(data: { name: string; description?: string; steps: any[]; auto_send?: boolean; auto_send_after_step?: number; auto_flush_overdue?: boolean }): Promise<Sequence> {
   return request('/sequences', { method: 'POST', body: JSON.stringify(data) });
 }

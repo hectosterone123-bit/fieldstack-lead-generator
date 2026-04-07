@@ -309,6 +309,8 @@ export interface SequenceStep {
   channel: TemplateChannel;
   template_id: number;
   label: string;
+  from_email?: string;
+  plain_text?: boolean;
 }
 
 export interface Sequence {
@@ -367,6 +369,7 @@ export interface OutreachQueueItem {
   email_opened_at: string | null;
   email_invalid: boolean;
   has_replied: boolean;
+  from_email: string | null;
 }
 
 export interface QueueStats {

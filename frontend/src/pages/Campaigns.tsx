@@ -525,6 +525,9 @@ function PreviewModal({ item, onClose, onMarkSent, onSend, emailConfigured, smsC
               {item.channel === 'sms' && item.lead_phone && (
                 <span className="ml-2 text-emerald-400">{item.lead_phone}</span>
               )}
+              {item.channel === 'email' && item.from_email && (
+                <span className="ml-2 text-zinc-600">from: {item.from_email}</span>
+              )}
             </p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-md hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors">

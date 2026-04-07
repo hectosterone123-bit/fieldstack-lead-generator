@@ -253,6 +253,7 @@ async function initDb() {
 
   // Migration: per-enrollment auto_send flag
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_sent_at DATETIME'); } catch(e) {}
 
   // Migration: auto_flush_overdue — auto-send overdue email/sms steps for opted-in sequences
   try { db.run('ALTER TABLE sequences ADD COLUMN auto_flush_overdue INTEGER DEFAULT 0'); } catch(e) {}
@@ -373,6 +374,10 @@ async function initDb() {
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('vapi_campaign_calls_per_day', '0')"); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN phone_valid INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN phone_line_type TEXT DEFAULT NULL'); } catch(e) {}
+
+  // Migration: missed call text-back
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('missed_call_textback_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('missed_call_textback_message', '')"); } catch(e) {}
 
   // Migration: manual call source tracking
   try { db.run("ALTER TABLE calls ADD COLUMN source TEXT DEFAULT 'ai'"); } catch(e) {}

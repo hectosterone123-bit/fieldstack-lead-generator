@@ -422,4 +422,65 @@ router.post('/vapi', async (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/webhooks/twilio-call-status — Twilio StatusCallback for missed calls
+// Set in Twilio console: Voice → Phone Numbers → Active Numbers → Voice Configuration → StatusCallback URL
+// URL: https://your-app.up.railway.app/api/webhooks/twilio-call-status
+// Status callback events: no-answer, busy, failed
+router.post('/twilio-call-status', async (req, res) => {
+  // Twilio sends form-encoded data
+  const callStatus = req.body.CallStatus;
+  const toNumber = req.body.To; // The number we dialed (lead's phone)
+
+  // Only act on missed/failed calls
+  if (!['no-answer', 'busy', 'failed'].includes(callStatus)) {
+    return res.sendStatus(200);
+  }
+
+  if (!toNumber) return res.sendStatus(200);
+
+  // Check if missed call follow-up is enabled
+  const enabledSetting = db.get("SELECT value FROM settings WHERE key = 'missed_call_textback_enabled'");
+  if (!enabledSetting || enabledSetting.value !== '1') return res.sendStatus(200);
+
+  if (!emailService.isConfigured()) return res.sendStatus(200);
+
+  // Find lead by phone number
+  const normalizedTo = toNumber.replace(/\D/g, '');
+  const lead = db.get(
+    "SELECT * FROM leads WHERE replace(replace(replace(replace(phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?",
+    [`%${normalizedTo.slice(-10)}`]
+  );
+  if (!lead || !lead.email || lead.unsubscribed_at || lead.email_invalid_at) return res.sendStatus(200);
+
+  // Get custom message or use default
+  const msgSetting = db.get("SELECT value FROM settings WHERE key = 'missed_call_textback_message'");
+  const senderName = db.get("SELECT value FROM settings WHERE key = 'sender_name'")?.value || 'Hector';
+  const serviceType = lead.service_type
+    ? lead.service_type.replace(/_/g, ' ')
+    : 'your service';
+
+  let body = msgSetting?.value ||
+    `Hey, this is ${senderName} — I tried calling about your ${serviceType} inquiry but missed you. When's a good time to connect? Feel free to reply here.`;
+
+  // Simple variable substitution
+  body = body.replace(/{sender_name}/g, senderName).replace(/{service_type}/g, serviceType);
+
+  const subject = `Tried reaching you — ${lead.business_name || lead.first_name || 'Hi'}`;
+  const result = await emailService.sendEmail(lead.email, subject, body, { leadId: lead.id });
+
+  if (result.success) {
+    db.run(
+      'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+      [lead.id, 'email_sent', 'Missed call follow-up', `Auto-email sent after ${callStatus} call`,
+       JSON.stringify({ resend_message_id: result.messageId, call_status: callStatus })]
+    );
+    db.run(
+      'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [lead.id]
+    );
+  }
+
+  res.sendStatus(200);
+});
+
 module.exports = router;

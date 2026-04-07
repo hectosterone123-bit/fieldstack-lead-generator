@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -50,6 +50,9 @@ export function Settings() {
   const [speedToLeadTemplateId, setSpeedToLeadTemplateId] = useState('');
   const [vapiCampaignEnabled, setVapiCampaignEnabled] = useState(false);
   const [vapiCampaignCallsPerDay, setVapiCampaignCallsPerDay] = useState('0');
+  const [missedCallTextbackEnabled, setMissedCallTextbackEnabled] = useState(false);
+  const [missedCallTextbackMessage, setMissedCallTextbackMessage] = useState('');
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   const { data: callScripts } = useQuery({
     queryKey: ['call-scripts'],
@@ -96,6 +99,8 @@ export function Settings() {
       setSpeedToLeadTemplateId(settings.speed_to_lead_template_id || '');
       setVapiCampaignEnabled(settings.vapi_campaign_enabled === '1');
       setVapiCampaignCallsPerDay(settings.vapi_campaign_calls_per_day || '0');
+      setMissedCallTextbackEnabled(settings.missed_call_textback_enabled === '1');
+      setMissedCallTextbackMessage(settings.missed_call_textback_message || '');
     }
   }, [settings]);
 
@@ -148,6 +153,8 @@ export function Settings() {
       { key: 'speed_to_lead_template_id', value: speedToLeadTemplateId },
       { key: 'vapi_campaign_enabled', value: vapiCampaignEnabled ? '1' : '0' },
       { key: 'vapi_campaign_calls_per_day', value: vapiCampaignCallsPerDay },
+      { key: 'missed_call_textback_enabled', value: missedCallTextbackEnabled ? '1' : '0' },
+      { key: 'missed_call_textback_message', value: missedCallTextbackMessage },
     ]);
   }
 
@@ -281,6 +288,36 @@ export function Settings() {
             className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
           />
         </div>
+
+        {/* Email Tracking Setup */}
+        {appUrl && (
+          <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Mail className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Email Tracking Setup</h2>
+            </div>
+            <p className="text-xs text-zinc-500 mb-3">
+              Add this webhook URL in your <a href="https://resend.com/webhooks" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">Resend dashboard</a> to track opens, clicks, and bounces.
+            </p>
+            <div className="flex items-center gap-2 mb-3">
+              <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
+                {appUrl}/api/webhooks/resend
+              </code>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${appUrl}/api/webhooks/resend`);
+                  setWebhookCopied(true);
+                  setTimeout(() => setWebhookCopied(false), 2000);
+                }}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              >
+                {webhookCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {webhookCopied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-zinc-600">Enable events: email.opened · email.clicked · email.bounced · email.complained</p>
+          </div>
+        )}
 
         {/* Autopilot */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
@@ -729,6 +766,57 @@ export function Settings() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Missed Call Text-Back */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <PhoneOutgoing className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Missed Call Follow-Up Email</h2>
+            </div>
+            <button
+              onClick={() => setMissedCallTextbackEnabled(!missedCallTextbackEnabled)}
+              className={`relative w-9 h-5 rounded-full transition-colors ${missedCallTextbackEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${missedCallTextbackEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Auto-sends an email when a call goes unanswered, busy, or fails. Requires Resend configured and the Twilio StatusCallback URL set on your phone number. Only sends if the lead has a valid email.
+          </p>
+          <div className="mb-3">
+            <label className="text-xs text-zinc-500 mb-1 block">Email Body Template</label>
+            <textarea
+              value={missedCallTextbackMessage}
+              onChange={e => setMissedCallTextbackMessage(e.target.value)}
+              placeholder={`Hey, this is {sender_name} — I tried calling about your {service_type} inquiry but missed you. When's a good time to connect? Feel free to reply here.`}
+              rows={3}
+              className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark] resize-none"
+            />
+            <p className="text-[10px] text-zinc-600 mt-1">Leave blank to use the default. Supports {'{sender_name}'} and {'{service_type}'}.</p>
+          </div>
+          {appUrl && (
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Twilio StatusCallback URL</label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
+                  {appUrl}/api/webhooks/twilio-call-status
+                </code>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${appUrl}/api/webhooks/twilio-call-status`);
+                    setWebhookCopied(true);
+                    setTimeout(() => setWebhookCopied(false), 2000);
+                  }}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                >
+                  {webhookCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {webhookCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Save */}

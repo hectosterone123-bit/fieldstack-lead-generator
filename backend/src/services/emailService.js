@@ -39,25 +39,36 @@ function getAppUrl() {
   return process.env.APP_URL || getSetting('app_url');
 }
 
-async function sendEmail(to, subject, htmlBody, { leadId } = {}) {
+async function sendEmail(to, subject, htmlBody, { leadId, fromEmail, plainText } = {}) {
   const client = getClient();
   if (!client) return { success: false, error: 'Resend API key not configured' };
 
   const toEmail = Array.isArray(to) ? to[0] : to;
+  const appUrl = getAppUrl();
 
   // Append unsubscribe link (CAN-SPAM compliance)
-  const appUrl = getAppUrl();
-  const footer = appUrl
-    ? `\n\n---\nTo unsubscribe: ${appUrl}/api/leads/unsubscribe?email=${encodeURIComponent(toEmail)}`
-    : '';
-  const body = htmlBody + footer;
+  const unsubUrl = appUrl
+    ? `${appUrl}/api/leads/unsubscribe?email=${encodeURIComponent(toEmail)}`
+    : null;
+  const footer = unsubUrl ? `\n\n---\nTo unsubscribe: ${unsubUrl}` : '';
+  const textBody = htmlBody.replace(/<[^>]*>/g, '') + footer;
 
   const payload = {
-    from: getFromAddress(),
+    from: fromEmail || getFromAddress(),
     to: Array.isArray(to) ? to : [to],
     subject,
-    html: body,
-    text: body.replace(/<[^>]*>/g, ''),
+    // plain_text mode: only send text, no HTML — looks like a real human email
+    ...(plainText
+      ? { text: textBody }
+      : { html: htmlBody + footer, text: textBody }
+    ),
+    headers: {
+      // One-click unsubscribe (RFC 8058) — Gmail shows "Unsubscribe" button next to sender name
+      ...(unsubUrl && {
+        'List-Unsubscribe': `<${unsubUrl}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      }),
+    },
   };
 
   // Per-lead reply-to: reply+{lead_id}@domain.com for future inbound parsing

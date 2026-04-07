@@ -35,8 +35,10 @@ function getRemainingBudget() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function startSequenceScheduler() {
-  // Run every 15 minutes during Central business hours (13-22 UTC = 8am-5pm CDT / 7am-4pm CST)
-  cron.schedule('*/15 13-22 * * 1-5', async () => {
+  const TZ = { timezone: 'America/Chicago' };
+
+  // Run every 15 minutes during Central business hours (8am-5pm Mon-Fri)
+  cron.schedule('*/15 8-17 * * 1-5', async () => {
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
@@ -46,9 +48,9 @@ function startSequenceScheduler() {
     } catch (err) {
       console.error('[Scheduler] Error:', err.message);
     }
-  });
+  }, TZ);
 
-  // Daily digest + re-queue at 7am
+  // Daily digest + re-queue at 7am CT
   cron.schedule('0 7 * * *', async () => {
     try {
       await sendDailyDigest();
@@ -56,10 +58,10 @@ function startSequenceScheduler() {
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
     }
-  });
+  }, TZ);
 
   // Campaign mode — auto-dial from queue every 5 min during business hours
-  cron.schedule('*/5 13-22 * * 1-5', async () => {
+  cron.schedule('*/5 8-17 * * 1-5', async () => {
     try {
       const enabled = db.get("SELECT value FROM settings WHERE key = 'vapi_campaign_enabled'")?.value;
       if (enabled !== '1') return;
@@ -82,7 +84,7 @@ function startSequenceScheduler() {
     } catch (err) {
       console.error('[Campaign] Error:', err.message);
     }
-  });
+  }, TZ);
 
   // Callback alarm — every 5 minutes, alert on imminent callbacks
   cron.schedule('*/5 * * * *', async () => {
@@ -183,8 +185,8 @@ async function autoSendDueItems() {
     const step = steps.find(s => s.order === enrollment.current_step);
     if (!step) continue;
 
-    const enrolledAt = new Date(enrollment.enrolled_at);
-    const dueDate = new Date(enrolledAt);
+    const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
 
@@ -203,7 +205,7 @@ async function autoSendDueItems() {
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
-        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
 
         if (!result.success) {
           console.error(`[Scheduler] Email failed for enrollment ${enrollment.id}: ${result.error}`);
@@ -214,7 +216,7 @@ async function autoSendDueItems() {
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { failed++; continue; }
@@ -262,12 +264,12 @@ async function autoSendDueItems() {
       const nextStep = enrollment.current_step + 1;
       if (nextStep > steps.length) {
         db.run(
-          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [nextStep, enrollment.id]
         );
       } else {
         db.run(
-          'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
           [nextStep, enrollment.id]
         );
       }
@@ -331,8 +333,8 @@ async function autoFlushOverdueItems() {
     // Only auto-flush email and sms channels — loom/call stay manual
     if (step.channel !== 'email' && step.channel !== 'sms') continue;
 
-    const enrolledAt = new Date(enrollment.enrolled_at);
-    const dueDate = new Date(enrolledAt);
+    const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
 
@@ -351,7 +353,7 @@ async function autoFlushOverdueItems() {
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
-        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
 
         if (!result.success) {
           console.error(`[Scheduler] Flush email failed for enrollment ${enrollment.id}: ${result.error}`);
@@ -362,7 +364,7 @@ async function autoFlushOverdueItems() {
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { failed++; continue; }
@@ -407,12 +409,12 @@ async function autoFlushOverdueItems() {
       const nextStep = enrollment.current_step + 1;
       if (nextStep > steps.length) {
         db.run(
-          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [nextStep, enrollment.id]
         );
       } else {
         db.run(
-          'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
           [nextStep, enrollment.id]
         );
       }
@@ -487,7 +489,7 @@ async function sendDailyDigest() {
 
   // Loom videos due today (step 2 = manual Loom step)
   const loomDue = db.all(`
-    SELECT ls.id, ls.enrolled_at, l.business_name, l.city, l.state, s.steps as sequence_steps, ls.current_step
+    SELECT ls.id, ls.enrolled_at, ls.last_sent_at, l.business_name, l.city, l.state, s.steps as sequence_steps, ls.current_step
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -499,7 +501,7 @@ async function sendDailyDigest() {
       const steps = JSON.parse(e.sequence_steps);
       const step = steps.find(s => s.order === e.current_step);
       if (!step) return false;
-      const enrolled = new Date(e.enrolled_at || Date.now());
+      const enrolled = new Date(e.last_sent_at || e.enrolled_at || Date.now());
       const due = new Date(enrolled);
       due.setDate(due.getDate() + step.delay_days);
       due.setHours(0, 0, 0, 0);
@@ -603,8 +605,8 @@ async function flushOverdueNow() {
 
     if (step.channel !== 'email' && step.channel !== 'sms') { skipped++; continue; }
 
-    const enrolledAt = new Date(enrollment.enrolled_at);
-    const dueDate = new Date(enrolledAt);
+    const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
 
@@ -618,12 +620,12 @@ async function flushOverdueNow() {
         if (!enrollment.email || !emailService.isConfigured()) { failed++; continue; }
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
-        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id });
+        const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
         if (!result.success) { failed++; continue; }
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `On-demand flush: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone || !smsService.isConfigured()) { failed++; continue; }
@@ -656,9 +658,9 @@ async function flushOverdueNow() {
 
       const nextStep = enrollment.current_step + 1;
       if (nextStep > steps.length) {
-        db.run("UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [nextStep, enrollment.id]);
+        db.run("UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [nextStep, enrollment.id]);
       } else {
-        db.run('UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStep, enrollment.id]);
+        db.run('UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [nextStep, enrollment.id]);
       }
 
       sent++;

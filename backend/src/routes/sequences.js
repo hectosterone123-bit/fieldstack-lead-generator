@@ -80,8 +80,8 @@ router.get('/queue', (req, res) => {
     const step = steps.find(s => s.order === enrollment.current_step);
     if (!step) continue;
 
-    const enrolledAt = new Date(enrollment.enrolled_at);
-    const dueDate = new Date(enrolledAt);
+    const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
 
@@ -119,6 +119,7 @@ router.get('/queue', (req, res) => {
         email_opened_at: enrollment.email_opened_at || null,
         email_invalid: !!enrollment.email_invalid_at,
         has_replied: !!enrollment.has_replied,
+        from_email: step.from_email || null,
       });
     }
   }
@@ -144,7 +145,7 @@ router.post('/flush-overdue', async (_req, res) => {
 
 router.get('/queue/stats', (req, res) => {
   const enrollments = db.all(`
-    SELECT ls.current_step, ls.enrolled_at, s.steps as sequence_steps
+    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     WHERE ls.status = 'active'
@@ -164,8 +165,8 @@ router.get('/queue/stats', (req, res) => {
     const step = steps.find(s => s.order === enrollment.current_step);
     if (!step) continue;
 
-    const enrolledAt = new Date(enrollment.enrolled_at);
-    const dueDate = new Date(enrolledAt);
+    const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
 
@@ -187,7 +188,7 @@ router.get('/autopilot/status', (req, res) => {
   const activeEnrollments = db.get("SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'active'")?.count || 0;
 
   const enrollments = db.all(`
-    SELECT ls.current_step, ls.enrolled_at, s.steps as sequence_steps
+    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps
     FROM lead_sequences ls JOIN sequences s ON ls.sequence_id = s.id
     WHERE ls.status = 'active'
   `);
@@ -197,7 +198,8 @@ router.get('/autopilot/status', (req, res) => {
     const steps = parseSteps({ steps: e.sequence_steps });
     const step = steps.find(s => s.order === e.current_step);
     if (!step) continue;
-    const dueDate = new Date(e.enrolled_at);
+    const baseDate = e.last_sent_at ? new Date(e.last_sent_at) : new Date(e.enrolled_at);
+    const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
     dueDate.setHours(0, 0, 0, 0);
     if (dueDate <= now) due_now++;
@@ -261,12 +263,12 @@ router.post('/queue/:enrollmentId/mark-sent', (req, res) => {
   const nextStep = enrollment.current_step + 1;
   if (nextStep > steps.length) {
     db.run(
-      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [nextStep, enrollmentId]
     );
   } else {
     db.run(
-      'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [nextStep, enrollmentId]
     );
   }
@@ -285,12 +287,12 @@ router.post('/queue/:enrollmentId/dismiss', (req, res) => {
   const nextStep = enrollment.current_step + 1;
   if (nextStep > steps.length) {
     db.run(
-      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [nextStep, enrollmentId]
     );
   } else {
     db.run(
-      'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [nextStep, enrollmentId]
     );
   }
@@ -340,7 +342,7 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   const subject = renderTemplate(template.subject, lead);
   const body = renderTemplate(template.body, lead);
 
-  const result = await emailService.sendEmail(lead.email, subject, body, { leadId: enrollment.lead_id });
+  const result = await emailService.sendEmail(lead.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
   if (!result.success) {
     return res.status(500).json({ success: false, error: result.error });
   }
@@ -349,7 +351,7 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   db.run(
     'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
     [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`,
-     JSON.stringify({ resend_message_id: result.messageId })]
+     JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
   );
 
   // Update lead contact tracking
@@ -371,12 +373,12 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   const nextStep = enrollment.current_step + 1;
   if (nextStep > steps.length) {
     db.run(
-      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [nextStep, enrollmentId]
     );
   } else {
     db.run(
-      'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [nextStep, enrollmentId]
     );
   }
@@ -447,12 +449,12 @@ router.post('/queue/:enrollmentId/send-sms', async (req, res) => {
   const nextStep = enrollment.current_step + 1;
   if (nextStep > steps.length) {
     db.run(
-      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [nextStep, enrollmentId]
     );
   } else {
     db.run(
-      'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [nextStep, enrollmentId]
     );
   }
@@ -611,12 +613,12 @@ router.patch('/enrollments/:enrollmentId/skip', (req, res) => {
   const nextStep = enrollment.current_step + 1;
   if (nextStep > steps.length) {
     db.run(
-      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [nextStep, enrollmentId]
     );
   } else {
     db.run(
-      'UPDATE lead_sequences SET current_step = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [nextStep, enrollmentId]
     );
   }
@@ -656,6 +658,69 @@ router.post('/', (req, res) => {
 
   const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [lastInsertRowid]);
   res.json({ success: true, data: { ...sequence, steps: parseSteps(sequence) } });
+});
+
+router.get('/:id/analytics', (req, res) => {
+  const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);
+  if (!sequence) return res.status(404).json({ success: false, error: 'Sequence not found' });
+
+  const steps = parseSteps(sequence);
+
+  // Enrollment totals
+  const enrollmentRows = db.all(
+    'SELECT status, current_step FROM lead_sequences WHERE sequence_id = ?',
+    [req.params.id]
+  );
+  const totalEnrolled = enrollmentRows.length;
+  const active = enrollmentRows.filter(r => r.status === 'active').length;
+  const completed = enrollmentRows.filter(r => r.status === 'completed').length;
+  const cancelled = enrollmentRows.filter(r => r.status === 'cancelled').length;
+
+  // Aggregate per-step from activity metadata (where sequence_id is stored going forward)
+  // Also check title pattern "(Step N)" for backwards compatibility
+  const allActivities = db.all(
+    "SELECT type, metadata, title FROM activities WHERE lead_id IN (SELECT lead_id FROM lead_sequences WHERE sequence_id = ?)",
+    [req.params.id]
+  );
+
+  const stepMap = {};
+  for (const step of steps) {
+    stepMap[step.order] = { step: step.order, label: step.label, sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+  }
+
+  for (const act of allActivities) {
+    let stepOrder = null;
+    // Prefer structured metadata
+    if (act.metadata) {
+      try {
+        const meta = JSON.parse(act.metadata);
+        if (meta.sequence_id == req.params.id && meta.step_order) {
+          stepOrder = meta.step_order;
+        }
+      } catch {}
+    }
+    // Fallback: parse "(Step N)" from title
+    if (!stepOrder && act.title) {
+      const m = act.title.match(/\(Step (\d+)\)$/);
+      if (m) stepOrder = parseInt(m[1]);
+    }
+
+    if (!stepOrder || !stepMap[stepOrder]) continue;
+
+    if (act.type === 'email_sent') stepMap[stepOrder].sent++;
+    else if (act.type === 'email_opened') stepMap[stepOrder].opened++;
+    else if (act.type === 'email_clicked') stepMap[stepOrder].clicked++;
+    else if (act.type === 'email_replied') stepMap[stepOrder].replied++;
+    else if (act.type === 'email_bounced') stepMap[stepOrder].bounced++;
+  }
+
+  res.json({
+    success: true,
+    data: {
+      steps: Object.values(stepMap),
+      totals: { enrolled: totalEnrolled, active, completed, cancelled },
+    },
+  });
 });
 
 router.get('/:id', (req, res) => {

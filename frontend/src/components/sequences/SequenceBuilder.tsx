@@ -249,6 +249,33 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
                   </select>
                 </div>
 
+                {/* From Email + plain text (email steps only) */}
+                {step.channel === 'email' && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500 shrink-0 w-16">From</span>
+                      <input
+                        value={step.from_email || ''}
+                        onChange={e => updateStep(index, { from_email: e.target.value || undefined })}
+                        placeholder="Default sender"
+                        className="flex-1 px-2 py-1 rounded bg-zinc-900 border border-white/[0.06] text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/50"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-zinc-500 w-16">Plain text</span>
+                        <span className="text-[10px] text-zinc-600">Better deliverability for cold outreach</span>
+                      </div>
+                      <button
+                        onClick={() => updateStep(index, { plain_text: !step.plain_text })}
+                        className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${step.plain_text ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                      >
+                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${step.plain_text ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-1">
                   <button onClick={() => moveStep(index, -1)} disabled={index === 0} className="w-6 h-6 rounded hover:bg-zinc-700 flex items-center justify-center text-zinc-500 hover:text-zinc-300 disabled:opacity-30 disabled:cursor-default">
