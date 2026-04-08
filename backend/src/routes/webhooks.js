@@ -5,6 +5,36 @@ const smsService = require('../services/smsService');
 const emailService = require('../services/emailService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
 
+// Resend webhook signature verification (svix)
+function verifyResendSignature(req) {
+  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  if (!secret) return true; // skip if not configured
+  try {
+    const { Webhook } = require('svix');
+    const wh = new Webhook(secret);
+    wh.verify(req.rawBody || Buffer.from(JSON.stringify(req.body)), req.headers);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Twilio request signature verification
+function verifyTwilioSignature(req) {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) return true; // skip if not configured
+  try {
+    const twilio = require('twilio');
+    const appUrl = process.env.APP_URL || db.get("SELECT value FROM settings WHERE key = 'app_url'")?.value || '';
+    if (!appUrl) return true; // can't verify without URL
+    const signature = req.headers['x-twilio-signature'] || '';
+    const url = `${appUrl}/api/webhooks/twilio-call-status`;
+    return twilio.validateRequest(authToken, signature, url, req.body || {});
+  } catch {
+    return false;
+  }
+}
+
 // Helper: calculate the UTC datetime of the next calling window (8 AM or 4 PM local)
 function nextCallingWindowUtc(state) {
   const STATE_TO_TZ = {
@@ -46,6 +76,7 @@ function nextCallingWindowUtc(state) {
 // URL: https://your-app.up.railway.app/api/webhooks/resend
 // Events to enable: email.opened, email.clicked, email.bounced, email.complained
 router.post('/resend', async (req, res) => {
+  if (!verifyResendSignature(req)) return res.status(400).json({ error: 'Invalid signature' });
   const { type, data } = req.body;
 
   // Helper: find lead_id by resend message ID
@@ -175,6 +206,12 @@ router.post('/email-inbound', (req, res) => {
   db.run(
     'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
     [leadId, 'note', 'Sequence auto-paused', 'Lead replied via email (auto-detected) — all active sequences paused']
+  );
+
+  // Advance lead to qualified if still in early stage
+  db.run(
+    "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
+    [leadId]
   );
 
   res.json({ ok: true, lead_id: leadId });
@@ -427,6 +464,7 @@ router.post('/vapi', async (req, res) => {
 // URL: https://your-app.up.railway.app/api/webhooks/twilio-call-status
 // Status callback events: no-answer, busy, failed
 router.post('/twilio-call-status', async (req, res) => {
+  if (!verifyTwilioSignature(req)) return res.status(403).send('Forbidden');
   // Twilio sends form-encoded data
   const callStatus = req.body.CallStatus;
   const toNumber = req.body.To; // The number we dialed (lead's phone)

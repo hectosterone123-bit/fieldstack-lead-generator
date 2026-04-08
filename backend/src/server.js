@@ -25,7 +25,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+// Capture raw body before JSON parsing — needed for Resend webhook signature verification
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; }
+}));
 app.use(express.urlencoded({ extended: false }));
 
 // Routes (mounted after DB is ready)

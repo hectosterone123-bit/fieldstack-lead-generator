@@ -7,6 +7,19 @@ const { recomputeHeatScore } = require('./heatScoreService');
 
 const MAX_SENDS_PER_TICK = 20;
 
+// Track daily limit alert so it fires at most once per day
+let limitAlertSentDate = '';
+
+async function sendAlert(subject, body) {
+  try {
+    const alertEmail = db.get("SELECT value FROM settings WHERE key = 'digest_email'")?.value;
+    if (!alertEmail || !emailService.isConfigured()) return;
+    await emailService.sendEmail(alertEmail, `[FieldStack Alert] ${subject}`, body);
+  } catch (e) {
+    console.error('[Scheduler] Alert email failed:', e.message);
+  }
+}
+
 function getWarmupLimit(startDate) {
   const dayNum = Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1;
   if (dayNum <= 3) return 5;
@@ -47,6 +60,7 @@ function startSequenceScheduler() {
       logPendingCount();
     } catch (err) {
       console.error('[Scheduler] Error:', err.message);
+      sendAlert('Scheduler error', `The sequence scheduler encountered an error:\n\n${err.message}\n\nCheck Railway logs for details.`);
     }
   }, TZ);
 
@@ -167,7 +181,15 @@ async function autoSendDueItems() {
   if (enrollments.length === 0) return;
 
   let { remaining } = getRemainingBudget();
-  if (remaining <= 0) { console.log('[scheduler] daily send limit reached, skipping auto-send'); return; }
+  if (remaining <= 0) {
+    console.log('[scheduler] daily send limit reached, skipping auto-send');
+    const today = new Date().toISOString().slice(0, 10);
+    if (limitAlertSentDate !== today) {
+      limitAlertSentDate = today;
+      sendAlert('Daily send limit reached', `Your daily email send limit has been reached. No more sequence emails will be sent today.\n\nLimit: ${getRemainingBudget().dailyLimit} emails/day.\n\nIncrease it in Settings → Daily Send Limit.`);
+    }
+    return;
+  }
 
   const now = new Date();
   now.setHours(0, 0, 0, 0);
@@ -283,6 +305,12 @@ async function autoSendDueItems() {
 
   if (sent > 0 || failed > 0) {
     console.log(`[Scheduler] Auto-send: ${sent} sent, ${failed} failed`);
+    if (failed > 0 && failed >= sent) {
+      sendAlert(
+        `High email failure rate (${failed} failed, ${sent} sent)`,
+        `The sequence scheduler had a high failure rate in the last tick.\n\nFailed: ${failed}\nSent: ${sent}\n\nCheck that your Resend API key is valid and your sending domain is verified.`
+      );
+    }
   }
 }
 
