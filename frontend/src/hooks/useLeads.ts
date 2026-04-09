@@ -4,7 +4,7 @@ import {
   deleteLead, patchLeadStatus, patchLeadHeatScore, logActivity, enrichLead,
   fetchFollowups, snoozeLead, bulkUpdateLeads, bulkEnrichLeads,
   testSubmitLead, testRespondLead, sendLeadEmail,
-  fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms,
+  fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms, fetchGbpData,
   type LeadsFilters
 } from '../lib/api';
 
@@ -201,6 +201,16 @@ export function useFindLeadEmail() {
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['lead', id] });
       qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
+
+export function useFetchGbpData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => fetchGbpData(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
     },
   });
 }

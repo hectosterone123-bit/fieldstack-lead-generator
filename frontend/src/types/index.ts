@@ -81,6 +81,7 @@ export interface Lead {
   notes: string | null;
   owner_name: string | null;
   direct_phone: string | null;
+  linkedin_url: string | null;
   gatekeeper_count: number;
   enrichment_data: string | null;
   enriched_at: string | null;
@@ -497,5 +498,6 @@ export interface CallQueueItem {
   last_contacted_at?: string | null;
   owner_name?: string | null;
   direct_phone?: string | null;
+  linkedin_url?: string | null;
   gatekeeper_count?: number;
 }

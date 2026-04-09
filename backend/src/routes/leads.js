@@ -568,7 +568,7 @@ router.put('/:id', (req, res, next) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [req.params.id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at','dnc_at','owner_name','direct_phone'];
+    const fields = ['business_name','first_name','last_name','email','phone','address','city','state','zip','service_type','status','heat_score','estimated_value','website','has_website','website_live','notes','next_followup_at','tags','proposal_amount','proposal_date','close_date','won_amount','lost_reason','loom_url','ghost_time','test_submitted_at','test_responded_at','dnc_at','owner_name','direct_phone','linkedin_url'];
     const updates = [];
     const params = [];
 
@@ -781,6 +781,57 @@ router.post('/:id/find-email', async (req, res, next) => {
     );
 
     res.json({ success: true, data: { emails, saved } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/fetch-gbp — fetch Google Places reviews + enrich lead with place_id / maps URL
+// Requires GOOGLE_PLACES_API_KEY env var
+router.post('/:id/fetch-gbp', async (req, res, next) => {
+  try {
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!apiKey) return res.status(400).json({ success: false, error: 'GOOGLE_PLACES_API_KEY not configured' });
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    let placeId = lead.google_place_id;
+
+    // Step 1: Text Search to get place_id (skip if already saved)
+    if (!placeId) {
+      const query = encodeURIComponent(`${lead.business_name} ${lead.city || ''} ${lead.state || ''}`);
+      const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&type=establishment&key=${apiKey}`;
+      const searchRes = await fetch(searchUrl);
+      const searchData = await searchRes.json();
+      if (!searchData.results?.length) {
+        return res.json({ success: true, data: { found: false } });
+      }
+      placeId = searchData.results[0].place_id;
+    }
+
+    // Step 2: Place Details — get phone, maps URL, reviews
+    const fields = 'name,formatted_phone_number,url,reviews';
+    const detailUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=${fields}&key=${apiKey}`;
+    const detailRes = await fetch(detailUrl);
+    const detailData = await detailRes.json();
+    const result = detailData.result;
+    if (!result) return res.json({ success: true, data: { found: false } });
+
+    const mapsUrl = result.url || null;
+    const phone = result.formatted_phone_number || null;
+    const reviews = (result.reviews || []).map(r => ({
+      author: r.author_name,
+      rating: r.rating,
+      text: r.text,
+      ago: r.relative_time_description,
+    }));
+
+    // Save place_id + maps_url back to lead
+    db.run(
+      'UPDATE leads SET google_place_id = ?, google_maps_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [placeId, mapsUrl, lead.id]
+    );
+
+    res.json({ success: true, data: { found: true, maps_url: mapsUrl, phone, reviews } });
   } catch (err) { next(err); }
 });
 

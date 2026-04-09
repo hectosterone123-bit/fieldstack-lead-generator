@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -53,6 +53,7 @@ export function Settings() {
   const [missedCallTextbackEnabled, setMissedCallTextbackEnabled] = useState(false);
   const [missedCallTextbackMessage, setMissedCallTextbackMessage] = useState('');
   const [webhookCopied, setWebhookCopied] = useState(false);
+  const [inboundCopied, setInboundCopied] = useState(false);
 
   const { data: callScripts } = useQuery({
     queryKey: ['call-scripts'],
@@ -767,6 +768,47 @@ export function Settings() {
             )}
           </div>
         </div>
+
+        {/* Inbound Reply Detection */}
+        {appUrl && replyToEmail && (
+          <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <MailCheck className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Inbound Reply Detection</h2>
+            </div>
+            <p className="text-xs text-zinc-500 mb-3">
+              When a lead replies to a sequence email, their sequences auto-pause and they're marked <span className="text-violet-400">Qualified</span>. Requires Resend inbound email enabled and MX records set on your reply domain.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">Resend Inbound Webhook URL</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
+                    {appUrl}/api/webhooks/email-inbound
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${appUrl}/api/webhooks/email-inbound`);
+                      setInboundCopied(true);
+                      setTimeout(() => setInboundCopied(false), 2000);
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                  >
+                    {inboundCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {inboundCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">DNS — MX Record (add to your reply domain)</label>
+                <code className="block px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-400 border border-white/[0.04]">
+                  {replyToEmail.split('@')[1] || 'mail.yourdomain.com'} &nbsp;MX &nbsp;10 &nbsp;inbound.resend.com
+                </code>
+              </div>
+              <p className="text-[10px] text-zinc-600">Enable inbound email in your Resend dashboard → Domains → your domain → Inbound. Replies to <span className="text-zinc-500">reply+*@{replyToEmail.split('@')[1] || 'yourdomain.com'}</span> will trigger this webhook.</p>
+            </div>
+          </div>
+        )}
 
         {/* Missed Call Text-Back */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">

@@ -386,6 +386,7 @@ async function initDb() {
   try { db.run('ALTER TABLE leads ADD COLUMN owner_name TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN direct_phone TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN gatekeeper_count INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE leads ADD COLUMN linkedin_url TEXT'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_link', '')"); } catch(e) {}
 
   // Seed default templates if table is empty
@@ -406,6 +407,12 @@ async function initDb() {
 
   // Migration: seed post-call SMS follow-up templates
   migratePostCallSmsTemplates();
+
+  // Migration: upgrade cold call scripts with Hormozi/Gong frameworks
+  migrateColdCallScriptsV2();
+
+  // Migration: add "I Built You Something" pre-built value opener script
+  migrateColdCallScriptsV3();
 
   saveDb();
   return db;
@@ -1242,6 +1249,228 @@ IF THEY'RE CLEARLY ANNOYED:
 Then email: Subject "Just tried calling you" with a 3-line pitch and booking link.`,
     },
   ];
+}
+
+function migrateColdCallScriptsV2() {
+  // Check if already migrated (sentinel: warm lead script exists)
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — Warm Lead Callback' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Upgrading cold call scripts with Hormozi/Gong frameworks...');
+
+  // Update master reference card
+  const masterBody = `OBJECTION HANDLING — AAA SYSTEM (Acknowledge → Associate → Ask)
+
+For every objection: don't defend, don't pitch — redirect with a question.
+
+---
+
+"I'm not interested"
+→ Acknowledge: "Totally fair."
+→ Associate: "Most contractors I talk to said the same thing — until they realized how many leads they were losing after hours."
+→ Ask: "Quick question: when a homeowner fills out your website form at 9 PM, what happens to it?"
+
+"Send me an email"
+→ "For sure. Quick question so I send the right thing — are you getting website leads right now, or mostly referrals?"
+[After they answer, lock a follow-up slot:]
+→ "I'll send that over — better to reach you Thursday or Friday to make sure it landed?"
+
+"I'm busy"
+→ "That's exactly why this exists — you're too busy to chase leads. When's a better 10 minutes — before 8 AM or after 5?"
+
+"How much?"
+→ Mechanic Close: "Depends on volume — same way a doctor can't give a diagnosis over the phone. But the guarantee is the real answer: 5 booked quotes or you don't pay. Worth seeing how it works first?"
+
+"I already have something for that"
+→ "Nice — what are you using?" [listen] "Got it. Does it respond at 10 PM on a Saturday?"
+
+"Is this AI? I don't trust that"
+→ "That's the most common thing I hear. Then I show them a screenshot of an actual conversation and they can't tell it's not a person. Can I send you one right now?"
+
+"I need to think about it"
+→ Zoom Out Close: "Totally. Here's the real picture — best case you add 5+ booked jobs a month. Worst case, our guarantee means you pay nothing. Which part would you want to think about more?"
+
+"We're good on leads"
+→ "Good to hear. So you're responding to every single one within 5 minutes? Because that's the bar — anything slower and homeowners move on to whoever calls them first."
+
+---
+
+OPENERS THAT ACTUALLY WORK (Gong data, 300M+ calls)
+
+✅ "How've you been?" [as if you've spoken before] — 6.6x better than average
+✅ "The reason I'm calling is..." — 2x more effective than calls that never explain why
+✅ "I have no idea if this is relevant — can I take 30 seconds?" — Sandler upfront contract, they almost always say yes
+
+❌ NEVER say "Did I catch you at a bad time?" — drops booking rate by 40%
+❌ NEVER open with your company name and full pitch — they tune out in 3 seconds
+
+---
+
+PRE-CALL CHECKLIST (5 min max)
+
+1. Look up their website. Contact form? → "I saw your site has a form — what happens when someone submits it?"
+2. Check Google reviews. 50+ reviews + 4.8 stars = busy and missing leads. Few reviews = needs volume.
+3. Note trade + city. Use both in the opener. "{service_type} in {city}" lands harder than "contractors."
+4. Have your calendar open. When they say yes → "How's Thursday at 4?" Don't say "I'll send a link."
+5. Goal = calls made, not time spent. "15 calls" beats "1 hour."
+
+---
+
+TWO-SLOT CLOSE (always use this instead of open-ended "when works?")
+→ "I've got Thursday morning or Friday afternoon — which is better for you?"
+→ If they stall: "I can do either — which is less bad?"
+
+---
+
+VOICEMAIL (under 12 seconds — create a curiosity gap):
+"Hey {first_name}, this is {sender_name} — quick question about your website leads. I'll text you."
+[Then immediately text:] "Hey, just tried calling. Found something specific to {service_type} contractors in {city} that's worth 2 minutes. When can I show you?"
+
+---
+
+MINDSET:
+• They need you more than you need them. One lost $8K job a week = $400K/year walking out the door.
+• Rejection is data. Track your most common objection and sharpen that rebuttal.
+• Stand up when you call — voice changes, energy goes up.
+• Call in batches of 10–15. First 3 are warmup. Stride hits at call 5.
+• The person asking questions is the person closing.`;
+
+  db.run(
+    "UPDATE templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE name = 'Cold Call — Objection Handling & Pre-Call Checklist' AND is_default = 1",
+    [masterBody]
+  );
+
+  // Add warm lead callback script
+  const warmLeadBody = `GOAL: Convert a warm lead (form submission, referral, or prior contact) into a booked estimate.
+This is NOT a cold call — they already expressed interest. Move faster.
+
+---
+
+OPENER (Hormozi inbound framework):
+"Hey, is this {first_name}?" [upward inflection, pause — sounds familiar]
+"This is {sender_name}..." [slight pause]
+"You reached out about getting a quote — just making sure we connected. When's a good time to come take a look?"
+
+[Immediately give two slots:]
+"I've got Thursday morning or Friday afternoon — which works better?"
+
+---
+
+IF THEY DON'T REMEMBER SUBMITTING:
+"Yeah you filled out the form on our site — no worries. Quick question while I have you: what's going on with the [service_type] situation? Is it urgent or more of a 'get it handled before summer' thing?"
+
+[This re-qualifies without re-pitching. Let them describe the problem — then book the visit.]
+
+---
+
+IF THEY'VE GONE COLD (submitted 3+ days ago):
+Pattern interrupt opener — don't remind them they're "late":
+"Hey {first_name}, how've you been?" [pause]
+"This is {sender_name} — I actually had a note to follow up with you about the [service] quote. Still on your radar or did you get it handled?"
+
+IF handled: "Good deal — if anything comes up again, I'm the same number."
+IF still interested: "Great — Thursday morning or Friday afternoon?"
+
+---
+
+OBJECTION HANDLING (warm leads):
+
+"I'm comparing a few companies"
+→ "Smart move. What matters most to you — price, speed, or the warranty?" [let them rank it]
+→ Then: "Got it. That's exactly what we're strongest on. Let me come out Thursday — 20 minutes and you'll have a real number to compare."
+
+"I already got a quote"
+→ "No problem. Was it in the range you expected, or did it surprise you?"
+→ If too high: "We hear that a lot. We can usually come in sharper — worth a second opinion?"
+→ If fine: "Fair enough. If anything changes, I'm easy to reach."
+
+"Just send me a quote over email"
+→ Mechanic Close: "I'd be giving you a made-up number without seeing the situation — same as a doctor diagnosing over the phone. 20 minutes on-site and I give you an exact number. Thursday or Friday?"
+
+"Not ready yet"
+→ "Totally get it. What's the timeline you're thinking? I ask so I don't bother you before you're ready."
+[Lock a follow-up date. Put it in the calendar.]
+
+---
+
+CLOSE SEQUENCE:
+1. Book the specific time: "Thursday at 10 or Friday at 2 — which is better?"
+2. Confirm address: "And that's at [address] — still the best place to come out?"
+3. Set expectation: "Perfect. I'll be there Thursday at 10. Takes about 20 minutes. You'll have a number same day."
+4. Stop talking.
+
+---
+
+AFTER BOOKING — TEXT IMMEDIATELY:
+"Hey {first_name}, confirmed for [day] at [time]. My number in case anything comes up: {sender_phone}. See you then."`;
+
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)",
+    ['Cold Call — Warm Lead Callback', 0, warmLeadBody]
+  );
+
+  console.log('[DB] Cold call scripts v2 applied.');
+}
+
+function migrateColdCallScriptsV3() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — I Built You Something' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding cold call scripts v3...');
+
+  const body = `GOAL: Get a 5-minute demo booked. The hook is that you already did pre-work for them.
+PRE-CALL REQUIRED: Check their website. Do they have a contact form with no auto-response?
+If yes → this script. If no → use "The Teaching Call" instead.
+
+---
+
+OPENER:
+"Hey {first_name}, this is {sender_name} — quick one. I was looking at {business_name}'s website and noticed you don't have automatic follow-up on your leads. I set up a demo of what that looks like for you specifically. Takes 5 minutes. When are you free?"
+
+[Stop. Wait. Don't fill the silence.]
+
+---
+
+IF "What is it exactly?":
+"It's an AI assistant that responds to your website leads in under a minute — texts them, qualifies the job, books the estimate. I set it up using your business name so you can see exactly what your customers would experience. 5 minutes."
+
+IF "Just send it to me":
+"I could, but it's more of a live thing — you'd want to see it respond in real time. Seriously 5 minutes. Thursday morning or Friday afternoon?"
+
+IF "I'm busy / bad time":
+"Totally — when's a better 5 minutes? I've got early mornings and after 5 PM."
+[Lock a specific time. Don't leave it open.]
+
+IF "How much is it?":
+"That's the second conversation — first let me show you if it even makes sense for you. If it doesn't book you 5 qualified quotes this month, you pay nothing anyway."
+
+IF "I already have someone handling that":
+"Good — do they respond in under a minute, nights and weekends? That's the gap most {service_type} contractors don't know they have. 5 minutes and I'll show you what yours looks like."
+
+IF "Not interested":
+"Totally fair. One question — when a homeowner fills out your website form at 9 PM on a Tuesday, what happens to it?"
+[Let them answer. The answer IS the pitch. If they say "goes to my email" — "And how fast do you get back to it?" That's when they feel it.]
+
+---
+
+WHY THIS WORKS:
+You've already done something for them before they agreed to anything.
+Most openers ask for attention. This one delivers value first.
+"I made something for you" triggers curiosity, not resistance.
+The 5-minute frame keeps stakes low — you're not asking them to buy, you're asking them to look.
+
+---
+
+PRE-CALL PREP (60 seconds):
+1. Pull up {business_name}'s website — confirm they have a contact form
+2. Note {service_type} and {city} — use both in the opener
+3. Have your Sam demo ready to screen share the moment they say yes
+4. Calendar open — book the slot on the call, not over email`;
+
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)",
+    ['Cold Call — I Built You Something', 1, body]
+  );
+
+  console.log('[DB] Cold call scripts v3 applied.');
 }
 
 function getNewLoomScripts() {

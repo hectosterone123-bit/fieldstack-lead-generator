@@ -120,6 +120,12 @@ export async function findLeadEmail(id: number): Promise<{ emails: string[]; sav
   return request(`/leads/${id}/find-email`, { method: 'POST' });
 }
 
+export interface GbpReview { author: string; rating: number; text: string; ago: string; }
+export interface GbpData { found: boolean; maps_url?: string; phone?: string; reviews?: GbpReview[]; }
+export async function fetchGbpData(id: number): Promise<GbpData> {
+  return request(`/leads/${id}/fetch-gbp`, { method: 'POST' });
+}
+
 // ─── Finder ───────────────────────────────────────────────────────────────────
 
 export interface FinderSearch {
