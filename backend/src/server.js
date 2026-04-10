@@ -76,6 +76,9 @@ async function start() {
   const { startSequenceScheduler } = require('./services/sequenceScheduler');
   startSequenceScheduler();
 
+  const { startCampaignScheduler } = require('./services/campaignScheduler');
+  startCampaignScheduler();
+
   // Serve frontend build
   const frontendDist = path.join(__dirname, '../../frontend/dist');
   app.use(express.static(frontendDist));

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
-  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2,
+  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2, LayoutTemplate, X, MessageSquare,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
-import { useSequences, useCreateSequence, useUpdateSequence, useDeleteSequence, useToggleSequence, useSequenceAnalytics } from '../hooks/useSequences';
-import type { SequenceStep } from '../types';
+import { useSequences, useCreateSequence, useUpdateSequence, useDeleteSequence, useToggleSequence, useSequenceAnalytics, useSequenceTemplates, useCloneTemplate } from '../hooks/useSequences';
+import type { Sequence, SequenceStep } from '../types';
 
 export function Sequences() {
   const { data: sequences, isLoading } = useSequences();
@@ -17,6 +17,10 @@ export function Sequences() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<'edit' | 'analytics'>('edit');
+  const [showTemplates, setShowTemplates] = useState(false);
+
+  const { data: templates } = useSequenceTemplates();
+  const cloneTemplate = useCloneTemplate();
 
   const selectedSequence = sequences?.find(s => s.id === selectedId) || null;
   const showBuilder = creating || selectedId != null;
@@ -51,12 +55,20 @@ export function Sequences() {
           <Repeat className="w-4 h-4 text-orange-400" />
           <h1 className="text-sm font-semibold text-zinc-100">Sequences</h1>
         </div>
-        <button
-          onClick={() => { setCreating(true); setSelectedId(null); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500 text-white text-sm hover:bg-orange-600 transition-colors"
-        >
-          <Plus className="w-4 h-4" /> New Sequence
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTemplates(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-300 text-sm hover:bg-zinc-700 transition-colors border border-white/[0.06]"
+          >
+            <LayoutTemplate className="w-4 h-4" /> Templates
+          </button>
+          <button
+            onClick={() => { setCreating(true); setSelectedId(null); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500 text-white text-sm hover:bg-orange-600 transition-colors"
+          >
+            <Plus className="w-4 h-4" /> New Sequence
+          </button>
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -263,6 +275,85 @@ export function Sequences() {
           </div>
         )}
       </div>
+
+      {/* Template Library Modal */}
+      {showTemplates && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowTemplates(false)} />
+          <div className="relative bg-zinc-900 border border-white/[0.08] rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-xl">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
+              <div>
+                <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                  <LayoutTemplate className="w-4 h-4 text-orange-400" />
+                  Sequence Templates
+                </h2>
+                <p className="text-xs text-zinc-500 mt-0.5">Pre-built sequences — clone in one click and customize from there.</p>
+              </div>
+              <button
+                onClick={() => setShowTemplates(false)}
+                className="w-7 h-7 rounded-lg hover:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Template cards */}
+            <div className="overflow-y-auto p-6">
+              {!templates?.length ? (
+                <p className="text-sm text-zinc-500 text-center py-8">No templates found.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {templates.map((tpl: Sequence) => {
+                    const channels = [...new Set(tpl.steps.map(s => s.channel))];
+                    const hasEmail = channels.includes('email');
+                    const hasSms = channels.includes('sms');
+                    return (
+                      <div key={tpl.id} className="bg-zinc-800/60 border border-white/[0.06] rounded-xl p-4 flex flex-col gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-zinc-200">{tpl.name}</p>
+                          <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{tpl.description}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-700 text-zinc-400 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" />{tpl.steps.length} steps
+                          </span>
+                          {hasEmail && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-violet-500/10 text-violet-400 flex items-center gap-1">
+                              <Mail className="w-2.5 h-2.5" />Email
+                            </span>
+                          )}
+                          {hasSms && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 flex items-center gap-1">
+                              <MessageSquare className="w-2.5 h-2.5" />SMS
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            cloneTemplate.mutate(tpl.id, {
+                              onSuccess: (newSeq) => {
+                                setShowTemplates(false);
+                                setSelectedId(newSeq.id);
+                                setCreating(false);
+                                setActiveTab('edit');
+                              },
+                            });
+                          }}
+                          disabled={cloneTemplate.isPending}
+                          className="mt-auto w-full py-2 rounded-lg bg-orange-500 text-white text-xs font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
+                        >
+                          Use Template
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

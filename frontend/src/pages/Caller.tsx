@@ -3,7 +3,7 @@ import {
   PhoneOutgoing, PhoneOff, Mic, MicOff, Play,
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
-  Bot, Zap, X, Square,
+  Bot, Zap, X, Square, Brain,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -108,6 +108,9 @@ export function Caller() {
   const [manualObjection, setManualObjection] = useState('');
   const [coaching, setCoaching] = useState('');
   const [coachLoading, setCoachLoading] = useState(false);
+  const [aiObjection, setAiObjection] = useState('');
+  const [aiCoachSuggestion, setAiCoachSuggestion] = useState('');
+  const [aiCoachLoading, setAiCoachLoading] = useState(false);
   const [manualOutcome, setManualOutcome] = useState('');
   const [manualNote, setManualNote] = useState('');
   const [loggingCall, setLoggingCall] = useState(false);
@@ -209,13 +212,15 @@ export function Caller() {
     };
   }, []);
 
-  // Reset takeover state + live transcript when active call changes
+  // Reset takeover state + live transcript + coach when active call changes
   useEffect(() => {
     setBargedIn(false);
     setMuted(true);
     setTakingOver(false);
     setTakeoverPhone(null);
     setLiveTranscript([]);
+    setAiObjection('');
+    setAiCoachSuggestion('');
   }, [activeCall?.id]);
 
   // Feature 1 + 2: Detect call ended
@@ -404,6 +409,19 @@ export function Caller() {
       toast('Failed to send whisper', 'error');
     } finally {
       setSendingWhisper(false);
+    }
+  };
+
+  const handleAiCoach = async () => {
+    if (!aiObjection.trim() || !activeCall?.lead_id) return;
+    setAiCoachLoading(true);
+    try {
+      const result = await coachCall(activeCall.lead_id, aiObjection, '');
+      setAiCoachSuggestion(result.suggestion);
+    } catch {
+      toast('Coach failed', 'error');
+    } finally {
+      setAiCoachLoading(false);
     }
   };
 
@@ -1571,6 +1589,11 @@ export function Caller() {
                           Called <span className="font-data text-zinc-400">{activeCall.contact_count}x</span> before
                         </span>
                       )}
+                      {(activeCall.gatekeeper_count ?? 0) > 0 && (
+                        <span className="text-xs text-amber-700">
+                          GK <span className="font-data">{activeCall.gatekeeper_count}x</span>
+                        </span>
+                      )}
                       {activeCall.website && (
                         <a
                           href={activeCall.website.startsWith('http') ? activeCall.website : `https://${activeCall.website}`}
@@ -1640,6 +1663,32 @@ export function Caller() {
                     {sendingWhisper ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageSquare className="w-3.5 h-3.5" />}
                     Whisper
                   </button>
+                </div>
+
+                {/* Objection Coach */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={aiObjection}
+                      onChange={e => setAiObjection(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAiCoach()}
+                      placeholder="Type objection to get a rebuttal…"
+                      className="flex-1 px-3 py-2 rounded-lg text-sm bg-violet-950/30 border border-violet-500/20 text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 [color-scheme:dark]"
+                    />
+                    <button
+                      onClick={handleAiCoach}
+                      disabled={!aiObjection.trim() || aiCoachLoading}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-violet-500/20 border border-violet-500/30 text-violet-400 hover:bg-violet-500/30 transition-colors disabled:opacity-30"
+                    >
+                      {aiCoachLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+                      Coach
+                    </button>
+                  </div>
+                  {aiCoachSuggestion && (
+                    <p className="text-xs text-violet-300 bg-violet-950/40 border border-violet-500/20 rounded-lg px-3 py-2 leading-relaxed">
+                      {aiCoachSuggestion}
+                    </p>
+                  )}
                 </div>
 
                 {/* Takeover banner */}

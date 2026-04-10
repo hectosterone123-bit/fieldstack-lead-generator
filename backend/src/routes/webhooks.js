@@ -246,6 +246,21 @@ router.post('/vapi', async (req, res) => {
     return res.json({ results });
   }
 
+  // Append live transcript lines as the call progresses
+  if (message.type === 'transcript') {
+    const { role, transcriptType, transcript: text } = message.transcript || {};
+    if (vapiCallId && transcriptType === 'final' && text) {
+      const call = db.get('SELECT id, transcript FROM calls WHERE vapi_call_id = ?', [vapiCallId]);
+      if (call) {
+        const prefix = role === 'assistant' ? 'AI: ' : 'Lead: ';
+        const newLine = prefix + text;
+        const updated = call.transcript ? call.transcript + '\n' + newLine : newLine;
+        db.run('UPDATE calls SET transcript = ? WHERE id = ?', [updated, call.id]);
+      }
+    }
+    return res.json({ ok: true });
+  }
+
   if (message.type === 'end-of-call-report') {
     const callRecord = db.get('SELECT * FROM calls WHERE vapi_call_id = ?', [vapiCallId]);
     if (!callRecord) return res.json({ ok: true });

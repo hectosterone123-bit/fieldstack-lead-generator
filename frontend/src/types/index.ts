@@ -477,6 +477,7 @@ export interface Call {
   phone_line_type?: string | null;
   ai_next_step?: string | null;
   ai_key_intel?: string | null;
+  gatekeeper_count?: number | null;
   monitor_listen_url?: string | null;
   monitor_control_url?: string | null;
   source?: 'ai' | 'manual' | null;

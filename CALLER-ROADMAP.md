@@ -1,6 +1,6 @@
 # AI Cold Caller — Feature Roadmap
 
-> Last updated: 2026-03-30
+> Last updated: 2026-04-09
 > Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ---
@@ -11,193 +11,174 @@
 - [x] Voicemail drop (configurable message, plays + hangs up)
 - [x] Best time windows (8–10 AM, 4–6 PM in lead's local timezone)
 - [x] Local presence dialing (state → phone number ID map)
-- [x] Max call duration cap (configurable, default 3 min)
+- [x] Max call duration cap (configurable in Settings)
 - [x] reportOutcome tool (AI logs outcome + next step + key intel during call)
 - [x] Listen In (real-time audio via Twilio Media Stream WebSocket + Web Audio API)
 - [x] Jump In / takeover (transfer to fallback phone via VAPI control message)
 - [x] Auto-advance queue (8s countdown after each call)
 - [x] Post-call outcome buttons (manual override)
-- [x] Post-call email + SMS follow-up (auto-sent on voicemail, no_answer, interested, callback)
+- [x] Post-call SMS follow-up (auto-sent on voicemail, no_answer, interested, callback)
 - [x] Call notes (saved to activities during or after call)
-- [x] DNC marking (per lead, session-local feedback)
+- [x] DNC marking
 - [x] AI Report panel (next step + key intel from AI)
 - [x] Call timer + today's stats
+- [x] Whisper coaching backend (`POST /api/calls/:id/whisper` → injects system msg to AI mid-call)
+- [x] Gatekeeper outcome + auto-schedule 7:30 AM callback next business day
+- [x] Bulk outcome override (`PATCH /api/calls/bulk/outcome`)
+- [x] Manual call logging (`POST /api/calls/log-manual`)
+- [x] AI objection coach backend (`POST /api/calls/coach` → Claude Haiku returns 1-2 sentence rebuttal)
+- [x] Callback scheduling with SMS confirmation (`POST /api/calls/schedule-callback`)
+- [x] Outcome SMS sender (`POST /api/calls/outcome-sms`)
+- [x] Auto-load queue from top leads by heat score (`POST /api/calls/queue/auto-load`)
+- [x] Scheduled queue items (`scheduled_for` column — queue skips future-dated items)
+- [x] Phone validation gating (`phone_valid != 0` check before queuing/calling)
+- [x] Campaign mode setting (toggle + daily cap in Settings)
+- [x] Speed-to-lead setting (toggle + script selector in Settings)
+- [x] firstMessage setting (configurable AI opener in Settings)
+- [x] No-answer retry cap setting (`vapi_max_no_answer_attempts` in Settings)
+- [x] Daily call goal setting (in Settings)
+- [x] Voice note transcription via Whisper (`POST /api/calls/voice-note`)
 
 ---
 
 ## Tier 1 — High Impact, Low Effort
 
+### [ ] Whisper UI
+Backend is done. Just need the frontend input + send button.
+- Add a text input + "Whisper" button in the active call panel (only visible during `in_progress`)
+- `POST /api/calls/:id/whisper` with `{ message }` — already works
+- ~30 min work
+
 ### [ ] Recording Playback
 Play back `recording_url` directly in the call history row.
-- Add an audio `<audio>` element or a custom play button in "Today's Calls"
-- `recording_url` is already stored in DB after every call
+- Add a play button in "Today's Calls" — clicking shows an `<audio>` element
+- `recording_url` already stored in DB after every call
 - No backend changes
 
 ### [ ] Live Transcript During Call
 Show words appearing in real-time instead of "Transcript will appear after call ends."
-- VAPI sends `transcript` events via the same monitor WebSocket alongside `media` frames
-- Parse `{ event: 'transcript', transcript: { text, role, isFinal } }` messages
-- Append to a `liveLines` state array, render in the transcript box
-- No backend changes
+- VAPI sends `{ event: 'transcript', transcript: { text, role, isFinal } }` over the monitor WebSocket alongside audio frames
+- Parse these in the existing `ws.onmessage` handler (Listen In already connects to that WebSocket)
+- Append final lines to a `liveLines` state array, render in the transcript box
+- No backend changes — but requires Listen In to be active
 
-### [ ] firstMessage — Configurable AI Opener
-Right now `firstMessage: null` means the AI waits silently for the lead to speak first. Awkward.
-- Add a "First Message" textarea in Settings → AI Cold Caller
-- Seed `vapi_first_message` setting (default: `"Hey, is this {business_name}?"`)
-- Read in `vapiService.js`, set `assistantConfig.firstMessage`
-- Cuts dead air at the start of every call → better lead experience
+### [ ] Campaign Mode Backend
+Settings UI is done, but the cron that actually fires calls isn't wired up yet.
+- Backend cron (every 5 min): check `vapi_campaign_enabled`, calling window, `active_calls_today < cap`, queue not empty → call `vapiService.startCall()`
+- Use `node-cron` or a `setInterval` in `server.js`
 
-### [ ] No-Answer Retry Cap
-After N no-answers/voicemails on same lead, auto-DNC or auto-pause.
-- Add `vapi_max_no_answer_attempts` setting (default: 3)
-- In `webhooks.js` `end-of-call-report`, count no-answer outcomes for this lead
-- If count >= cap, set `dnc_at = CURRENT_TIMESTAMP` and log activity
-- Prevents burning your number's reputation on dead numbers
+### [ ] Speed-to-Lead Backend
+Settings UI is done. The auto-queue trigger on lead creation isn't wired yet.
+- In `POST /api/leads`, after insert: if `speed_to_lead_enabled === '1'` and lead has phone and within calling window → insert into `call_queue`
 
-### [ ] Call Retry Auto-Schedule
-After no_answer or voicemail, automatically re-add the lead to the queue for the next calling window.
-- In `webhooks.js` after logging outcome, if `no_answer` or `voicemail` and contact_count < N:
-  - Calculate next window start (next 8 AM or 4 PM in lead's timezone)
-  - Insert into `call_queue` with a `scheduled_for` column
-  - Queue processor skips items where `scheduled_for > now`
-- Removes the need to manually re-queue no-answers
+### [ ] firstMessage Backend
+Settings UI is done. `vapiService.js` doesn't read it yet.
+- In `vapiService.js`: read `vapi_first_message` from settings → if set, run `renderTemplate()` on it → set `assistantConfig.firstMessage`
+
+### [ ] No-Answer Retry Cap Backend
+Settings UI is done. The auto-DNC logic isn't wired yet.
+- In `webhooks.js` `end-of-call-report`: if outcome is `no_answer` or `voicemail`, count how many times this lead has had that outcome → if >= cap, set `dnc_at`
 
 ---
 
 ## Tier 2 — High Impact, Medium Effort
 
-### [ ] Whisper Coaching (Mid-Call Inject)
-Inject a text message to the AI mid-call without the lead hearing it.
-- Add a text input + "Whisper" button in the active call panel
-- POST to `/api/calls/:id/whisper` → sends `{ type: 'add-message', message: { role: 'system', content: '...' } }` to `monitor_control_url`
-- Use cases: "Wrap up now", "Ask about their AC brand", "They seem interested, push for a meeting"
+### [ ] Objection Coach UI
+Backend is done (`POST /api/calls/coach`). Need the frontend panel.
+- Small expandable panel in the active call section
+- Text input for the objection + "Coach me" button
+- Shows Claude's 1-2 sentence rebuttal
+- Works during live call or when reviewing
 
-### [ ] Scheduled Campaign Mode
-Run X calls/day automatically on a schedule, no manual clicking.
-- Add a `campaign_mode_enabled` setting + `campaign_calls_per_day` limit
-- Backend cron (every minute): if campaign mode on, it's within calling windows, and `active_calls_today < limit` → trigger next queue item automatically
-- Fully autopilot — come back to check results
+### [ ] Auto-Load Queue UI
+Backend is done (`POST /api/calls/queue/auto-load`). Need a button in the Caller queue panel.
+- "Auto-fill" button next to "+ Add Leads" that calls the endpoint with current script + optional service filter
+- Fills queue with top N leads by heat score automatically
+
+### [ ] Daily Call Goal Progress Bar
+Setting is done. Need the UI.
+- Read `daily_call_goal` from settings
+- Show `X / Y` progress bar in Caller page header
+- Green when >= goal, orange when < goal
 
 ### [ ] Script A/B Stats
-Track pickup rate, connection rate, and interest rate per call script template.
-- Add aggregated stats to `/api/calls/history` or a new `/api/calls/stats-by-template` endpoint
-- Show a mini table below call queue: Script name | Calls | Pickup % | Interested %
-- Lets you retire bad scripts and double down on winners
+Track pickup rate and interest rate per call script template.
+- Backend: `/api/calls/stats-by-template` — group by `template_id`, count outcomes
+- Frontend: mini table in Caller or Templates page showing Script | Calls | Pickup % | Interested %
 
-### [ ] Speed-to-Lead Auto-Dial
-When a new lead is imported or manually created, auto-trigger a call immediately.
-- Add `speed_to_lead_enabled` setting
-- In leads `POST /` route, if enabled + lead has phone + within calling window → auto-insert into `call_queue` at position 0
-- First to call = first to close; the whole point of the platform
-
-### [ ] Phone Number Validation (Pre-Call)
-Validate numbers before dialing to avoid wasted calls on disconnected/invalid numbers.
-- Use Twilio Lookup API: `POST /api/leads/:id/validate-phone`
-- Store result in a `phone_valid` column
-- Skip invalid numbers in queue processor
-- Costs ~$0.005/lookup but saves a full VAPI call on bad numbers
+### [ ] Call Retry Auto-Schedule
+After `no_answer` or `voicemail`, auto-reschedule lead for next calling window.
+- In `webhooks.js` after logging outcome: compute next window time (next 8 AM or 4 PM in lead's timezone), insert into `call_queue` with `scheduled_for` set
+- Queue processor already skips `scheduled_for > now`
 
 ---
 
 ## Tier 3 — Medium Impact, Low Effort
 
-### [ ] Daily Call Goal + Progress Bar
-Set a daily target (e.g., 50 calls) and show a progress bar in the Caller header.
-- Add `daily_call_goal` setting (default: 50)
-- Count today's calls from history, show `X / Y calls` with a bar
-- Simple motivational UI, 30 min work
+### [ ] Outcome Color Coding in History
+Color-tint call history rows by outcome.
+- `interested` → emerald bg tint, `callback_requested` → amber, `not_interested` → red tint
+- One-line CSS addition per row
 
 ### [ ] Retry Count Badge in Queue
-Show how many times each lead in the queue has already been called.
-- `call_queue` already joins to `leads` which has `contact_count`
-- Add a small badge next to each queue item: "Called 2x"
+Show how many times each queued lead has already been called.
+- `contact_count` already returned by the queue query
+- Add small badge: "Called 2x" next to the lead name in the queue list
 
-### [ ] Outcome Color Coding in History
-Color-code call history rows by outcome instead of just a text label.
-- `interested` → emerald background tint
-- `callback_requested` → amber tint
-- `not_interested` → no tint (default)
-- One-line CSS change
-
-### [ ] Bulk Outcome Override
-Select multiple calls from history and bulk-set outcome.
-- Same pattern as bulk lead status update already in Leads page
-- Useful after a dialing session when you want to quickly triage results
+### [ ] Gatekeeper Count Display
+Show gatekeeper hit count on the lead info panel during a call.
+- `gatekeeper_count` is tracked on leads — surface it in the active call lead info row
+- Helps operator know to call before 8 AM next time
 
 ---
 
-## Tier 4 — Analytics & Reporting
+## Tier 4 — Analytics
 
 ### [ ] Calling Performance Dashboard
 Week/month view: calls dialed, pickup rate, interest rate, cost estimate.
-- New section in Dashboard page (or a tab in Caller)
-- Backend: `/api/calls/stats?range=7d|30d`
-- Charts: calls per day bar chart, outcome breakdown pie
+- New `/api/calls/stats?range=7d|30d` endpoint
+- Cards + simple bar chart in Dashboard or Caller page
 
 ### [ ] Best Hours Heatmap
-Show which hours historically get the best pickup rates.
-- Parse `started_at` from call history, group by hour + outcome
-- Display as a simple 24-column heatmap: green = good pickup, red = dead zone
-- Helps you manually tune the best-time windows setting
+Show which hours historically get best pickup rates.
+- Parse `started_at` from call history, group by local hour + outcome
+- 24-column heatmap: green = good, grey = low volume
 
 ### [ ] Cost Tracker
-Estimate VAPI cost per session and per qualified lead.
-- VAPI pricing: ~$0.05/min transport + model tokens (Haiku = cheap)
-- Track `sum(duration_seconds)` for the day → estimate dollar cost
-- Show "Today: ~$X.XX | Cost per interested: ~$X.XX" in Today's stats panel
-
-### [ ] Script Performance Comparison
-Side-by-side stats for all scripts: avg duration, pickup %, interest %, outcome breakdown.
-- Table in Templates page for call scripts
-- Data from calls table joined to template_id
+Estimate VAPI cost per session.
+- `sum(duration_seconds)` for today → `* $0.05/60` estimate
+- Show "Today: ~$X.XX" in stats panel
 
 ---
 
 ## Tier 5 — Big Swings
 
-### [ ] Parallel / Power Dialer
-Dial 2–3 leads simultaneously. Connect to the first human that picks up. Drop the others.
-- VAPI supports multiple concurrent calls
-- Start N calls at once, listen for `in_progress` status on all of them
-- When first real human detected → route to primary, end the others
+### [ ] Power Dialer (Parallel Calls)
+Dial 2–3 leads simultaneously, connect to first human answer.
+- Start N VAPI calls at once, listen for `in_progress` status via polling
+- When first real pickup detected → route to primary, end others
 - 2–3x throughput vs. sequential dialing
+- FCC note: <3% abandoned call rate required for ATDS compliance
 
 ### [ ] Inbound Call Handler
-When someone calls back on your VAPI number, have the AI handle it (or route to you).
-- Set up VAPI inbound call assistant config
-- AI recognizes "oh you called earlier" context by phone number lookup
-- Logs inbound call activity to the lead record
-- Webhook already has `inbound` call type from Twilio
+When someone calls back on the VAPI number, AI handles it with context.
+- Set up VAPI inbound assistant config
+- Look up lead by caller phone number, inject context into system prompt
+- Logs inbound call to lead's activity timeline
 
-### [ ] AI Objection Library
-Pre-load the AI with contractor-specific objections and vetted rebuttals.
-- "I already have a marketing company" → "Most of our clients said the same thing before they saw the ROI..."
-- Store in a `call_objections` table, inject as part of system prompt
-- Settings UI to add/edit/delete objections
-
-### [ ] Dynamic Script Variables from Lead Enrichment
-Inject live data into call scripts: Google review count, last contacted date, website status.
-- `{review_count}`, `{days_since_last_contact}`, `{has_website}`
-- Already tracked in leads table — just expose them as template variables
-- Makes every call feel researched and personal
+### [ ] Dynamic Script Variables from Enrichment
+Inject live lead data into call scripts.
+- `{review_count}`, `{days_since_last_contact}`, `{has_website}`, `{gatekeeper_count}`
+- Already tracked in DB — just expose as template variables in `templateService.js`
 
 ---
 
 ## Cost Reduction Checklist
 
-- [ ] **Clear ElevenLabs Voice ID** in Settings → uses VAPI built-in voice (free)
-- [ ] **Set max duration to 150–180s** — already configurable
-- [ ] **Enable voicemail drop** — cap voicemail calls at ~20s instead of 3 min
-- [ ] **Set no-answer retry cap to 3** — stop burning minutes on dead numbers
-- [ ] **Phone number validation** — $0.005/lookup saves a full call on bad numbers
-- [ ] **Tighter system prompt** — every token costs; audit scripts for verbosity
-- [ ] **Campaign mode off-peak** — call during windows only (already built)
-
----
-
-## Notes
-
-- VAPI pricing: ~$0.05/min (transport) + LLM tokens. Haiku is ~$0.001/min at avg call length.
-- Twilio Lookup: $0.005 per number. Worth it at any volume.
-- Power dialer requires careful "call drop" handling — FCC rules on abandoned calls (<3% drop rate for ATDS).
-- Speed-to-lead matters most for web leads (people who just filled out a form). Less critical for cold outreach.
+- [ ] **Clear ElevenLabs Voice ID** → uses VAPI built-in voice (free)
+- [x] **Max duration cap** — configurable, default 3 min
+- [x] **Voicemail drop** — caps voicemail calls at ~20s
+- [ ] **No-answer retry cap** — backend not wired yet (UI is done)
+- [ ] **Phone validation** — `phone_valid` gate exists but Twilio Lookup not wired
+- [x] **Best time windows** — only call during high-answer windows
+- [x] **Claude Haiku** — cheapest model, already default

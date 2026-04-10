@@ -38,7 +38,7 @@ router.get('/active', (req, res) => {
     SELECT c.*, l.business_name, l.phone, l.city, l.state, l.service_type,
            l.website, l.rating, l.review_count, l.notes, l.contact_count,
            l.last_contacted_at, l.heat_score, l.google_maps_url,
-           c.ai_next_step, c.ai_key_intel
+           l.gatekeeper_count, c.ai_next_step, c.ai_key_intel
     FROM calls c
     JOIN leads l ON l.id = c.lead_id
     WHERE c.status IN ('queued', 'ringing', 'in_progress')

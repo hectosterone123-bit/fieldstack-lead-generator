@@ -5,6 +5,7 @@ import {
   fetchOutreachQueue, fetchQueueStats, markQueueItemSent, markQueueItemReplied, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
   setEnrollmentAutoSend, flushOverdue, fetchAutopilotStatus, setAutopilot,
+  fetchSequenceTemplates, cloneSequenceTemplate,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -27,6 +28,25 @@ export function useSequenceAnalytics(id: number | null) {
     queryKey: ['sequence-analytics', id],
     queryFn: () => fetchSequenceAnalytics(id!),
     enabled: id != null,
+  });
+}
+
+export function useSequenceTemplates() {
+  return useQuery({
+    queryKey: ['sequence-templates'],
+    queryFn: fetchSequenceTemplates,
+  });
+}
+
+export function useCloneTemplate() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (id: number) => cloneSequenceTemplate(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sequences'] });
+      toast('Sequence cloned from template');
+    },
   });
 }
 

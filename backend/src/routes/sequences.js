@@ -660,6 +660,24 @@ router.post('/', (req, res) => {
   res.json({ success: true, data: { ...sequence, steps: parseSteps(sequence) } });
 });
 
+// Template library — must be before /:id routes
+router.get('/templates', (req, res) => {
+  const templates = db.all('SELECT * FROM sequences WHERE is_template = 1 ORDER BY id ASC');
+  res.json({ success: true, data: templates.map(t => ({ ...t, steps: parseSteps(t) })) });
+});
+
+router.post('/templates/:id/clone', (req, res) => {
+  const template = db.get('SELECT * FROM sequences WHERE id = ? AND is_template = 1', [req.params.id]);
+  if (!template) return res.status(404).json({ success: false, error: 'Template not found' });
+
+  const { lastInsertRowid } = db.run(
+    'INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue, is_template) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
+    [template.name, template.description, template.steps, template.is_active, template.auto_send, template.auto_send_after_step, template.auto_flush_overdue]
+  );
+  const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [lastInsertRowid]);
+  res.json({ success: true, data: { ...sequence, steps: parseSteps(sequence) } });
+});
+
 router.get('/:id/analytics', (req, res) => {
   const sequence = db.get('SELECT * FROM sequences WHERE id = ?', [req.params.id]);
   if (!sequence) return res.status(404).json({ success: false, error: 'Sequence not found' });

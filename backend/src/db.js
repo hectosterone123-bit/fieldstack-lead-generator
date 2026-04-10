@@ -254,6 +254,7 @@ async function initDb() {
   // Migration: per-enrollment auto_send flag
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_sent_at DATETIME'); } catch(e) {}
+  try { db.run('ALTER TABLE sequences ADD COLUMN is_template INTEGER DEFAULT 0'); } catch(e) {}
 
   // Migration: auto_flush_overdue — auto-send overdue email/sms steps for opted-in sequences
   try { db.run('ALTER TABLE sequences ADD COLUMN auto_flush_overdue INTEGER DEFAULT 0'); } catch(e) {}
@@ -413,6 +414,9 @@ async function initDb() {
 
   // Migration: add "I Built You Something" pre-built value opener script
   migrateColdCallScriptsV3();
+
+  // Migration: seed pre-built sequence template library
+  seedTemplateLibrary();
 
   saveDb();
   return db;
@@ -2870,6 +2874,182 @@ function migratePostCallSmsTemplates() {
     'Post-Call SMS — Voicemail', 2,
     "Hey {first_name}, just left a voicemail for {business_name}. Quick version: I help {service_type} contractors get back to every website lead in 90 seconds. Worth a call this week?",
   ]);
+}
+
+function seedTemplateLibrary() {
+  const existing = get('SELECT id FROM sequences WHERE is_template = 1 LIMIT 1');
+  if (existing) return;
+  console.log('[DB] Seeding sequence template library...');
+
+  // Template A — HVAC Emergency Responder (SMS, 3 steps)
+  const a1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'new', 1, NULL, ?, 0)",
+    ['HVAC Responder SMS — Day 0', "Hey {first_name}, this is {sender_name} — saw your request for HVAC service in {city}. Got availability this week. When's a good time to connect?"]
+  );
+  const a2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'new', 2, NULL, ?, 0)",
+    ['HVAC Responder SMS — Day 2', "Hey {first_name}, following up from {business_name}. Still looking for HVAC help? We can usually get someone out same week."]
+  );
+  const a3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'new', 3, NULL, ?, 0)",
+    ['HVAC Responder SMS — Day 5', "Hey {first_name}, last check-in. If you already found someone, no worries — just let me know and I'll stop reaching out."]
+  );
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue, is_template) VALUES (?, ?, ?, 1, 1, 0, 1, 1)",
+    [
+      'HVAC Emergency Responder',
+      'Fast 3-text SMS sequence for hot HVAC leads. All SMS — no email required. Designed for same-week booking urgency.',
+      JSON.stringify([
+        { order: 1, delay_days: 0, channel: 'sms', template_id: Number(a1.lastInsertRowid), label: 'Initial Outreach' },
+        { order: 2, delay_days: 2, channel: 'sms', template_id: Number(a2.lastInsertRowid), label: 'Follow-Up' },
+        { order: 3, delay_days: 5, channel: 'sms', template_id: Number(a3.lastInsertRowid), label: 'Final Check-In' },
+      ]),
+    ]
+  );
+
+  // Template B — Roofing Storm Season (Email + SMS, 5 steps)
+  const b1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'new', 1, ?, ?, 0)",
+    [
+      'Roofing Storm — Hook',
+      'damage on your roof, {first_name}?',
+      `Hey {first_name},
+
+Quick question — did {business_name} get hit by the recent storms in {city}?
+
+We've been helping homeowners get their roof repairs fully covered through insurance. Most people don't realize their policy pays for it.
+
+Takes about 10 minutes for us to do a free inspection and find out if you have a claim.
+
+Worth a look?
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  const b2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'new', 2, ?, ?, 0)",
+    [
+      'Roofing Storm — Insurance Angle',
+      'your insurance might cover this',
+      `Hey {first_name},
+
+Most homeowners in {city} who file a storm damage claim get their entire roof replaced — zero out of pocket.
+
+The catch: you usually have to file within 12 months of the storm. After that, you lose the claim.
+
+We handle the inspection, the paperwork, and the adjuster meeting. You just sign off.
+
+Free 10-minute inspection — want me to get you on the calendar?
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  const b3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'new', 3, ?, ?, 0)",
+    [
+      'Roofing Storm — Social Proof',
+      'neighbor down the street just got $18k covered',
+      `Hey {first_name},
+
+A homeowner two streets over from {city} just had their full roof replacement covered — $18,400, zero out of pocket.
+
+They almost didn't call because they assumed it wouldn't qualify.
+
+If your roof is more than a few years old and you had any storm activity this year, there's a good chance you have a valid claim.
+
+10-minute inspection, no pressure. Want to find out?
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  const b4 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'new', 4, NULL, ?, 0)",
+    ['Roofing Storm — SMS Nudge', "Hey {first_name}, sent a couple emails about storm damage coverage. If your roof got hit, your insurance likely covers it. 5 minutes to find out? -{sender_name}"]
+  );
+  const b5 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'new', 5, ?, ?, 0)",
+    [
+      'Roofing Storm — Breakup',
+      'closing your file, {first_name}',
+      `Hey {first_name},
+
+I've reached out a few times about storm damage coverage and haven't heard back, so I'm going to close out your file.
+
+If your roof situation changes — or you want a second opinion on a claim — reach out anytime.
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue, is_template) VALUES (?, ?, ?, 1, 1, 0, 1, 1)",
+    [
+      'Roofing Storm Season',
+      '5-step storm season sequence for roofing leads. Insurance claim angle — email x3, SMS nudge, breakup email. Works best after hail/wind events.',
+      JSON.stringify([
+        { order: 1, delay_days: 0, channel: 'email', template_id: Number(b1.lastInsertRowid), label: 'Storm Hook' },
+        { order: 2, delay_days: 2, channel: 'email', template_id: Number(b2.lastInsertRowid), label: 'Insurance Angle' },
+        { order: 3, delay_days: 5, channel: 'email', template_id: Number(b3.lastInsertRowid), label: 'Social Proof' },
+        { order: 4, delay_days: 8, channel: 'sms', template_id: Number(b4.lastInsertRowid), label: 'SMS Nudge' },
+        { order: 5, delay_days: 14, channel: 'email', template_id: Number(b5.lastInsertRowid), label: 'Breakup' },
+      ]),
+    ]
+  );
+
+  // Template C — Re-engagement (Email + SMS, 3 steps)
+  const c1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'contacted', 1, ?, ?, 0)",
+    [
+      'Re-engagement — Did We Drop the Ball',
+      'did we drop the ball, {first_name}?',
+      `Hey {first_name},
+
+We connected a while back about {service_type} for {business_name} and I never heard back.
+
+I wanted to check in — did we miss something on our end? Sometimes timing just isn't right.
+
+If you're still looking for help or want to revisit, I'm happy to pick up where we left off.
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  const c2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'sms', 'contacted', 2, NULL, ?, 0)",
+    ['Re-engagement — SMS Check-In', "Hey {first_name}, sent an email a few days ago. Are you still looking for help with {service_type}? -{sender_name}"]
+  );
+  const c3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', 'contacted', 3, ?, ?, 0)",
+    [
+      'Re-engagement — Closing File',
+      'closing your file',
+      `Hey {first_name},
+
+I've reached out a couple times and haven't heard back, so I'm going to close out your file.
+
+No hard feelings — if your timing changes or you need {service_type} help down the road, you know where to find us.
+
+{sender_name}
+{sender_phone}`,
+    ]
+  );
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue, is_template) VALUES (?, ?, ?, 1, 1, 0, 1, 1)",
+    [
+      'Re-engagement (3-Step)',
+      'Reactivate cold leads that went quiet. Email check-in → SMS nudge → breakup email. Works for any service type.',
+      JSON.stringify([
+        { order: 1, delay_days: 0, channel: 'email', template_id: Number(c1.lastInsertRowid), label: 'Did We Drop the Ball?' },
+        { order: 2, delay_days: 5, channel: 'sms', template_id: Number(c2.lastInsertRowid), label: 'SMS Check-In' },
+        { order: 3, delay_days: 12, channel: 'email', template_id: Number(c3.lastInsertRowid), label: 'Closing File' },
+      ]),
+    ]
+  );
+
+  console.log('[DB] Template library seeded (3 templates).');
 }
 
 function saveDb() {

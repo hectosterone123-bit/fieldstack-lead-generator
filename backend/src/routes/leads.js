@@ -550,12 +550,15 @@ router.post('/', (req, res, next) => {
       autoEnrollLeads([lead.id], defaultSeqId);
     }
 
-    // Speed-to-lead: auto-queue new lead for immediate calling
+    // Speed-to-lead: auto-queue new lead for immediate calling (8 AM–8 PM CT only)
     const speedEnabled = db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_enabled'")?.value === '1';
     const speedTemplateId = parseInt(db.get("SELECT value FROM settings WHERE key = 'speed_to_lead_template_id'")?.value);
     if (speedEnabled && speedTemplateId && lead.phone && !lead.dnc_at) {
-      db.run("UPDATE call_queue SET position = position + 1 WHERE status = 'pending'");
-      db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, 1, 'pending')", [lead.id, speedTemplateId]);
+      const localHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }).format(new Date()));
+      if (localHour >= 8 && localHour < 20) {
+        db.run("UPDATE call_queue SET position = position + 1 WHERE status = 'pending'");
+        db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, 1, 'pending')", [lead.id, speedTemplateId]);
+      }
     }
 
     res.status(201).json({ success: true, data: lead });

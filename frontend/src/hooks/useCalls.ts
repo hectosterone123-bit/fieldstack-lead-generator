@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchActiveCalls, fetchCallHistory, fetchCallQueue,
   startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
-  bulkUpdateCallOutcomes, autoLoadQueue,
+  bulkUpdateCallOutcomes, autoLoadQueue, whisperCall,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -134,6 +134,16 @@ export function useBulkUpdateCallOutcomes() {
       qc.invalidateQueries({ queryKey: ['call-history'] });
       toast(`${data.updated} calls updated`);
     },
+    onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useWhisperCall() {
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: ({ callId, message }: { callId: number; message: string }) =>
+      whisperCall(callId, message),
+    onSuccess: () => toast('Whisper sent'),
     onError: (err: Error) => toast(err.message, 'error'),
   });
 }

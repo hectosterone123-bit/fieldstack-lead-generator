@@ -302,6 +302,14 @@ export async function fetchSequences(): Promise<Sequence[]> {
   return request('/sequences');
 }
 
+export async function fetchSequenceTemplates(): Promise<Sequence[]> {
+  return request('/sequences/templates');
+}
+
+export async function cloneSequenceTemplate(id: number): Promise<Sequence> {
+  return request(`/sequences/templates/${id}/clone`, { method: 'POST' });
+}
+
 export async function fetchSequence(id: number): Promise<Sequence> {
   return request(`/sequences/${id}`);
 }
