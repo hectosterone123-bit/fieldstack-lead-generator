@@ -1,10 +1,10 @@
-const Anthropic = require('@anthropic-ai/sdk');
-const { AuthenticationError, RateLimitError, APIConnectionError } = Anthropic;
+const fetch = require('node-fetch');
 const db = require('../db');
 const { renderTemplate } = require('./templateService');
 const { recomputeHeatScore } = require('./heatScoreService');
 
-const client = new Anthropic();
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
+const MODEL = 'gemini-2.5-flash-preview-04-17';
 
 const VALID_STATUSES = ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'];
 const FOLLOWUP_DAYS = { new: 1, contacted: 3, qualified: 2, proposal_sent: 5, booked: 1 };
@@ -55,182 +55,265 @@ IMPORTANT RULES FOR ACTIONS:
 - Keep all SMS messages under 160 characters. No emojis. Professional, direct tone.
 - Before calling send_email: call preview_template first, show the user the subject and first ~150 chars of the body. Ask "Should I send this?" and wait for yes.
 - Before calling bulk_send_email: call search_leads with the same status/service_type filter to show which leads will receive it and the count. Say "I'll send [template name] to X leads: [list names]. Should I proceed?" Wait for explicit confirmation before sending.
-- Never bulk send email without confirming the count and template name first.`;
+- Never bulk send email without confirming the count and template name first.
+- Before calling bulk_personalized_send: call search_leads first to show the user which leads will be targeted. Say "I'll send personalized emails to X leads: [list names] using [template]. Each email will be uniquely written. Should I proceed?" Wait for explicit confirmation.
+- Use personalize_email to preview a single personalized email before sending. Show the user the subject and first 200 chars of the body.`;
 
+// Tool definitions (converted to OpenAI function format)
 const tools = [
   {
-    name: 'get_lead',
-    description: 'Get detailed info about a specific lead by ID, including recent activities and enrichment data.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' }
-      },
-      required: ['lead_id']
-    }
-  },
-  {
-    name: 'search_leads',
-    description: 'Search and filter leads. Use for questions like "which leads are new", "show me hot leads", "leads in Dallas", etc.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] },
-        service_type: { type: 'string', enum: ['hvac', 'plumbing', 'electrical', 'roofing', 'landscaping', 'pest_control', 'general'] },
-        search: { type: 'string', description: 'Search by business name, city, phone, or email' },
-        sort: { type: 'string', enum: ['heat_score', 'created_at', 'updated_at', 'estimated_value', 'business_name'], description: 'Sort field (default: heat_score)' },
-        order: { type: 'string', enum: ['asc', 'desc'], description: 'Sort order (default: desc)' },
-        limit: { type: 'integer', description: 'Max results (default 10, max 25)' }
+    type: 'function',
+    function: {
+      name: 'get_lead',
+      description: 'Get detailed info about a specific lead by ID, including recent activities and enrichment data.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' }
+        },
+        required: ['lead_id']
       }
     }
   },
   {
-    name: 'get_followups',
-    description: 'Get leads with follow-ups due today and overdue follow-ups.',
-    input_schema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'get_stats',
-    description: 'Get dashboard statistics: total leads, pipeline value, conversion rate, leads by status and service type.',
-    input_schema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'get_templates',
-    description: 'Get outreach templates. Filter by channel (email/sms/call_script) and/or status stage.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        channel: { type: 'string', enum: ['email', 'sms', 'call_script'] },
-        status_stage: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] }
+    type: 'function',
+    function: {
+      name: 'search_leads',
+      description: 'Search and filter leads. Use for questions like "which leads are new", "show me hot leads", "leads in Dallas", etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] },
+          service_type: { type: 'string', enum: ['hvac', 'plumbing', 'electrical', 'roofing', 'landscaping', 'pest_control', 'general'] },
+          search: { type: 'string', description: 'Search by business name, city, phone, or email' },
+          sort: { type: 'string', enum: ['heat_score', 'created_at', 'updated_at', 'estimated_value', 'business_name'], description: 'Sort field (default: heat_score)' },
+          order: { type: 'string', enum: ['asc', 'desc'], description: 'Sort order (default: desc)' },
+          limit: { type: 'integer', description: 'Max results (default 10, max 25)' }
+        }
       }
     }
   },
   {
-    name: 'preview_template',
-    description: 'Render a template with a specific lead\'s data, replacing variables like {business_name}, {city}, etc. Returns the filled-in subject and body.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        template_id: { type: 'integer' },
-        lead_id: { type: 'integer' }
-      },
-      required: ['template_id', 'lead_id']
+    type: 'function',
+    function: {
+      name: 'get_followups',
+      description: 'Get leads with follow-ups due today and overdue follow-ups.',
+      parameters: { type: 'object', properties: {} }
     }
   },
   {
-    name: 'update_lead_status',
-    description: 'Change a lead\'s pipeline status. Use when the user says things like "mark as contacted", "move to qualified", "close the deal", "mark as lost". This also auto-schedules a follow-up and recomputes the heat score.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' },
-        status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] }
-      },
-      required: ['lead_id', 'status']
+    type: 'function',
+    function: {
+      name: 'get_stats',
+      description: 'Get dashboard statistics: total leads, pipeline value, conversion rate, leads by status and service type.',
+      parameters: { type: 'object', properties: {} }
     }
   },
   {
-    name: 'log_activity',
-    description: 'Log a call attempt, email sent, SMS sent, or note on a lead. Use when the user says "log a call", "I emailed them", "sent a text", or "add a note".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' },
-        type: { type: 'string', enum: ['note', 'call_attempt', 'email_sent', 'sms_sent'], description: 'Activity type (default: note)' },
-        title: { type: 'string', description: 'Short title for the activity' },
-        description: { type: 'string', description: 'Optional longer description' }
-      },
-      required: ['lead_id', 'title']
+    type: 'function',
+    function: {
+      name: 'get_templates',
+      description: 'Get outreach templates. Filter by channel (email/sms/call_script) and/or status stage.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', enum: ['email', 'sms', 'call_script'] },
+          status_stage: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] }
+        }
+      }
     }
   },
   {
-    name: 'set_followup',
-    description: 'Schedule a follow-up reminder for a lead N days from now. Use when the user says "remind me in 3 days", "follow up next week", "snooze this lead".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' },
-        days: { type: 'integer', description: 'Number of days from now (minimum 1)' }
-      },
-      required: ['lead_id', 'days']
+    type: 'function',
+    function: {
+      name: 'preview_template',
+      description: 'Render a template with a specific lead\'s data, replacing variables like {business_name}, {city}, etc. Returns the filled-in subject and body.',
+      parameters: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'integer' },
+          lead_id: { type: 'integer' }
+        },
+        required: ['template_id', 'lead_id']
+      }
     }
   },
   {
-    name: 'update_heat_score',
-    description: 'Manually set a lead\'s heat score (0-100). Use when the user says "set heat to 80", "this lead is hot", "cool down this lead".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' },
-        heat_score: { type: 'integer', description: 'New heat score (0-100)' }
-      },
-      required: ['lead_id', 'heat_score']
+    type: 'function',
+    function: {
+      name: 'update_lead_status',
+      description: 'Change a lead\'s pipeline status. Use when the user says things like "mark as contacted", "move to qualified", "close the deal", "mark as lost". This also auto-schedules a follow-up and recomputes the heat score.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'] }
+        },
+        required: ['lead_id', 'status']
+      }
     }
   },
   {
-    name: 'add_note',
-    description: 'Add a note to a lead\'s notes field. Appends to existing notes. Use when the user says "note that...", "remember that...", "jot down...".',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'The lead ID' },
-        note: { type: 'string', description: 'The note text to add' }
-      },
-      required: ['lead_id', 'note']
+    type: 'function',
+    function: {
+      name: 'log_activity',
+      description: 'Log a call attempt, email sent, SMS sent, or note on a lead. Use when the user says "log a call", "I emailed them", "sent a text", or "add a note".',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          type: { type: 'string', enum: ['note', 'call_attempt', 'email_sent', 'sms_sent'], description: 'Activity type (default: note)' },
+          title: { type: 'string', description: 'Short title for the activity' },
+          description: { type: 'string', description: 'Optional longer description' }
+        },
+        required: ['lead_id', 'title']
+      }
     }
   },
   {
-    name: 'get_sequences',
-    description: 'List all active outreach sequences available for enrollment. Use this before enrolling a lead to show the user what sequences exist and their step counts.',
-    input_schema: { type: 'object', properties: {} }
-  },
-  {
-    name: 'send_sms',
-    description: 'Send an actual SMS text message to a lead via Twilio. IMPORTANT: Always show the user the exact message content and get explicit confirmation before calling this tool. Verify the lead has a phone number first using get_lead.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'ID of the lead to text' },
-        message: { type: 'string', description: 'The SMS message body. Max 160 characters. No emojis.' }
-      },
-      required: ['lead_id', 'message']
+    type: 'function',
+    function: {
+      name: 'set_followup',
+      description: 'Schedule a follow-up reminder for a lead N days from now. Use when the user says "remind me in 3 days", "follow up next week", "snooze this lead".',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          days: { type: 'integer', description: 'Number of days from now (minimum 1)' }
+        },
+        required: ['lead_id', 'days']
+      }
     }
   },
   {
-    name: 'enroll_in_sequence',
-    description: 'Enroll a lead in an automated outreach sequence. Use get_sequences first to find available sequences. Always get user confirmation before enrolling.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'ID of the lead to enroll' },
-        sequence_id: { type: 'integer', description: 'ID of the sequence to enroll them in' }
-      },
-      required: ['lead_id', 'sequence_id']
+    type: 'function',
+    function: {
+      name: 'update_heat_score',
+      description: 'Manually set a lead\'s heat score (0-100). Use when the user says "set heat to 80", "this lead is hot", "cool down this lead".',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          heat_score: { type: 'integer', description: 'New heat score (0-100)' }
+        },
+        required: ['lead_id', 'heat_score']
+      }
     }
   },
   {
-    name: 'send_email',
-    description: 'Send an email to a single lead using a template via Resend. Use get_templates(channel: "email") to find templates, use preview_template to show the rendered content. IMPORTANT: Always show the user the email subject and first 150 chars of body and get explicit confirmation before calling this tool.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        lead_id: { type: 'integer', description: 'ID of the lead to email' },
-        template_id: { type: 'integer', description: 'ID of the email template to use' }
-      },
-      required: ['lead_id', 'template_id']
+    type: 'function',
+    function: {
+      name: 'add_note',
+      description: 'Add a note to a lead\'s notes field. Appends to existing notes. Use when the user says "note that...", "remember that...", "jot down...".',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          note: { type: 'string', description: 'The note text to add' }
+        },
+        required: ['lead_id', 'note']
+      }
     }
   },
   {
-    name: 'bulk_send_email',
-    description: 'Send an email template to multiple leads matching a filter. IMPORTANT: Before calling this, use search_leads with the same filters to show how many leads will receive the email. Present the count and template name, then get explicit confirmation. Do NOT call without confirmed approval.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        template_id: { type: 'integer', description: 'ID of the email template to send' },
-        status: { type: 'string', description: 'Filter by lead status (optional). E.g. "new", "contacted"' },
-        service_type: { type: 'string', description: 'Filter by service type (optional). E.g. "hvac", "roofing"' }
-      },
-      required: ['template_id']
+    type: 'function',
+    function: {
+      name: 'get_sequences',
+      description: 'List all active outreach sequences available for enrollment. Use this before enrolling a lead to show the user what sequences exist and their step counts.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_sms',
+      description: 'Send an actual SMS text message to a lead via Twilio. IMPORTANT: Always show the user the exact message content and get explicit confirmation before calling this tool. Verify the lead has a phone number first using get_lead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'ID of the lead to text' },
+          message: { type: 'string', description: 'The SMS message body. Max 160 characters. No emojis.' }
+        },
+        required: ['lead_id', 'message']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'enroll_in_sequence',
+      description: 'Enroll a lead in an automated outreach sequence. Use get_sequences first to find available sequences. Always get user confirmation before enrolling.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'ID of the lead to enroll' },
+          sequence_id: { type: 'integer', description: 'ID of the sequence to enroll them in' }
+        },
+        required: ['lead_id', 'sequence_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'send_email',
+      description: 'Send an email to a single lead using a template via Resend. Use get_templates(channel: "email") to find templates, use preview_template to show the rendered content. IMPORTANT: Always show the user the email subject and first 150 chars of body and get explicit confirmation before calling this tool.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'ID of the lead to email' },
+          template_id: { type: 'integer', description: 'ID of the email template to use' }
+        },
+        required: ['lead_id', 'template_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'personalize_email',
+      description: 'Generate a truly personalized email for a specific lead using their website data, reviews, and business details. Returns a preview of the personalized subject and body. Use this before sending to show the user what will be sent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          template_id: { type: 'integer', description: 'The email template ID to base the personalization on' }
+        },
+        required: ['lead_id', 'template_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bulk_personalized_send',
+      description: 'Personalize and send unique emails to multiple leads. Each email is individually written based on the lead\'s business data, reviews, and website info. IMPORTANT: Call search_leads first to show the user which leads will be targeted, then get explicit confirmation before calling this tool.',
+      parameters: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'integer', description: 'Base template ID to personalize from' },
+          status: { type: 'string', description: 'Filter by lead status (optional)' },
+          service_type: { type: 'string', description: 'Filter by service type (optional)' },
+          limit: { type: 'integer', description: 'Max leads to email (default 10, max 25)' }
+        },
+        required: ['template_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bulk_send_email',
+      description: 'Send an email template to multiple leads matching a filter. IMPORTANT: Before calling this, use search_leads with the same filters to show how many leads will receive the email. Present the count and template name, then get explicit confirmation. Do NOT call without confirmed approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'integer', description: 'ID of the email template to send' },
+          status: { type: 'string', description: 'Filter by lead status (optional). E.g. "new", "contacted"' },
+          service_type: { type: 'string', description: 'Filter by service type (optional). E.g. "hvac", "roofing"' }
+        },
+        required: ['template_id']
+      }
     }
   }
 ];
@@ -334,7 +417,6 @@ async function executeTool(toolName, input) {
 
       autoUpdateHeatScore(input.lead_id);
 
-      // Auto-schedule follow-up or clear for terminal statuses
       if (['lost', 'closed_won'].includes(input.status)) {
         db.run('UPDATE leads SET next_followup_at = NULL WHERE id = ?', [input.lead_id]);
       } else if (FOLLOWUP_DAYS[input.status]) {
@@ -519,6 +601,76 @@ async function executeTool(toolName, input) {
       return { success: true, message: `Email sent to ${lead.business_name} (${lead.email})` };
     }
 
+    case 'personalize_email': {
+      const { lead_id, template_id } = input;
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+      if (!template) return { error: 'Template not found' };
+      if (template.channel !== 'email') return { error: 'Template is not an email template' };
+
+      const personalized = await generatePersonalizedEmail(lead, template);
+      return {
+        lead_id,
+        business_name: lead.business_name,
+        email: lead.email || null,
+        has_enrichment: !!lead.enrichment_data,
+        subject: personalized.subject,
+        body: personalized.body,
+      };
+    }
+
+    case 'bulk_personalized_send': {
+      const { template_id, status, service_type, limit } = input;
+
+      const emailService = require('./emailService');
+      if (!emailService.isConfigured()) return { error: 'Email not configured (missing RESEND_API_KEY)' };
+
+      const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+      if (!template) return { error: 'Template not found' };
+      if (template.channel !== 'email') return { error: 'Template is not an email template' };
+
+      const conditions = ["email IS NOT NULL AND email != ''", "(unsubscribed_at IS NULL OR unsubscribed_at = '')"];
+      const params = [];
+      if (status) { conditions.push('status = ?'); params.push(status); }
+      if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
+      const maxLeads = Math.min(limit || 10, 25);
+      const leads = db.all(
+        `SELECT * FROM leads WHERE ${conditions.join(' AND ')} ORDER BY heat_score DESC LIMIT ?`,
+        [...params, maxLeads]
+      );
+
+      if (leads.length === 0) return { error: 'No leads match that filter with a valid email address' };
+
+      let sent = 0, failed = 0;
+      for (const lead of leads) {
+        try {
+          const personalized = await generatePersonalizedEmail(lead, template);
+          const result = await emailService.sendEmail(lead.email, personalized.subject, personalized.body);
+          if (result.success) {
+            sent++;
+            db.run(
+              'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+              [lead.id, 'email_sent', 'Personalized email sent', personalized.subject,
+               JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'sam_ai_personalized' })]
+            );
+            db.run(
+              'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+              [lead.id]
+            );
+            if (lead.status === 'new') {
+              db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead.id]);
+            }
+          } else { failed++; }
+        } catch { failed++; }
+      }
+
+      return {
+        success: true,
+        message: `Sent ${sent} personalized email${sent !== 1 ? 's' : ''}${failed > 0 ? `, ${failed} failed` : ''}. New leads auto-advanced to "contacted".`,
+      };
+    }
+
     case 'bulk_send_email': {
       const { template_id, status, service_type } = input;
 
@@ -568,6 +720,67 @@ async function executeTool(toolName, input) {
   }
 }
 
+async function generatePersonalizedEmail(lead, template) {
+  let enrichmentContext = '';
+  if (lead.enrichment_data) {
+    try {
+      const enrichment = JSON.parse(lead.enrichment_data);
+      const parts = [];
+      if (enrichment.description) parts.push(`About: ${enrichment.description.slice(0, 200)}`);
+      if (enrichment.services_offered?.length) parts.push(`Services: ${enrichment.services_offered.slice(0, 5).join(', ')}`);
+      if (enrichment.team_names?.length) parts.push(`Team: ${enrichment.team_names.slice(0, 3).join(', ')}`);
+      enrichmentContext = parts.join('. ');
+    } catch {}
+  }
+
+  const context = [
+    `Business: ${lead.business_name}`,
+    `Location: ${[lead.city, lead.state].filter(Boolean).join(', ')}`,
+    `Service: ${lead.service_type || 'home services'}`,
+    lead.rating ? `Rating: ${lead.rating} stars (${lead.review_count || 0} reviews)` : '',
+    lead.website ? `Website: ${lead.website}` : '',
+    enrichmentContext,
+  ].filter(Boolean).join('\n');
+
+  const renderedSubject = renderTemplate(template.subject || '', lead);
+  const renderedBody = renderTemplate(template.body || '', lead);
+
+  const prompt = `You are an expert B2B cold email writer for home service contractors in the US.
+
+Rewrite this email with a unique, specific opening (2-3 sentences) that references real details about this business. Keep the rest of the structure intact but make it flow naturally.
+
+LEAD DETAILS:
+${context}
+
+BASE EMAIL:
+Subject: ${renderedSubject}
+Body:
+${renderedBody}
+
+RULES:
+- Opening must feel researched and specific to THIS business (mention their rating, city, specialty, or something from their website)
+- Under 200 words total
+- No emojis. High urgency tone. Professional but direct.
+- End with one clear CTA
+- Return ONLY valid JSON with no markdown: {"subject": "...", "body": "..."}`;
+
+  const data = await callGemini([{ role: 'user', content: prompt }], false);
+  const raw = data.choices?.[0]?.message?.content?.trim() || '';
+
+  let parsed;
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+  } catch {
+    parsed = { subject: renderedSubject, body: renderedBody };
+  }
+
+  return {
+    subject: parsed.subject || renderedSubject,
+    body: parsed.body || renderedBody,
+  };
+}
+
 function buildContextString(context) {
   if (!context) return '';
   const parts = [`The user is currently on the ${pageLabel(context.page)} page.`];
@@ -587,122 +800,96 @@ function pageLabel(path) {
   return map[path] || path;
 }
 
-function convertToClaudeMessages(dbMessages) {
-  const messages = [];
-  for (const msg of dbMessages) {
-    if (msg.role === 'user') {
-      messages.push({ role: 'user', content: msg.content });
-    } else if (msg.role === 'assistant') {
-      messages.push({ role: 'assistant', content: msg.content });
-    }
+async function callGemini(messages, useTools = true) {
+  const body = {
+    model: MODEL,
+    max_tokens: 2048,
+    messages,
+  };
+  if (useTools) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
   }
-  return messages;
+
+  const res = await fetch(`${GEMINI_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 401) throw new Error('AI copilot is not configured. Please set GEMINI_API_KEY.');
+    if (res.status === 429) throw new Error('AI is temporarily busy. Please wait a moment and try again.');
+    throw new Error(`Gemini API error ${res.status}: ${errText}`);
+  }
+
+  return res.json();
 }
 
 const MAX_TOOL_ROUNDS = 5;
 
 async function streamChat(dbMessages, context, onEvent) {
   const systemPrompt = SYSTEM_PROMPT + (context ? `\n\nCurrent session context:\n${buildContextString(context)}` : '');
-  let claudeMessages = convertToClaudeMessages(dbMessages);
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...dbMessages.map(m => ({ role: m.role, content: m.content })),
+  ];
+
   let toolRounds = 0;
 
-  try {
-    while (true) {
-      const stream = client.messages.stream({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        system: systemPrompt,
-        messages: claudeMessages,
-        tools,
+  while (true) {
+    const data = await callGemini(messages);
+    const choice = data.choices?.[0];
+    const message = choice?.message;
+
+    if (!message) throw new Error('No response from Gemini');
+
+    const finishReason = choice.finish_reason;
+    const toolCalls = message.tool_calls;
+
+    if (finishReason !== 'tool_calls' || !toolCalls?.length || toolRounds >= MAX_TOOL_ROUNDS) {
+      const text = message.content || '';
+      if (text) onEvent({ type: 'text', text });
+      return text;
+    }
+
+    toolRounds++;
+
+    messages.push({
+      role: 'assistant',
+      content: message.content || null,
+      tool_calls: toolCalls,
+    });
+
+    for (const tc of toolCalls) {
+      const toolName = tc.function.name;
+      let input = {};
+      try { input = JSON.parse(tc.function.arguments); } catch {}
+
+      onEvent({ type: 'tool_call', tool: toolName });
+      const result = await executeTool(toolName, input);
+      onEvent({ type: 'tool_done', tool: toolName });
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: JSON.stringify(result),
       });
-
-      let fullText = '';
-      let toolUseBlocks = [];
-      let currentToolUse = null;
-
-      for await (const event of stream) {
-        if (event.type === 'content_block_start') {
-          if (event.content_block.type === 'tool_use') {
-            currentToolUse = { id: event.content_block.id, name: event.content_block.name, inputJson: '' };
-            onEvent({ type: 'tool_call', tool: event.content_block.name });
-          }
-        } else if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            fullText += event.delta.text;
-            onEvent({ type: 'text', text: event.delta.text });
-          } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
-            currentToolUse.inputJson += event.delta.partial_json;
-          }
-        } else if (event.type === 'content_block_stop') {
-          if (currentToolUse) {
-            let input = {};
-            try { input = JSON.parse(currentToolUse.inputJson); } catch {}
-            toolUseBlocks.push({ ...currentToolUse, input });
-            currentToolUse = null;
-          }
-        }
-      }
-
-      const finalMessage = await stream.finalMessage();
-
-      // If no tool calls or we've hit the limit, we're done
-      if (finalMessage.stop_reason !== 'tool_use' || toolRounds >= MAX_TOOL_ROUNDS) {
-        return fullText;
-      }
-
-      // Execute tools and continue the conversation
-      toolRounds++;
-
-      // Build the assistant message with all content blocks
-      const assistantContent = finalMessage.content.map(block => {
-        if (block.type === 'text') return { type: 'text', text: block.text };
-        if (block.type === 'tool_use') return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
-        return block;
-      });
-
-      claudeMessages.push({ role: 'assistant', content: assistantContent });
-
-      // Execute each tool and build tool results
-      const toolResults = await Promise.all(toolUseBlocks.map(async tool => {
-        const result = await executeTool(tool.name, tool.input);
-        onEvent({ type: 'tool_done', tool: tool.name });
-        return {
-          type: 'tool_result',
-          tool_use_id: tool.id,
-          content: JSON.stringify(result),
-        };
-      }));
-
-      claudeMessages.push({ role: 'user', content: toolResults });
-
-      // Reset for next round
-      fullText = '';
-      toolUseBlocks = [];
     }
-  } catch (err) {
-    if (err instanceof AuthenticationError) {
-      throw new Error('AI copilot is not configured. Please set ANTHROPIC_API_KEY.');
-    }
-    if (err instanceof RateLimitError) {
-      throw new Error('AI is temporarily busy. Please wait a moment and try again.');
-    }
-    if (err instanceof APIConnectionError) {
-      throw new Error('Could not connect to AI service. Check your internet connection.');
-    }
-    throw err;
   }
 }
 
 async function generateTitle(userMessage, assistantResponse) {
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 30,
-    messages: [{
-      role: 'user',
-      content: `Generate a short title (max 6 words) for this conversation. Reply with ONLY the title, no quotes or punctuation.\n\nUser: ${userMessage}\n\nAssistant: ${assistantResponse.slice(0, 300)}`
-    }]
-  });
-  return response.content[0]?.text?.trim() || userMessage.slice(0, 50);
+  const data = await callGemini([{
+    role: 'user',
+    content: `Generate a short title (max 6 words) for this conversation. Reply with ONLY the title, no quotes or punctuation.\n\nUser: ${userMessage}\n\nAssistant: ${assistantResponse.slice(0, 300)}`
+  }], false);
+  return data.choices?.[0]?.message?.content?.trim() || userMessage.slice(0, 50);
 }
 
 module.exports = { streamChat, generateTitle };

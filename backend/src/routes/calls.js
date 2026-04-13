@@ -445,7 +445,7 @@ router.post('/coach', async (req, res, next) => {
   try {
     const { lead_id, objection, script_body } = req.body;
     if (!objection?.trim()) return res.status(400).json({ success: false, error: 'objection required' });
-    if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ success: false, error: 'ANTHROPIC_API_KEY not set' });
+    if (!process.env.GROQ_API_KEY) return res.status(500).json({ success: false, error: 'GROQ_API_KEY not set' });
 
     const lead = lead_id ? db.get('SELECT business_name, city, state, service_type FROM leads WHERE id = ?', [lead_id]) : null;
     const contextLine = lead
@@ -455,20 +455,24 @@ router.post('/coach', async (req, res, next) => {
     const userMessage = `${contextLine}${scriptLine}\n\nObjection: "${objection.trim()}"\n\nWhat do I say right now?`;
 
     const fetch = require('node-fetch');
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
         max_tokens: 150,
-        system: `You are a battle-hardened sales coach. A rep is on a LIVE cold call right now selling AI lead response software to home service contractors.
+        messages: [
+          {
+            role: 'system',
+            content: `You are a battle-hardened sales coach. A rep is on a LIVE cold call right now selling AI lead response software to home service contractors.
 Give 1-2 sentences the rep can say OUT LOUD right now to handle the objection.
 Rules: Direct and confident. Focus on pain (missed leads, lost revenue) not features. No opener phrases like "Great question". Output ONLY the response — nothing else.`,
-        messages: [{ role: 'user', content: userMessage }],
+          },
+          { role: 'user', content: userMessage },
+        ],
       }),
     });
 
@@ -477,7 +481,7 @@ Rules: Direct and confident. Focus on pain (missed leads, lost revenue) not feat
       return res.status(500).json({ success: false, error: errData.error?.message || 'AI request failed' });
     }
     const data = await response.json();
-    const suggestion = data.content?.[0]?.text?.trim() || '';
+    const suggestion = data.choices?.[0]?.message?.content?.trim() || '';
     res.json({ success: true, data: { suggestion } });
   } catch (err) { next(err); }
 });
@@ -626,8 +630,8 @@ router.post('/voice-note', async (req, res) => {
     const lead = db.get('SELECT id FROM leads WHERE id = ?', [lead_id]);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not configured' });
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({ success: false, error: 'GROQ_API_KEY not configured' });
     }
 
     // Decode base64 → Buffer
@@ -641,13 +645,13 @@ router.post('/voice-note', async (req, res) => {
       : mime_type.includes('mp3') ? 'mp3'
       : 'webm';
     formData.append('file', audioBuffer, { filename: `voice_note.${ext}`, contentType: mime_type });
-    formData.append('model', 'whisper-1');
+    formData.append('model', 'whisper-large-v3-turbo');
 
     const fetch = require('node-fetch');
-    const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const whisperRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         ...formData.getHeaders(),
       },
       body: formData,
