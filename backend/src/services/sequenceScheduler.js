@@ -603,8 +603,6 @@ async function flushOverdueNow() {
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
     WHERE ls.status = 'active'
-      AND (s.auto_send IS NULL OR s.auto_send = 0)
-      AND (ls.auto_send IS NULL OR ls.auto_send = 0)
       AND (l.unsubscribed_at IS NULL)
       AND (l.email_invalid_at IS NULL)
   `);
