@@ -418,6 +418,9 @@ async function initDb() {
   // Migration: add Gatekeeper script
   migrateColdCallScriptsV4();
 
+  // Migration: patch Gatekeeper script with "don't know owner's name" section
+  migrateColdCallScriptsV4b();
+
   // Migration: seed pre-built sequence template library
   seedTemplateLibrary();
 
@@ -2949,6 +2952,33 @@ or after 5 PM when gatekeepers are gone.`,
     ]
   );
   console.log('[DB] Gatekeeper script added.');
+}
+
+function migrateColdCallScriptsV4b() {
+  const tpl = get("SELECT id, body FROM templates WHERE name = 'Cold Call — Gatekeeper' AND is_default = 1 LIMIT 1");
+  if (!tpl || tpl.body.includes("IF YOU DON'T KNOW THE OWNER'S NAME")) return;
+  const patch = `
+---
+
+IF YOU DON'T KNOW THE OWNER'S NAME:
+"Hey, who's the owner there?" (casual, one breath — don't over-explain)
+
+OR if that feels too blunt:
+"Hey, who handles the {service_type} side over there — is there an owner or manager I can grab?"
+
+Once they give you the name:
+"Perfect — is [name] around?"
+
+→ Save the name in the lead's "Owner Name" field before you hang up.
+  Next call opens with their first name like you've spoken before.
+
+PRE-CALL SHORTCUT (30 seconds):
+Google "{business_name} {city} owner" or check LinkedIn.
+Most small contractors have their name on Google Maps, Yelp, or their website.
+Getting the name before you dial = 2x higher transfer rate.`;
+
+  db.run("UPDATE templates SET body = body || ? WHERE id = ?", [patch, tpl.id]);
+  console.log('[DB] Gatekeeper script patched with unknown-name section.');
 }
 
 function seedTemplateLibrary() {
