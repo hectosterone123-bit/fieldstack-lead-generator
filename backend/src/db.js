@@ -415,6 +415,9 @@ async function initDb() {
   // Migration: add "I Built You Something" pre-built value opener script
   migrateColdCallScriptsV3();
 
+  // Migration: add Gatekeeper script
+  migrateColdCallScriptsV4();
+
   // Migration: seed pre-built sequence template library
   seedTemplateLibrary();
 
@@ -2874,6 +2877,78 @@ function migratePostCallSmsTemplates() {
     'Post-Call SMS — Voicemail', 2,
     "Hey {first_name}, just left a voicemail for {business_name}. Quick version: I help {service_type} contractors get back to every website lead in 90 seconds. Worth a call this week?",
   ]);
+}
+
+function migrateColdCallScriptsV4() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — Gatekeeper' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding Gatekeeper cold call script...');
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', 1, NULL, ?, 1)",
+    [
+      'Cold Call — Gatekeeper',
+      `GOAL: Get transferred to the owner. Never pitch to the gatekeeper — they can't buy.
+
+---
+
+OPENER (sound like you belong):
+"Hey, is {first_name} around?"
+
+Use first name only. Casual tone. No company intro — that triggers screening.
+
+---
+
+IF "What's this regarding?":
+"It's about their website — I had a quick question for him."
+
+OR (if you know their service):
+"I was looking at their {service_type} leads online, just need 30 seconds with him."
+
+Vague but specific. Don't explain the product. Don't pitch.
+
+---
+
+IF "He's not available / not in":
+"No worries — when's usually a better time to catch him directly?"
+
+Lock a specific time. On callback, open with:
+"Hey, I spoke with [name] yesterday — she said this was a better time for {first_name}."
+
+---
+
+IF they keep blocking / ask for more info:
+"Totally understand — what's the best email to reach him directly? I'll keep it short."
+
+Then send the "I Built You Something" email and follow up with a call.
+
+---
+
+IF transferred and owner picks up → switch to your main opener immediately.
+No re-intro. No "I was just talking to your receptionist." Just go:
+"Hey {first_name}, this is {sender_name} — [opener]"
+
+---
+
+DO:
+- Sound like a peer, not a vendor
+- Use owner's first name every time
+- Be warm and brief with the gatekeeper — they remember rude callers
+- Ask for a specific callback time, not "I'll try again"
+
+DON'T:
+- Say "I'm calling about a business opportunity" → instant screen
+- Ask for "the owner" or "the person in charge" → sounds like a cold caller
+- Leave a voicemail pitch with the gatekeeper — it rarely gets passed on
+- Explain Sam AI or FieldStack to the gatekeeper
+
+---
+
+GATEKEEPER COUNT: Check {business_name}'s gatekeeper_count before calling.
+If >= 3 hits → try calling before 8 AM (owner often answers before staff arrives)
+or after 5 PM when gatekeepers are gone.`,
+    ]
+  );
+  console.log('[DB] Gatekeeper script added.');
 }
 
 function seedTemplateLibrary() {
