@@ -6,10 +6,11 @@ import {
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
   ChevronDown, MousePointerClick, MailX, ShieldAlert,
 } from 'lucide-react';
+import { CallBriefModal } from '../components/leads/CallBriefModal';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatCurrency, formatRelativeTime, cn } from '../lib/utils';
-import type { Lead, LeadStatus, ActivityType } from '../types';
+import type { Lead, LeadStatus, ActivityType, HotSignalLead } from '../types';
 import { Link } from 'react-router-dom';
 import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
 import { useToast } from '../lib/toast';
@@ -194,6 +195,7 @@ export function Dashboard() {
   const logActivity = useLogActivity();
   const patchStatus = usePatchStatus();
   const { toast } = useToast();
+  const [scriptLead, setScriptLead] = useState<Lead | null>(null);
 
   if (isLoading) {
     return (
@@ -220,7 +222,9 @@ export function Dashboard() {
   const byStatus = stats?.by_status || [];
   const maxCount = Math.max(...byStatus.map(s => s.count), 1);
 
-  const allFollowups = [...(followups?.overdue || []), ...(followups?.due_today || [])];
+  const overdueLeads = [...(followups?.overdue || [])].sort((a: Lead, b: Lead) => b.heat_score - a.heat_score);
+  const dueTodayLeads = [...(followups?.due_today || [])].sort((a: Lead, b: Lead) => b.heat_score - a.heat_score);
+  const allFollowups = [...overdueLeads, ...dueTodayLeads];
   const overdueIds = new Set((followups?.overdue || []).map((l: Lead) => l.id));
 
   function getOverdueText(dateStr: string | null) {
@@ -450,6 +454,64 @@ export function Dashboard() {
         />
       )}
 
+      {/* Hot Signals — leads who opened email in last 48h, not yet called back */}
+      {stats?.hot_signal_leads && stats.hot_signal_leads.length > 0 && (
+        <div className="bg-zinc-900 border border-orange-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Flame className="w-4 h-4 text-orange-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Hot Signals</h2>
+            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.hot_signal_leads.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">opened email · not yet called</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {stats.hot_signal_leads.map((lead: HotSignalLead) => {
+              const hoursAgo = lead.email_opened_at
+                ? Math.round((Date.now() - new Date(lead.email_opened_at).getTime()) / (1000 * 60 * 60))
+                : null;
+              return (
+                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-orange-500/[0.03] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                      {hoursAgo !== null && (
+                        <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                          {hoursAgo < 1 ? 'just now' : `${hoursAgo}h ago`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {lead.phone && <span className="font-data">{lead.phone}</span>}
+                      {lead.service_type && <span>· {lead.service_type}</span>}
+                      {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => setScriptLead(lead)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <FileText className="w-3 h-3" /> Script
+                    </button>
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Call Now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Today's Follow-ups */}
       {followups && (
         <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">
@@ -499,15 +561,28 @@ export function Dashboard() {
                         )}>
                           {isOverdue ? 'Overdue' : 'Due Today'}
                         </span>
+                        {lead.email_opened_at && (
+                          <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                            <Flame className="w-2.5 h-2.5" /> Opened email
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                        {lead.phone && <span>{lead.phone}</span>}
+                        {lead.phone && <span className="font-data">{lead.phone}</span>}
                         {lead.service_type && <span>· {lead.service_type}</span>}
+                        {lead.owner_name && <span>· {lead.owner_name}</span>}
                         <span>· {getOverdueText(lead.next_followup_at)}</span>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => setScriptLead(lead)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                        title="Open call script"
+                      >
+                        <FileText className="w-3 h-3" /> Script
+                      </button>
                       <button
                         onClick={() => logActivity.mutate(
                           { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
@@ -702,6 +777,8 @@ export function Dashboard() {
           </Link>
         </div>
       )}
+
+      <CallBriefModal lead={scriptLead} onClose={() => setScriptLead(null)} />
     </div>
   );
 }

@@ -167,6 +167,26 @@ export interface BatchSearchMeta {
   new: number;
 }
 
+export interface GhostLead {
+  id: number;
+  business_name: string;
+  last_contacted_at: string;
+  status: LeadStatus;
+  phone: string | null;
+  service_type: ServiceType;
+}
+
+export interface HotSignalLead {
+  id: number;
+  business_name: string;
+  owner_name: string | null;
+  phone: string | null;
+  heat_score: number;
+  email_opened_at: string;
+  service_type: ServiceType;
+  city: string | null;
+}
+
 export interface Stats {
   total_leads: number;
   by_status: { status: LeadStatus; count: number }[];
@@ -191,14 +211,8 @@ export interface Stats {
   proposals_open_count: number;
   proposals_open_value: number;
   ghost_count: number;
-  ghost_leads: Array<{
-    id: number;
-    business_name: string;
-    last_contacted_at: string;
-    status: LeadStatus;
-    phone: string | null;
-    service_type: ServiceType;
-  }>;
+  ghost_leads: GhostLead[];
+  hot_signal_leads: HotSignalLead[];
   outreach_summary: {
     total_emails_sent: number;
     total_opens: number;

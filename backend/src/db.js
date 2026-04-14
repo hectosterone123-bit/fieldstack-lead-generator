@@ -298,6 +298,9 @@ async function initDb() {
   // Migration: add direct loom delivery email templates if missing
   migrateDirectLoomEmails();
 
+  // Migration: owner contact tracking (for Call Brief Modal)
+  try { db.run('ALTER TABLE leads ADD COLUMN owner_name TEXT'); } catch(e) {}
+
   // Migration: add 4 new high-impact loom scripts (v2)
   migrateLoomScriptsV2();
 

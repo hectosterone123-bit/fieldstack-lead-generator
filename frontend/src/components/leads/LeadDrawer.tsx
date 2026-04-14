@@ -7,6 +7,7 @@ import {
   MailOpen, MousePointerClick, MailX, ShieldAlert, Linkedin,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
+import { CallBriefModal } from './CallBriefModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
 import type { Lead, LeadStatus, EnrichmentData, ActivityType } from '../../types';
 import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
@@ -98,6 +99,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [customTag, setCustomTag] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showScript, setShowScript] = useState(false);
   const [gbpData, setGbpData] = useState<GbpData | null>(null);
 
   const lead = data as (Lead & { activities: any[] }) | undefined;
@@ -982,6 +984,44 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 )}
               </div>
 
+              {/* Email engagement summary */}
+              {lead.activities && (() => {
+                const emailSent = lead.activities.filter((a: any) => a.type === 'email_sent').length;
+                const emailOpens = lead.activities.filter((a: any) => a.type === 'email_opened').length;
+                const emailClicks = lead.activities.filter((a: any) => a.type === 'email_clicked').length;
+                const emailBounced = lead.activities.some((a: any) => a.type === 'email_bounced');
+                if (!emailSent && !emailOpens && !emailClicks && !emailBounced) return null;
+                return (
+                  <div className="px-5 py-3 border-t border-white/[0.04]">
+                    <p className="text-overline text-zinc-600 mb-2">Email Engagement</p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                        <Mail className="w-3.5 h-3.5 text-violet-400" />
+                        {emailSent} sent
+                      </span>
+                      {emailOpens > 0 && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+                          <MailOpen className="w-3.5 h-3.5" />
+                          {emailOpens}× opened
+                        </span>
+                      )}
+                      {emailClicks > 0 && (
+                        <span className="flex items-center gap-1.5 text-xs text-blue-400">
+                          <MousePointerClick className="w-3.5 h-3.5" />
+                          {emailClicks}× clicked
+                        </span>
+                      )}
+                      {emailBounced && (
+                        <span className="flex items-center gap-1.5 text-xs text-red-400">
+                          <MailX className="w-3.5 h-3.5" />
+                          bounced
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Activity timeline */}
               {lead.activities && lead.activities.length > 0 && (
                 <div className="px-5 py-4">
@@ -1018,6 +1058,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               <TemplatePreviewModal lead={lead} onClose={() => setShowTemplates(false)} />
             )}
 
+            {/* Call brief modal */}
+            <CallBriefModal lead={showScript ? lead : null} onClose={() => setShowScript(false)} />
+
             {/* Sticky footer */}
             <div className="flex items-center gap-2 px-5 py-4 border-t border-white/[0.04] bg-zinc-950/60 backdrop-blur-sm flex-shrink-0">
               <button
@@ -1026,6 +1069,13 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               >
                 <Send className="w-4 h-4" />
                 Outreach
+              </button>
+              <button
+                onClick={() => setShowScript(true)}
+                className="px-3 py-2.5 rounded-lg text-sm font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/[0.06] transition-colors flex items-center gap-2"
+                title="Call script"
+              >
+                <FileText className="w-4 h-4" />
               </button>
               <button
                 onClick={handleLogCall}

@@ -247,6 +247,21 @@ router.get('/', (req, res, next) => {
       LIMIT 5
     `);
 
+    // Hot signals: leads who opened an email in last 48h but haven't been called back yet
+    const hot_signal_leads = db.all(`
+      SELECT l.id, l.business_name, l.owner_name, l.phone, l.heat_score, l.email_opened_at, l.service_type, l.city
+      FROM leads l
+      WHERE l.email_opened_at > datetime('now', '-48 hours')
+        AND l.status NOT IN ('lost', 'closed_won')
+        AND NOT EXISTS (
+          SELECT 1 FROM activities a
+          WHERE a.lead_id = l.id AND a.type = 'call_attempt'
+            AND a.created_at > l.email_opened_at
+        )
+      ORDER BY l.email_opened_at DESC
+      LIMIT 5
+    `);
+
     res.json({
       success: true,
       data: {
@@ -274,6 +289,7 @@ router.get('/', (req, res, next) => {
         proposals_open_value: proposals_open?.total || 0,
         ghost_count,
         ghost_leads,
+        hot_signal_leads,
         outreach_summary,
         step_performance,
         requeue_eligible,

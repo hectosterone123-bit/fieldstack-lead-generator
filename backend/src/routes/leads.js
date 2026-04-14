@@ -999,6 +999,12 @@ router.post('/:id/activities', (req, res, next) => {
     if (type === 'call_attempt') {
       db.run('UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
       autoUpdateHeatScore(req.params.id);
+      // Auto-schedule 3-day follow-up if none exists or current one is overdue
+      db.run(
+        `UPDATE leads SET next_followup_at = datetime('now', '+3 days'), updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND (next_followup_at IS NULL OR date(next_followup_at) <= date('now'))`,
+        [req.params.id]
+      );
     }
 
     db.run(
