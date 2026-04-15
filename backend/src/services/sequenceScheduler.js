@@ -9,6 +9,8 @@ const MAX_SENDS_PER_TICK = 20;
 
 // Track daily limit alert so it fires at most once per day
 let limitAlertSentDate = '';
+// Prevent overlapping scheduler ticks
+let schedulerRunning = false;
 
 async function sendAlert(subject, body) {
   try {
@@ -52,6 +54,8 @@ function startSequenceScheduler() {
 
   // Run every 3 minutes (24/7) to keep queues fresh and responsive
   cron.schedule('*/3 * * * *', async () => {
+    if (schedulerRunning) { console.log('[Scheduler] Skipping tick — previous run still in progress'); return; }
+    schedulerRunning = true;
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
@@ -61,6 +65,8 @@ function startSequenceScheduler() {
     } catch (err) {
       console.error('[Scheduler] Error:', err.message);
       sendAlert('Scheduler error', `The sequence scheduler encountered an error:\n\n${err.message}\n\nCheck Railway logs for details.`);
+    } finally {
+      schedulerRunning = false;
     }
   }, TZ);
 
@@ -222,8 +228,8 @@ async function autoSendDueItems() {
         if (!enrollment.email) { failed++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
 
-        // Jitter: random 30-90s delay between sends to avoid bulk-send fingerprint
-        await sleep(30000 + Math.floor(Math.random() * 60000));
+        // Jitter: small random delay between sends to avoid bulk-send fingerprint
+        await sleep(3000 + Math.floor(Math.random() * 5000));
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
@@ -376,8 +382,8 @@ async function autoFlushOverdueItems() {
         if (!enrollment.email) { failed++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
 
-        // Jitter: random 30-90s delay between sends to avoid bulk-send fingerprint
-        await sleep(30000 + Math.floor(Math.random() * 60000));
+        // Jitter: small random delay between sends to avoid bulk-send fingerprint
+        await sleep(3000 + Math.floor(Math.random() * 5000));
 
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
