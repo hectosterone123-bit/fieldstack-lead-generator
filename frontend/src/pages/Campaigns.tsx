@@ -118,7 +118,7 @@ export function Campaigns() {
                       `${autopilot?.active_enrollments ?? 0} enrolled`,
                       `${autopilot?.due_now ?? 0} due now`,
                       `${autopilot?.sends_remaining ?? 0} sends left today`,
-                      autopilot?.enabled ? 'Next run ~15 min' : '',
+                      autopilot?.enabled ? 'Next run ~3 min' : '',
                     ].filter(Boolean).join(' · ')
               }
             </p>

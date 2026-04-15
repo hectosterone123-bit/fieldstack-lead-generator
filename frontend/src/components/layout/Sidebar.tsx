@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing, BookOpen } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 const navGroups = [
@@ -16,6 +16,7 @@ const navGroups = [
     label: 'Outreach',
     items: [
       { to: '/caller', icon: PhoneOutgoing, label: 'AI Caller' },
+      { to: '/prospecting', icon: BookOpen, label: 'My Script' },
       { to: '/campaigns', icon: Target, label: 'Campaigns' },
       { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
       { to: '/sequences', icon: Repeat, label: 'Sequences' },

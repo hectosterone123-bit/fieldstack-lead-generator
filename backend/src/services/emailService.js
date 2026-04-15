@@ -3,13 +3,20 @@ const { Resend } = require('resend');
 let resend = null;
 
 function isConfigured() {
-  return !!process.env.RESEND_API_KEY;
+  // Check env var first (highest priority)
+  if (process.env.RESEND_API_KEY) return true;
+  // Fall back to database setting (user configured via UI)
+  const apiKey = getSetting('resend_api_key');
+  return !!apiKey;
 }
 
 function getClient() {
   if (resend) return resend;
   if (!isConfigured()) return null;
-  resend = new Resend(process.env.RESEND_API_KEY);
+  // Use env var or fall back to database setting
+  const apiKey = process.env.RESEND_API_KEY || getSetting('resend_api_key');
+  if (!apiKey) return null;
+  resend = new Resend(apiKey);
   return resend;
 }
 

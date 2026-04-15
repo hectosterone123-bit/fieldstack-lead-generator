@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -18,6 +18,7 @@ export function Settings() {
   });
 
   const [bookingLink, setBookingLink] = useState('');
+  const [resendApiKey, setResendApiKey] = useState('');
   const [resendFrom, setResendFrom] = useState('');
   const [appUrl, setAppUrl] = useState('');
   const [senderName, setSenderName] = useState('');
@@ -68,6 +69,7 @@ export function Settings() {
   useEffect(() => {
     if (settings) {
       setBookingLink(settings.booking_link || '');
+      setResendApiKey(settings.resend_api_key || '');
       setResendFrom(settings.resend_from || '');
       setAppUrl(settings.app_url || '');
       setSenderName(settings.sender_name || '');
@@ -122,6 +124,7 @@ export function Settings() {
   function handleSave() {
     saveMutation.mutate([
       { key: 'booking_link', value: bookingLink },
+      { key: 'resend_api_key', value: resendApiKey },
       { key: 'resend_from', value: resendFrom },
       { key: 'reply_to_email', value: replyToEmail },
       { key: 'app_url', value: appUrl },
@@ -175,6 +178,92 @@ export function Settings() {
       </div>
 
       <div className="space-y-6">
+        {/* Compliance Checklist */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle2 className="w-4 h-4 text-orange-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Compliance & Setup</h2>
+          </div>
+          <div className="space-y-2.5">
+            {/* Resend API */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <Mail className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">Resend API Key</span>
+              </div>
+              {resendFrom ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </div>
+
+            {/* VAPI Configured */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <PhoneOutgoing className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">VAPI Configured</span>
+              </div>
+              {vapiPhoneNumberId ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </div>
+
+            {/* Email Warmup */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <Zap className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">Email Warmup</span>
+              </div>
+              {warmupStartDate ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </div>
+
+            {/* Booking Link */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <Link className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">Booking Link</span>
+              </div>
+              {bookingLink ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+              )}
+            </div>
+
+            {/* A2P 10DLC */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <FileIcon className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">A2P 10DLC</span>
+              </div>
+              <a
+                href="/FieldStack%20-%20Client%20SMS%20Setup%20Guide.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-orange-400 hover:text-orange-300 font-medium"
+              >
+                Setup Guide →
+              </a>
+            </div>
+
+            {/* Daily Send Limit */}
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-800/30">
+              <div className="flex items-center gap-2">
+                <MailCheck className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-xs text-zinc-300">Daily Send Limit</span>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-data">{dailySendLimit}/day</span>
+            </div>
+          </div>
+        </div>
+
         {/* Sender Identity */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -232,6 +321,24 @@ export function Settings() {
             value={bookingLink}
             onChange={e => setBookingLink(e.target.value)}
             placeholder="https://calendly.com/your-link"
+            className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+          />
+        </div>
+
+        {/* Resend API Key */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Mail className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Resend API Key</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            Your API key from <a href="https://resend.com/api-keys" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">Resend dashboard</a>. Required for email sending.
+          </p>
+          <input
+            type="password"
+            value={resendApiKey}
+            onChange={e => setResendApiKey(e.target.value)}
+            placeholder="re_..."
             className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
           />
         </div>

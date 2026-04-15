@@ -633,6 +633,10 @@ export async function coachCall(lead_id: number | null, objection: string, scrip
   return request('/calls/coach', { method: 'POST', body: JSON.stringify({ lead_id, objection, script_body }) });
 }
 
+export async function fetchTemplateStats(): Promise<Array<{ template_id: number; template_name: string; total: number; interested: number; callbacks: number; no_contact: number; not_interested: number; conversion_rate: number; callback_rate: number; no_contact_rate: number }>> {
+  return request('/calls/stats/templates');
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export async function fetchSettings(): Promise<Record<string, string>> {

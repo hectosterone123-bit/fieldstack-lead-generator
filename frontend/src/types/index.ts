@@ -191,6 +191,7 @@ export interface Stats {
   total_leads: number;
   by_status: { status: LeadStatus; count: number }[];
   by_service_type: { service_type: ServiceType; count: number }[];
+  by_source: { source: 'manual' | 'osm_finder' | 'csv_import' | 'google_places'; count: number }[];
   pipeline_value: number;
   hot_leads_count: number;
   booked_count: number;

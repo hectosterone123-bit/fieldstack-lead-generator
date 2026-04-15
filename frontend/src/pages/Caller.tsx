@@ -9,7 +9,7 @@ import Vapi from '@vapi-ai/web';
 import {
   useActiveCalls, useCallHistory, useCallQueue, useEndCall,
   useCallNextInQueue, useClearCallQueue, useSetCallQueue, useUpdateCallOutcome,
-  useBulkUpdateCallOutcomes, useAutoLoadQueue,
+  useBulkUpdateCallOutcomes, useAutoLoadQueue, useTemplateStats,
 } from '../hooks/useCalls';
 import { useUpdateLead } from '../hooks/useLeads';
 import { fetchLeads, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote } from '../lib/api';
@@ -52,6 +52,16 @@ export function Caller() {
   const bulkOutcome = useBulkUpdateCallOutcomes();
   const updateLead = useUpdateLead();
   const { toast } = useToast();
+  const { data: templateStatsData = [] } = useTemplateStats();
+
+  // Transform template stats into UI format
+  const scriptStats = templateStatsData.map((stat: any) => ({
+    id: stat.template_id,
+    name: stat.template_name || 'Unknown Script',
+    total: stat.total,
+    pickupRate: stat.conversion_rate || 0,
+    interested: stat.interested || 0,
+  }));
 
   const [scripts, setScripts] = useState<Template[]>([]);
   const [selectedScript, setSelectedScript] = useState<number | null>(null);
@@ -679,14 +689,6 @@ export function Caller() {
   const pickedUp = history.filter(c => c.outcome && !['no_answer', 'voicemail'].includes(c.outcome)).length;
   const interested = history.filter(c => c.outcome === 'interested').length;
   const callbacks = history.filter(c => c.outcome === 'callback_requested').length;
-
-  const scriptStats = scripts.map(script => {
-    const sc = history.filter(c => c.template_id === script.id);
-    const t = sc.length;
-    const p = sc.filter(c => c.outcome && !['no_answer', 'voicemail'].includes(c.outcome)).length;
-    const i = sc.filter(c => c.outcome === 'interested').length;
-    return { id: script.id, name: script.name, total: t, pickedUp: p, interested: i, pickupRate: t > 0 ? Math.round((p / t) * 100) : 0 };
-  }).filter(s => s.total > 0);
 
   const handleStartBatch = async () => {
     if (!selectedScript) return;

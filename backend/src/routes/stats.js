@@ -15,6 +15,10 @@ router.get('/', (req, res, next) => {
       `SELECT service_type, COUNT(*) as count FROM leads GROUP BY service_type ORDER BY count DESC`
     );
 
+    const by_source = db.all(
+      `SELECT source, COUNT(*) as count FROM leads GROUP BY source ORDER BY count DESC`
+    );
+
     const pipeline_value = db.get(
       `SELECT SUM(estimated_value) as total FROM leads WHERE status NOT IN ('lost')`
     )?.total || 0;
@@ -268,6 +272,7 @@ router.get('/', (req, res, next) => {
         total_leads,
         by_status,
         by_service_type,
+        by_source,
         pipeline_value,
         hot_leads_count,
         booked_count,

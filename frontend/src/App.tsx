@@ -11,6 +11,7 @@ import { Settings } from './pages/Settings';
 import { Scraper } from './pages/Scraper';
 import { Cockpit } from './pages/Cockpit';
 import { Caller } from './pages/Caller';
+import { ProspectingScript } from './pages/ProspectingScript';
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/sms" element={<SmsInbox />} />
           <Route path="/scraper" element={<Scraper />} />
           <Route path="/caller" element={<Caller />} />
+          <Route path="/prospecting" element={<ProspectingScript />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

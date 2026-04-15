@@ -50,8 +50,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function startSequenceScheduler() {
   const TZ = { timezone: 'America/Chicago' };
 
-  // Run every 15 minutes during Central business hours (8am-5pm Mon-Fri)
-  cron.schedule('*/15 8-17 * * 1-5', async () => {
+  // Run every 3 minutes (24/7) to keep queues fresh and responsive
+  cron.schedule('*/3 * * * *', async () => {
     try {
       autoCompleteEnrollments();
       await autoSendDueItems();
@@ -129,7 +129,7 @@ function startSequenceScheduler() {
     }
   });
 
-  console.log('[Scheduler] Sequence scheduler started (every 15 min, Mon-Fri 8am-5pm CT + daily digest 7am + callback alarm every 5 min)');
+  console.log('[Scheduler] Sequence scheduler started (every 3 min 24/7 + daily digest 7am CT + callback alarm every 5 min)');
 }
 
 function autoCompleteEnrollments() {

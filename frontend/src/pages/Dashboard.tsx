@@ -4,7 +4,7 @@ import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
-  ChevronDown, MousePointerClick, MailX, ShieldAlert,
+  ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map,
 } from 'lucide-react';
 import { CallBriefModal } from '../components/leads/CallBriefModal';
 import { fetchStats } from '../lib/api';
@@ -445,6 +445,38 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Lead Sources */}
+      {stats?.by_source && stats.by_source.length > 0 && (
+        <div>
+          <p className="text-overline text-zinc-500 mt-2 mb-3">Lead Sources</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+            {stats.by_source.map((source: { source: string; count: number }) => {
+              const sourceLabels: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+                manual: { label: 'Manual', icon: FileText, color: 'bg-zinc-500/10 text-zinc-400' },
+                osm_finder: { label: 'OSM Finder', icon: Search, color: 'bg-blue-500/10 text-blue-400' },
+                csv_import: { label: 'CSV Import', icon: Upload, color: 'bg-amber-500/10 text-amber-400' },
+                google_places: { label: 'Google Places', icon: Map, color: 'bg-emerald-500/10 text-emerald-400' },
+              };
+              const config = sourceLabels[source.source] || { label: source.source, icon: Globe, color: 'bg-zinc-500/10 text-zinc-400' };
+              const Icon = config.icon;
+              return (
+                <div key={source.source} className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center', config.color)}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-bold tracking-tight font-data text-white">
+                    {source.count}
+                  </p>
+                  <p className="text-overline text-zinc-500 mt-1">{config.label}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Outreach Performance */}
       {stats?.outreach_summary && stats.outreach_summary.total_emails_sent > 0 && (
         <OutreachPerformance
@@ -490,7 +522,7 @@ export function Dashboard() {
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button
-                      onClick={() => setScriptLead(lead)}
+                      onClick={() => setScriptLead(lead as unknown as Lead)}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-xs font-medium rounded-lg transition-colors"
                     >
                       <FileText className="w-3 h-3" /> Script

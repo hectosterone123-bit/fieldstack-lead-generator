@@ -989,8 +989,13 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 const emailSent = lead.activities.filter((a: any) => a.type === 'email_sent').length;
                 const emailOpens = lead.activities.filter((a: any) => a.type === 'email_opened').length;
                 const emailClicks = lead.activities.filter((a: any) => a.type === 'email_clicked').length;
+                const emailReplied = lead.activities.filter((a: any) => a.type === 'email_replied').length;
                 const emailBounced = lead.activities.some((a: any) => a.type === 'email_bounced');
-                if (!emailSent && !emailOpens && !emailClicks && !emailBounced) return null;
+                const emailComplained = lead.activities.some((a: any) => a.type === 'email_complained');
+                const openRate = emailSent > 0 ? Math.round((emailOpens / emailSent) * 100) : 0;
+                const firstOpenedRel = lead.email_opened_at ? formatRelativeTime(lead.email_opened_at) : null;
+
+                if (!emailSent && !emailOpens && !emailClicks && !emailReplied && !emailBounced && !emailComplained) return null;
                 return (
                   <div className="px-5 py-3 border-t border-white/[0.04]">
                     <p className="text-overline text-zinc-600 mb-2">Email Engagement</p>
@@ -1000,9 +1005,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                         {emailSent} sent
                       </span>
                       {emailOpens > 0 && (
-                        <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-400" title={firstOpenedRel ? `First opened ${firstOpenedRel}` : ''}>
                           <MailOpen className="w-3.5 h-3.5" />
-                          {emailOpens}× opened
+                          {emailOpens}× ({openRate}%)
                         </span>
                       )}
                       {emailClicks > 0 && (
@@ -1011,10 +1016,22 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                           {emailClicks}× clicked
                         </span>
                       )}
+                      {emailReplied > 0 && (
+                        <span className="flex items-center gap-1.5 text-xs text-cyan-400">
+                          <Reply className="w-3.5 h-3.5" />
+                          {emailReplied}× replied
+                        </span>
+                      )}
                       {emailBounced && (
                         <span className="flex items-center gap-1.5 text-xs text-red-400">
                           <MailX className="w-3.5 h-3.5" />
                           bounced
+                        </span>
+                      )}
+                      {emailComplained && (
+                        <span className="flex items-center gap-1.5 text-xs text-orange-400">
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          complained
                         </span>
                       )}
                     </div>

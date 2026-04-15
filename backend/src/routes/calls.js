@@ -27,11 +27,11 @@ const STATE_TO_TIMEZONE = {
 
 // GET /api/calls/active — currently active calls
 router.get('/active', (req, res) => {
-  // Auto-complete calls stuck in active status for more than 30 minutes
+  // Auto-complete calls stuck in active status for more than 5 minutes (VAPI max is 3 min)
   db.run(
     `UPDATE calls SET status = 'completed', ended_at = CURRENT_TIMESTAMP
      WHERE status IN ('queued', 'ringing', 'in_progress')
-     AND created_at < datetime('now', '-30 minutes')`
+     AND created_at < datetime('now', '-5 minutes')`
   );
 
   const calls = db.all(`
@@ -687,6 +687,32 @@ router.get('/:callId', (req, res) => {
 
   if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
   res.json({ success: true, data: call });
+});
+
+// GET /api/calls/template-stats — Script A/B testing stats
+router.get('/stats/templates', (req, res) => {
+  const rows = db.all(`
+    SELECT c.template_id, t.name as template_name,
+           COUNT(*) as total,
+           SUM(CASE WHEN c.outcome = 'interested' THEN 1 ELSE 0 END) as interested,
+           SUM(CASE WHEN c.outcome = 'callback_requested' THEN 1 ELSE 0 END) as callbacks,
+           SUM(CASE WHEN c.outcome IN ('no_answer','voicemail') THEN 1 ELSE 0 END) as no_contact,
+           SUM(CASE WHEN c.outcome = 'not_interested' THEN 1 ELSE 0 END) as not_interested
+    FROM calls c
+    LEFT JOIN templates t ON t.id = c.template_id
+    WHERE c.status = 'completed' AND c.template_id IS NOT NULL
+    GROUP BY c.template_id
+    ORDER BY interested DESC
+  `);
+
+  const withRates = rows.map((r) => ({
+    ...r,
+    conversion_rate: r.total > 0 ? Math.round(((r.interested + r.callbacks) / r.total) * 100) : 0,
+    callback_rate: r.total > 0 ? Math.round((r.callbacks / r.total) * 100) : 0,
+    no_contact_rate: r.total > 0 ? Math.round((r.no_contact / r.total) * 100) : 0,
+  }));
+
+  res.json({ success: true, data: withRates });
 });
 
 module.exports = router;

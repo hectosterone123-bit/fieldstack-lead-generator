@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchActiveCalls, fetchCallHistory, fetchCallQueue,
+  fetchActiveCalls, fetchCallHistory, fetchCallQueue, fetchTemplateStats,
   startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
   bulkUpdateCallOutcomes, autoLoadQueue, whisperCall,
 } from '../lib/api';
@@ -159,5 +159,12 @@ export function useAutoLoadQueue() {
       toast(`${data.queued} leads queued`);
     },
     onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useTemplateStats() {
+  return useQuery({
+    queryKey: ['template-stats'],
+    queryFn: fetchTemplateStats,
   });
 }
