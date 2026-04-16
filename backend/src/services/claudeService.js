@@ -4,7 +4,7 @@ const { renderTemplate } = require('./templateService');
 const { recomputeHeatScore } = require('./heatScoreService');
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
-const MODEL = 'gemini-2.5-flash-preview-04-17';
+const MODEL = 'gemini-2.5-flash';
 
 const VALID_STATUSES = ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'];
 const FOLLOWUP_DAYS = { new: 1, contacted: 3, qualified: 2, proposal_sent: 5, booked: 1 };
