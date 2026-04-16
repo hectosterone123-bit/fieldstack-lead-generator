@@ -381,6 +381,7 @@ export interface AutopilotStatus {
   enabled: boolean;
   active_enrollments: number;
   due_now: number;
+  no_contact: number;
   sends_remaining: number;
   email_configured: boolean;
 }

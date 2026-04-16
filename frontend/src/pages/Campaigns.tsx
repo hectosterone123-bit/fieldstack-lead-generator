@@ -116,7 +116,8 @@ export function Campaigns() {
                   ? '⚠ Daily send limit reached'
                   : [
                       `${autopilot?.active_enrollments ?? 0} enrolled`,
-                      `${autopilot?.due_now ?? 0} due now`,
+                      autopilot?.due_now ? `${autopilot.due_now} sendable` : null,
+                      (autopilot?.no_contact ?? 0) > 0 ? `⚠ ${autopilot.no_contact} no email` : null,
                       `${autopilot?.sends_remaining ?? 0} sends left today`,
                       autopilot?.enabled ? 'Next run ~3 min' : '',
                     ].filter(Boolean).join(' · ')

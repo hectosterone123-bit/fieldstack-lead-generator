@@ -145,10 +145,14 @@ router.post('/flush-overdue', async (_req, res) => {
 
 router.get('/queue/stats', (req, res) => {
   const enrollments = db.all(`
-    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps
+    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps,
+           l.email, l.phone
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
+    JOIN leads l ON ls.lead_id = l.id
     WHERE ls.status = 'active'
+      AND (l.unsubscribed_at IS NULL)
+      AND (l.email_invalid_at IS NULL)
   `);
 
   const now = new Date();
@@ -164,6 +168,10 @@ router.get('/queue/stats', (req, res) => {
     const steps = parseSteps({ steps: enrollment.sequence_steps });
     const step = steps.find(s => s.order === enrollment.current_step);
     if (!step) continue;
+
+    // Skip if lead can't receive this channel (no email for email steps, no phone for sms)
+    if (step.channel === 'email' && !enrollment.email) continue;
+    if (step.channel === 'sms' && !enrollment.phone) continue;
 
     const baseDate = enrollment.last_sent_at ? new Date(enrollment.last_sent_at) : new Date(enrollment.enrolled_at);
     const dueDate = new Date(baseDate);
@@ -188,16 +196,23 @@ router.get('/autopilot/status', (req, res) => {
   const activeEnrollments = db.get("SELECT COUNT(*) as count FROM lead_sequences WHERE status = 'active'")?.count || 0;
 
   const enrollments = db.all(`
-    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps
+    SELECT ls.current_step, ls.enrolled_at, ls.last_sent_at, s.steps as sequence_steps,
+           l.email, l.phone
     FROM lead_sequences ls JOIN sequences s ON ls.sequence_id = s.id
+    JOIN leads l ON ls.lead_id = l.id
     WHERE ls.status = 'active'
+      AND (l.unsubscribed_at IS NULL)
+      AND (l.email_invalid_at IS NULL)
   `);
   const now = new Date(); now.setHours(0, 0, 0, 0);
   let due_now = 0;
+  let no_contact = 0;
   for (const e of enrollments) {
     const steps = parseSteps({ steps: e.sequence_steps });
     const step = steps.find(s => s.order === e.current_step);
     if (!step) continue;
+    if (step.channel === 'email' && !e.email) { no_contact++; continue; }
+    if (step.channel === 'sms' && !e.phone) { no_contact++; continue; }
     const baseDate = e.last_sent_at ? new Date(e.last_sent_at) : new Date(e.enrolled_at);
     const dueDate = new Date(baseDate);
     dueDate.setDate(dueDate.getDate() + step.delay_days);
@@ -208,7 +223,7 @@ router.get('/autopilot/status', (req, res) => {
   const budget = getRemainingBudget();
   const emailConfigured = emailService.isConfigured();
 
-  res.json({ success: true, data: { enabled, active_enrollments: activeEnrollments, due_now, sends_remaining: budget.remaining, email_configured: emailConfigured } });
+  res.json({ success: true, data: { enabled, active_enrollments: activeEnrollments, due_now, no_contact, sends_remaining: budget.remaining, email_configured: emailConfigured } });
 });
 
 // POST /api/sequences/autopilot — bulk enable/disable auto_send on all active sequences + enrollments
