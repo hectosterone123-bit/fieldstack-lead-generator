@@ -221,12 +221,22 @@ async function autoSendDueItems() {
     if (dueDate > now) continue; // not due yet
 
     const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
-    if (!template) continue;
+    if (!template) {
+      db.run(
+        'UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [`Template not found for step ${step.order} (template_id=${step.template_id})`, enrollment.id]
+      );
+      continue;
+    }
 
     try {
       if (step.channel === 'email') {
         if (!enrollment.email) { failed++; continue; }
-        if (!emailService.isConfigured()) { failed++; continue; }
+        if (!emailService.isConfigured()) {
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['Email not configured — add Resend API key in Settings', enrollment.id]);
+          failed++; continue;
+        }
 
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
         await sleep(3000 + Math.floor(Math.random() * 5000));
@@ -237,6 +247,8 @@ async function autoSendDueItems() {
 
         if (!result.success) {
           console.error(`[Scheduler] Email failed for enrollment ${enrollment.id}: ${result.error}`);
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [result.error, enrollment.id]);
           failed++;
           continue;
         }
@@ -248,13 +260,19 @@ async function autoSendDueItems() {
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { failed++; continue; }
-        if (!smsService.isConfigured()) { failed++; continue; }
+        if (!smsService.isConfigured()) {
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['SMS not configured — add Twilio credentials in Settings', enrollment.id]);
+          failed++; continue;
+        }
 
         const body = renderTemplate(template.body, enrollment);
         const result = await smsService.sendSms(enrollment.phone, body);
 
         if (!result.success) {
           console.error(`[Scheduler] SMS failed for enrollment ${enrollment.id}: ${result.error}`);
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [result.error, enrollment.id]);
           failed++;
           continue;
         }
@@ -288,16 +306,16 @@ async function autoSendDueItems() {
         }
       }
 
-      // Advance enrollment
+      // Advance enrollment, clear any prior error
       const nextStep = enrollment.current_step + 1;
       if (nextStep > steps.length) {
         db.run(
-          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, last_error = NULL, last_error_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [nextStep, enrollment.id]
         );
       } else {
         db.run(
-          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, last_error = NULL, last_error_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
           [nextStep, enrollment.id]
         );
       }
@@ -305,6 +323,8 @@ async function autoSendDueItems() {
       sent++;
     } catch (err) {
       console.error(`[Scheduler] Error processing enrollment ${enrollment.id}:`, err.message);
+      db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [err.message, enrollment.id]);
       failed++;
     }
   }
@@ -375,12 +395,22 @@ async function autoFlushOverdueItems() {
     if (dueDate > now) continue; // not overdue yet
 
     const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
-    if (!template) continue;
+    if (!template) {
+      db.run(
+        'UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [`Template not found for step ${step.order} (template_id=${step.template_id})`, enrollment.id]
+      );
+      continue;
+    }
 
     try {
       if (step.channel === 'email') {
         if (!enrollment.email) { failed++; continue; }
-        if (!emailService.isConfigured()) { failed++; continue; }
+        if (!emailService.isConfigured()) {
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['Email not configured — add Resend API key in Settings', enrollment.id]);
+          failed++; continue;
+        }
 
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
         await sleep(3000 + Math.floor(Math.random() * 5000));
@@ -391,6 +421,8 @@ async function autoFlushOverdueItems() {
 
         if (!result.success) {
           console.error(`[Scheduler] Flush email failed for enrollment ${enrollment.id}: ${result.error}`);
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [result.error, enrollment.id]);
           failed++;
           continue;
         }
@@ -402,13 +434,19 @@ async function autoFlushOverdueItems() {
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { failed++; continue; }
-        if (!smsService.isConfigured()) { failed++; continue; }
+        if (!smsService.isConfigured()) {
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['SMS not configured — add Twilio credentials in Settings', enrollment.id]);
+          failed++; continue;
+        }
 
         const body = renderTemplate(template.body, enrollment);
         const result = await smsService.sendSms(enrollment.phone, body);
 
         if (!result.success) {
           console.error(`[Scheduler] Flush SMS failed for enrollment ${enrollment.id}: ${result.error}`);
+          db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [result.error, enrollment.id]);
           failed++;
           continue;
         }
@@ -439,16 +477,16 @@ async function autoFlushOverdueItems() {
         }
       }
 
-      // Advance enrollment
+      // Advance enrollment, clear any prior error
       const nextStep = enrollment.current_step + 1;
       if (nextStep > steps.length) {
         db.run(
-          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+          "UPDATE lead_sequences SET status = 'completed', completed_at = CURRENT_TIMESTAMP, current_step = ?, last_sent_at = CURRENT_TIMESTAMP, last_error = NULL, last_error_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
           [nextStep, enrollment.id]
         );
       } else {
         db.run(
-          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'UPDATE lead_sequences SET current_step = ?, last_sent_at = CURRENT_TIMESTAMP, last_error = NULL, last_error_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
           [nextStep, enrollment.id]
         );
       }
@@ -456,6 +494,8 @@ async function autoFlushOverdueItems() {
       sent++;
     } catch (err) {
       console.error(`[Scheduler] Flush error for enrollment ${enrollment.id}:`, err.message);
+      db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [err.message, enrollment.id]);
       failed++;
     }
   }

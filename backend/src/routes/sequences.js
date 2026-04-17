@@ -65,10 +65,15 @@ router.get('/queue', (req, res) => {
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
     WHERE ls.status = 'active'
-      AND (ls.auto_send IS NULL OR ls.auto_send = 0)
-      AND (s.auto_send IS NULL OR s.auto_send = 0)
-      AND (s.auto_send_after_step IS NULL OR s.auto_send_after_step = 0
-           OR ls.current_step <= s.auto_send_after_step)
+      AND (
+        (
+          (ls.auto_send IS NULL OR ls.auto_send = 0)
+          AND (s.auto_send IS NULL OR s.auto_send = 0)
+          AND (s.auto_send_after_step IS NULL OR s.auto_send_after_step = 0
+               OR ls.current_step <= s.auto_send_after_step)
+        )
+        OR ls.last_error IS NOT NULL
+      )
   `);
 
   const now = new Date();
@@ -120,6 +125,8 @@ router.get('/queue', (req, res) => {
         email_invalid: !!enrollment.email_invalid_at,
         has_replied: !!enrollment.has_replied,
         from_email: step.from_email || null,
+        last_error: enrollment.last_error || null,
+        last_error_at: enrollment.last_error_at || null,
       });
     }
   }

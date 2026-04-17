@@ -83,12 +83,12 @@ async function sendEmail(to, subject, htmlBody, { leadId, fromEmail, plainText }
   if (replyTo && leadId) {
     const domain = replyTo.split('@')[1];
     if (domain) {
-      payload.reply_to = `reply+${leadId}@${domain}`;
+      payload.replyTo = `reply+${leadId}@${domain}`;
     } else {
-      payload.reply_to = replyTo;
+      payload.replyTo = replyTo;
     }
   } else if (replyTo) {
-    payload.reply_to = replyTo;
+    payload.replyTo = replyTo;
   }
 
   try {

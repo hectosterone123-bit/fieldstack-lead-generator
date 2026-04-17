@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Send, Users, Mail, MessageSquare, Clock, AlertTriangle, CheckCircle,
   SkipForward, Eye, X, Zap, Target, TrendingUp, MailOpen,
-  PhoneCall, Play, Gauge, Reply,
+  PhoneCall, Play, Gauge, Reply, Settings as SettingsIcon,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -30,6 +31,7 @@ const CHANNEL_COLORS: Record<TemplateChannel, string> = {
 };
 
 export function Campaigns() {
+  const navigate = useNavigate();
   const { data: queue, isLoading: queueLoading } = useOutreachQueue();
   const { data: stats } = useQueueStats();
   const { data: sequences } = useSequences();
@@ -50,6 +52,16 @@ export function Campaigns() {
   const [previewItem, setPreviewItem] = useState<OutreachQueueItem | null>(null);
   const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'overdue' | 'today'>('all');
+  const [channelFilter, setChannelFilter] = useState<'all' | 'email' | 'sms'>('all');
+  const [sequenceFilter, setSequenceFilter] = useState<number | null>(null);
+
+  function clearAllFilters() {
+    setFilter('all');
+    setChannelFilter('all');
+    setSequenceFilter(null);
+  }
+
+  const hasSecondaryFilters = channelFilter !== 'all' || sequenceFilter !== null;
 
   const emailConfigured = emailStatus?.configured ?? false;
   const smsConfigured = smsStatus?.configured ?? false;
@@ -62,8 +74,10 @@ export function Campaigns() {
   };
 
   const filteredQueue = queue?.filter(item => {
-    if (filter === 'overdue') return item.is_overdue;
-    if (filter === 'today') return !item.is_overdue;
+    if (filter === 'overdue' && !item.is_overdue) return false;
+    if (filter === 'today' && item.is_overdue) return false;
+    if (channelFilter !== 'all' && item.channel !== channelFilter) return false;
+    if (sequenceFilter !== null && item.sequence_id !== sequenceFilter) return false;
     return true;
   }) ?? [];
 
@@ -114,13 +128,27 @@ export function Campaigns() {
                 ? '⚠ Email not configured — go to Settings'
                 : autopilot?.sends_remaining === 0
                   ? '⚠ Daily send limit reached'
-                  : [
-                      `${autopilot?.active_enrollments ?? 0} enrolled`,
-                      autopilot?.due_now ? `${autopilot.due_now} sendable` : null,
-                      (autopilot?.no_contact ?? 0) > 0 ? `⚠ ${autopilot.no_contact} no email` : null,
-                      `${autopilot?.sends_remaining ?? 0} sends left today`,
-                      autopilot?.enabled ? 'Next run ~3 min' : '',
-                    ].filter(Boolean).join(' · ')
+                  : (() => {
+                    const parts: (string | React.ReactNode)[] = [];
+                    parts.push(`${autopilot?.active_enrollments ?? 0} enrolled`);
+                    if (autopilot?.due_now) parts.push(`${autopilot.due_now} sendable`);
+                    if ((autopilot?.no_contact ?? 0) > 0) parts.push(
+                      <button
+                        key="no-email"
+                        onClick={() => navigate('/leads')}
+                        className="text-amber-400 hover:text-amber-300 underline underline-offset-2 transition-colors"
+                      >
+                        ⚠ {autopilot!.no_contact} no email
+                      </button>
+                    );
+                    parts.push(`${autopilot?.sends_remaining ?? 0} sends left today`);
+                    if (autopilot?.enabled) parts.push('Next run ~3 min');
+                    return parts.filter(Boolean).reduce((acc: React.ReactNode[], part, i) => [
+                      ...acc,
+                      i > 0 ? <span key={`sep-${i}`}> · </span> : null,
+                      part,
+                    ], []).filter(Boolean);
+                  })()
               }
             </p>
           </div>
@@ -156,6 +184,8 @@ export function Campaigns() {
           icon={AlertTriangle}
           color={stats?.overdue ? 'text-red-400' : 'text-zinc-500'}
           bgColor={stats?.overdue ? 'bg-red-500/10' : 'bg-zinc-800'}
+          onClick={() => { setFilter('overdue'); setChannelFilter('all'); setSequenceFilter(null); }}
+          active={filter === 'overdue' && channelFilter === 'all' && sequenceFilter === null}
         />
         <StatCard
           label="Due Today"
@@ -163,6 +193,8 @@ export function Campaigns() {
           icon={Clock}
           color={stats?.due_today ? 'text-amber-400' : 'text-zinc-500'}
           bgColor={stats?.due_today ? 'bg-amber-500/10' : 'bg-zinc-800'}
+          onClick={() => { setFilter('today'); setChannelFilter('all'); setSequenceFilter(null); }}
+          active={filter === 'today' && channelFilter === 'all' && sequenceFilter === null}
         />
         <StatCard
           label="Upcoming"
@@ -170,6 +202,8 @@ export function Campaigns() {
           icon={TrendingUp}
           color="text-zinc-400"
           bgColor="bg-zinc-800"
+          onClick={clearAllFilters}
+          active={filter === 'all' && channelFilter === 'all' && sequenceFilter === null}
         />
         <StatCard
           label="Emails in Queue"
@@ -177,6 +211,8 @@ export function Campaigns() {
           icon={Mail}
           color="text-violet-400"
           bgColor="bg-violet-500/10"
+          onClick={() => { setFilter('all'); setChannelFilter('email'); setSequenceFilter(null); }}
+          active={channelFilter === 'email'}
         />
         <StatCard
           label="SMS in Queue"
@@ -184,6 +220,8 @@ export function Campaigns() {
           icon={MessageSquare}
           color="text-emerald-400"
           bgColor="bg-emerald-500/10"
+          onClick={() => { setFilter('all'); setChannelFilter('sms'); setSequenceFilter(null); }}
+          active={channelFilter === 'sms'}
         />
         <StatCard
           label="Sent Today"
@@ -191,6 +229,7 @@ export function Campaigns() {
           icon={Gauge}
           color={stats?.sends_remaining === 0 ? 'text-red-400' : 'text-blue-400'}
           bgColor={stats?.sends_remaining === 0 ? 'bg-red-500/10' : 'bg-blue-500/10'}
+          onClick={() => navigate('/settings')}
         />
       </div>
 
@@ -203,10 +242,18 @@ export function Campaigns() {
             : 'bg-amber-500/[0.06] text-amber-400'
         )}>
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-          {stats.sends_remaining === 0
-            ? 'Daily send limit reached — emails won\'t send until midnight.'
-            : `${stats.sends_remaining} email send${stats.sends_remaining === 1 ? '' : 's'} remaining today (${stats.sent_today}/${stats.daily_limit} used).`
-          }
+          <span className="flex-1">
+            {stats.sends_remaining === 0
+              ? 'Daily send limit reached — emails won\'t send until midnight.'
+              : `${stats.sends_remaining} email send${stats.sends_remaining === 1 ? '' : 's'} remaining today (${stats.sent_today}/${stats.daily_limit} used).`
+            }
+          </span>
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity"
+          >
+            <SettingsIcon className="w-3 h-3" /> Adjust limit
+          </button>
         </div>
       )}
 
@@ -214,23 +261,39 @@ export function Campaigns() {
       {activeSequences.length > 0 && (
         <div className="px-5 py-3 border-b border-white/[0.04] flex items-center gap-3 overflow-x-auto">
           <span className="text-xs text-zinc-500 shrink-0">Active:</span>
-          {activeSequences.map(seq => (
-            <div key={seq.id} className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-1.5 shrink-0">
-              <Zap className="w-3 h-3 text-orange-400" />
-              <span className="text-xs text-zinc-300 font-medium">{seq.name}</span>
-              <span className="text-[10px] text-zinc-500">{seq.active_enrollments ?? 0} enrolled</span>
-              {(seq.emails_sent ?? 0) > 0 && (
-                <span className="text-[10px] text-zinc-500">
-                  {seq.emails_sent} sent
-                  {(seq.emails_opened ?? 0) > 0 && (
-                    <span className={cn('ml-1', (seq.emails_opened! / seq.emails_sent!) >= 0.3 ? 'text-emerald-400' : '')}>
-                      {Math.round((seq.emails_opened! / seq.emails_sent!) * 100)}% opened
-                    </span>
-                  )}
-                </span>
-              )}
-            </div>
-          ))}
+          {activeSequences.map(seq => {
+            const isActive = sequenceFilter === seq.id;
+            return (
+              <button
+                key={seq.id}
+                onClick={() => {
+                  setSequenceFilter(isActive ? null : seq.id);
+                  setFilter('all');
+                  setChannelFilter('all');
+                }}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg px-3 py-1.5 shrink-0 transition-all text-left',
+                  isActive
+                    ? 'bg-orange-500/15 ring-1 ring-orange-500/40 border border-orange-500/20'
+                    : 'bg-zinc-800/50 hover:bg-zinc-800 border border-transparent'
+                )}
+              >
+                <Zap className={cn('w-3 h-3', isActive ? 'text-orange-400' : 'text-orange-400/60')} />
+                <span className={cn('text-xs font-medium', isActive ? 'text-orange-300' : 'text-zinc-300')}>{seq.name}</span>
+                <span className="text-[10px] text-zinc-500">{seq.active_enrollments ?? 0} enrolled</span>
+                {(seq.emails_sent ?? 0) > 0 && (
+                  <span className="text-[10px] text-zinc-500">
+                    {seq.emails_sent} sent
+                    {(seq.emails_opened ?? 0) > 0 && (
+                      <span className={cn('ml-1', (seq.emails_opened! / seq.emails_sent!) >= 0.3 ? 'text-emerald-400' : '')}>
+                        {Math.round((seq.emails_opened! / seq.emails_sent!) * 100)}% opened
+                      </span>
+                    )}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -242,7 +305,7 @@ export function Campaigns() {
             onClick={() => setFilter(tab)}
             className={cn(
               'px-3 py-1.5 text-xs font-medium rounded-lg transition-colors',
-              filter === tab
+              filter === tab && !hasSecondaryFilters
                 ? 'bg-orange-500/10 text-orange-400 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.15)]'
                 : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'
             )}
@@ -250,6 +313,17 @@ export function Campaigns() {
             {tab === 'all' ? `All (${queue?.length ?? 0})` : tab === 'overdue' ? `Overdue (${overdue.length})` : `Due Today (${dueToday.length})`}
           </button>
         ))}
+
+        {hasSecondaryFilters && (
+          <button
+            onClick={clearAllFilters}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg text-orange-400 bg-orange-500/10 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.15)] transition-colors"
+          >
+            {channelFilter !== 'all' ? (channelFilter === 'email' ? 'Email' : 'SMS') : null}
+            {sequenceFilter !== null ? (activeSequences.find(s => s.id === sequenceFilter)?.name ?? 'Sequence') : null}
+            <X className="w-3 h-3" />
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           {/* Flush Overdue — sends all overdue email/SMS now */}
@@ -363,17 +437,27 @@ export function Campaigns() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color, bgColor }: {
+function StatCard({ label, value, icon: Icon, color, bgColor, onClick, active }: {
   label: string; value: number | string; icon: React.ElementType; color: string; bgColor: string;
+  onClick?: () => void; active?: boolean;
 }) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div className={cn('rounded-xl px-4 py-3 border border-white/[0.04]', bgColor)}>
+    <Tag
+      onClick={onClick}
+      className={cn(
+        'rounded-xl px-4 py-3 border transition-all text-left w-full',
+        bgColor,
+        active ? 'border-orange-500/30 ring-1 ring-orange-500/20' : 'border-white/[0.04]',
+        onClick && 'hover:brightness-110 hover:border-white/[0.10] cursor-pointer',
+      )}
+    >
       <div className="flex items-center gap-2 mb-1">
         <Icon className={cn('w-3.5 h-3.5', color)} />
         <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</span>
       </div>
       <p className={cn('text-xl font-semibold font-data', color)}>{value}</p>
-    </div>
+    </Tag>
   );
 }
 
@@ -437,6 +521,11 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
           )}
           {!item.lead_email && !item.email_invalid && item.channel === 'email' && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">No email</span>
+          )}
+          {item.last_error && (
+            <span title={item.last_error} className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 cursor-help">
+              Send failed
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">

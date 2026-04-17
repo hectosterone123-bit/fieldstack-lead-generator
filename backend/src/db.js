@@ -254,6 +254,8 @@ async function initDb() {
   // Migration: per-enrollment auto_send flag
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_sent_at DATETIME'); } catch(e) {}
+  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_error TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_error_at DATETIME'); } catch(e) {}
   try { db.run('ALTER TABLE sequences ADD COLUMN is_template INTEGER DEFAULT 0'); } catch(e) {}
 
   // Migration: auto_flush_overdue — auto-send overdue email/sms steps for opted-in sequences
@@ -405,6 +407,9 @@ async function initDb() {
   // Migration: seed 5-step auto outreach sequence
   seedAutoOutreachSequence();
 
+  // Migration: repair sequences that reference deleted template IDs (after niche migration re-seeds)
+  repairSequenceTemplateIds();
+
   // Migration: seed post-call email follow-up templates
   migratePostCallEmailTemplates();
   migratePostCallEmailSignatures();
@@ -438,6 +443,36 @@ function migrateTemplatesToNiche() {
   console.log('[DB] Migrating templates to niche-specific variables...');
   db.run("DELETE FROM templates WHERE is_default = 1");
   // seedDefaultTemplates() will re-insert them on the next call
+}
+
+function repairSequenceTemplateIds() {
+  const sequences = all('SELECT id, name, steps FROM sequences');
+  let repaired = 0;
+  for (const seq of sequences) {
+    let steps;
+    try { steps = JSON.parse(seq.steps || '[]'); } catch { continue; }
+    let changed = false;
+    for (const step of steps) {
+      if (!step.template_id) continue;
+      const exists = get('SELECT id FROM templates WHERE id = ?', [step.template_id]);
+      if (!exists) {
+        const replacement = get(
+          'SELECT id FROM templates WHERE step_order = ? AND channel = ? AND is_default = 1 ORDER BY id ASC LIMIT 1',
+          [step.order, step.channel]
+        );
+        if (replacement) {
+          step.template_id = replacement.id;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      db.run('UPDATE sequences SET steps = ? WHERE id = ?', [JSON.stringify(steps), seq.id]);
+      repaired++;
+      console.log(`[DB] Repaired template IDs in sequence: ${seq.name}`);
+    }
+  }
+  if (repaired > 0) console.log(`[DB] Repaired ${repaired} sequence(s) with broken template references`);
 }
 
 function getLoomScriptTemplates() {

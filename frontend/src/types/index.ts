@@ -398,6 +398,8 @@ export interface OutreachQueueItem {
   email_invalid: boolean;
   has_replied: boolean;
   from_email: string | null;
+  last_error?: string | null;
+  last_error_at?: string | null;
 }
 
 export interface QueueStats {
