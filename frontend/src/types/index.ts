@@ -187,6 +187,17 @@ export interface HotSignalLead {
   city: string | null;
 }
 
+export interface RepliedLead {
+  id: number;
+  business_name: string;
+  owner_name: string | null;
+  phone: string | null;
+  heat_score: number;
+  service_type: ServiceType;
+  city: string | null;
+  replied_at: string;
+}
+
 export interface Stats {
   total_leads: number;
   by_status: { status: LeadStatus; count: number }[];
@@ -213,6 +224,7 @@ export interface Stats {
   proposals_open_value: number;
   ghost_count: number;
   ghost_leads: GhostLead[];
+  replied_leads: RepliedLead[];
   hot_signal_leads: HotSignalLead[];
   outreach_summary: {
     total_emails_sent: number;

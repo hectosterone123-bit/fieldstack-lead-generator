@@ -10,7 +10,7 @@ import { CallBriefModal } from '../components/leads/CallBriefModal';
 import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatCurrency, formatRelativeTime, cn } from '../lib/utils';
-import type { Lead, LeadStatus, ActivityType, HotSignalLead } from '../types';
+import type { Lead, LeadStatus, ActivityType, HotSignalLead, RepliedLead } from '../types';
 import { Link } from 'react-router-dom';
 import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
 import { useToast } from '../lib/toast';
@@ -484,6 +484,64 @@ export function Dashboard() {
           stepPerformance={stats.step_performance || []}
           requeueEligible={stats.requeue_eligible || 0}
         />
+      )}
+
+      {/* Reply Alerts — leads who replied to email, no follow-up yet */}
+      {stats?.replied_leads && stats.replied_leads.length > 0 && (
+        <div className="bg-zinc-900 border border-emerald-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Reply className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Replied — Needs Follow-Up</h2>
+            <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.replied_leads.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">replied to email · no response yet</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {stats.replied_leads.map((lead: RepliedLead) => {
+              const hoursAgo = lead.replied_at
+                ? Math.round((Date.now() - new Date(lead.replied_at).getTime()) / (1000 * 60 * 60))
+                : null;
+              return (
+                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-emerald-500/[0.02] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-emerald-500" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                      {hoursAgo !== null && (
+                        <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                          {hoursAgo < 1 ? 'just now' : hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo / 24)}d ago`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {lead.phone && <span className="font-data">{lead.phone}</span>}
+                      {lead.service_type && <span>· {lead.service_type}</span>}
+                      {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => setScriptLead(lead as unknown as Lead)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <FileText className="w-3 h-3" /> Script
+                    </button>
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Call Now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Hot Signals — leads who opened email in last 48h, not yet called back */}

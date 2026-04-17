@@ -251,6 +251,25 @@ router.get('/', (req, res, next) => {
       LIMIT 5
     `);
 
+    // Reply alerts: leads who replied to email in last 7 days with no outbound follow-up since
+    const replied_leads = db.all(`
+      SELECT l.id, l.business_name, l.owner_name, l.phone, l.heat_score, l.service_type, l.city,
+             MAX(a.created_at) as replied_at
+      FROM leads l
+      JOIN activities a ON a.lead_id = l.id AND a.type = 'email_replied'
+      WHERE a.created_at > datetime('now', '-7 days')
+        AND l.status NOT IN ('lost', 'closed_won')
+        AND NOT EXISTS (
+          SELECT 1 FROM activities a2
+          WHERE a2.lead_id = l.id
+            AND a2.type IN ('call_attempt', 'email_sent', 'sms_sent')
+            AND a2.created_at > a.created_at
+        )
+      GROUP BY l.id
+      ORDER BY replied_at DESC
+      LIMIT 5
+    `);
+
     // Hot signals: leads who opened an email in last 48h but haven't been called back yet
     const hot_signal_leads = db.all(`
       SELECT l.id, l.business_name, l.owner_name, l.phone, l.heat_score, l.email_opened_at, l.service_type, l.city
@@ -294,6 +313,7 @@ router.get('/', (req, res, next) => {
         proposals_open_value: proposals_open?.total || 0,
         ghost_count,
         ghost_leads,
+        replied_leads,
         hot_signal_leads,
         outreach_summary,
         step_performance,
