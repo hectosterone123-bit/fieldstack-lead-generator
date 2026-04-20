@@ -42,7 +42,7 @@ const OUTCOME_LABELS: Record<string, { label: string; color: string; bg: string 
 export function Caller() {
   const { data: activeCalls = [] } = useActiveCalls();
   const { data: history = [], refetch: refetchHistory } = useCallHistory();
-  const { data: queue = [] } = useCallQueue();
+  const { data: queue = [], isLoading: queueLoading } = useCallQueue();
   const endCall = useEndCall();
   const callNext = useCallNextInQueue();
   const clearQueue = useClearCallQueue();
@@ -81,6 +81,7 @@ export function Caller() {
   const [autoAdvance, setAutoAdvance] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const prevActiveCallRef = useRef<Call | null>(null);
+  const prevQueueLenRef = useRef(0);
 
   // Feature 2: Post-call outcome
   const [justCompletedCall, setJustCompletedCall] = useState<Call | null>(null);
@@ -656,18 +657,19 @@ export function Caller() {
     return () => window.removeEventListener('keydown', handler);
   }, [speedMode, callerMode, manualLead, loggingCall]);
 
-  // Manual mode: Sync queue data from call-queue query
+  // Sync queue data from call-queue query — always, regardless of mode, so queue persists across navigation
   useEffect(() => {
-    if (callerMode === 'manual' && queue.length > 0) {
+    if (queue.length > 0) {
+      if (prevQueueLenRef.current === 0) setSelectedQueueIndex(0); // only reset index on initial load
+      prevQueueLenRef.current = queue.length;
       setQueueView(queue.slice(0, 10));
-      setSelectedQueueIndex(0);
-      setManualLead(null);
+      // NOTE: do NOT clear manualLead here — queue refetches every 3s and would wipe the selection
     }
-  }, [queue, callerMode]);
+  }, [queue]);
 
-  // Manual mode: Auto-load queue when entering manual mode
+  // Auto-load queue when entering manual mode — only if queue is genuinely empty (not mid-fetch)
   useEffect(() => {
-    if (callerMode === 'manual' && selectedScript && queueView.length === 0) {
+    if (callerMode === 'manual' && selectedScript && !queueLoading && queue.length === 0 && queueView.length === 0) {
       try {
         autoLoadQueue.mutate({
           serviceType: undefined,
@@ -676,7 +678,7 @@ export function Caller() {
         });
       } catch { /* ignore */ }
     }
-  }, [callerMode, selectedScript]);
+  }, [callerMode, selectedScript, queue, queueLoading]);
 
   // Auto-scroll transcript box when live lines arrive
   useEffect(() => {
