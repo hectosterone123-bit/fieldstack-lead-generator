@@ -1,20 +1,23 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   X, Phone, Globe, MapPin, ExternalLink, MessageSquare, PhoneCall,
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
   FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply, Bot,
   MailOpen, MousePointerClick, MailX, ShieldAlert, Linkedin,
+  ChevronDown, ChevronUp, Send as SendIcon,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { CallBriefModal } from './CallBriefModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
-import type { Lead, LeadStatus, EnrichmentData, ActivityType } from '../../types';
+import type { Lead, LeadStatus, EnrichmentData, ActivityType, SmsMessage } from '../../types';
 import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
 import { HeatScore } from '../shared/HeatScore';
 import { formatCurrency, formatRelativeTime, cn } from '../../lib/utils';
 import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail, useFetchGbpData } from '../../hooks/useLeads';
+import { useSmsConversation, useSendSms, useSmsStatus } from '../../hooks/useSms';
 import type { GbpData } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 
@@ -79,6 +82,7 @@ interface Props {
 }
 
 export function LeadDrawer({ leadId, onClose }: Props) {
+  const navigate = useNavigate();
   const { data, isLoading } = useLead(leadId);
   const patchStatus = usePatchStatus();
   const patchHeatScore = usePatchHeatScore();
@@ -92,6 +96,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const findEmail = useFindLeadEmail();
   const fetchGbp = useFetchGbpData();
   const { toast } = useToast();
+  const smsStatus = useSmsStatus();
+  const { data: smsMessages } = useSmsConversation(leadId);
+  const sendSms = useSendSms();
 
   const [noteText, setNoteText] = useState('');
   const [editValue, setEditValue] = useState<number | null>(null);
@@ -101,6 +108,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showScript, setShowScript] = useState(false);
   const [gbpData, setGbpData] = useState<GbpData | null>(null);
+  const [activityTypeFilter, setActivityTypeFilter] = useState<string | null>(null);
+  const [smsOpen, setSmsOpen] = useState(true);
+  const [smsDraft, setSmsDraft] = useState('');
 
   const lead = data as (Lead & { activities: any[] }) | undefined;
 
@@ -996,57 +1006,159 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 const firstOpenedRel = lead.email_opened_at ? formatRelativeTime(lead.email_opened_at) : null;
 
                 if (!emailSent && !emailOpens && !emailClicks && !emailReplied && !emailBounced && !emailComplained) return null;
+
+                function Badge({ type, children, className }: { type: string; children: React.ReactNode; className: string }) {
+                  const active = activityTypeFilter === type;
+                  return (
+                    <button
+                      onClick={() => setActivityTypeFilter(active ? null : type)}
+                      className={cn(
+                        'flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg transition-all',
+                        className,
+                        active ? 'ring-1 ring-current bg-white/[0.06]' : 'hover:bg-white/[0.04]',
+                      )}
+                    >
+                      {children}
+                    </button>
+                  );
+                }
+
                 return (
                   <div className="px-5 py-3 border-t border-white/[0.04]">
-                    <p className="text-overline text-zinc-600 mb-2">Email Engagement</p>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                    <p className="text-overline text-zinc-600 mb-2">Email Engagement <span className="text-zinc-700 normal-case font-normal text-[10px]">· click to filter log</span></p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge type="email_sent" className="text-zinc-400">
                         <Mail className="w-3.5 h-3.5 text-violet-400" />
                         {emailSent} sent
-                      </span>
+                      </Badge>
                       {emailOpens > 0 && (
-                        <span className="flex items-center gap-1.5 text-xs text-emerald-400" title={firstOpenedRel ? `First opened ${firstOpenedRel}` : ''}>
+                        <Badge type="email_opened" className="text-emerald-400">
                           <MailOpen className="w-3.5 h-3.5" />
-                          {emailOpens}× ({openRate}%)
-                        </span>
+                          <span title={firstOpenedRel ? `First opened ${firstOpenedRel}` : ''}>{emailOpens}× ({openRate}%)</span>
+                        </Badge>
                       )}
                       {emailClicks > 0 && (
-                        <span className="flex items-center gap-1.5 text-xs text-blue-400">
+                        <Badge type="email_clicked" className="text-blue-400">
                           <MousePointerClick className="w-3.5 h-3.5" />
                           {emailClicks}× clicked
-                        </span>
+                        </Badge>
                       )}
                       {emailReplied > 0 && (
-                        <span className="flex items-center gap-1.5 text-xs text-cyan-400">
+                        <Badge type="email_replied" className="text-cyan-400">
                           <Reply className="w-3.5 h-3.5" />
                           {emailReplied}× replied
-                        </span>
+                        </Badge>
                       )}
                       {emailBounced && (
-                        <span className="flex items-center gap-1.5 text-xs text-red-400">
+                        <Badge type="email_bounced" className="text-red-400">
                           <MailX className="w-3.5 h-3.5" />
                           bounced
-                        </span>
+                        </Badge>
                       )}
                       {emailComplained && (
-                        <span className="flex items-center gap-1.5 text-xs text-orange-400">
+                        <Badge type="email_complained" className="text-orange-400">
                           <ShieldAlert className="w-3.5 h-3.5" />
                           complained
-                        </span>
+                        </Badge>
                       )}
                     </div>
                   </div>
                 );
               })()}
 
+              {/* SMS Conversation */}
+              {smsStatus.data?.configured && smsMessages && smsMessages.length > 0 && (
+                <div className="border-t border-white/[0.04]">
+                  <button
+                    onClick={() => setSmsOpen(v => !v)}
+                    className="w-full px-5 py-3 flex items-center justify-between text-left hover:bg-white/[0.02] transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="text-overline text-zinc-600">SMS Conversation</p>
+                      <span className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded font-data">
+                        {smsMessages.length}
+                      </span>
+                      {smsMessages.some((m: SmsMessage) => m.direction === 'inbound') && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
+                      )}
+                    </div>
+                    {smsOpen ? <ChevronUp className="w-3.5 h-3.5 text-zinc-600" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-600" />}
+                  </button>
+                  {smsOpen && (
+                    <div className="px-5 pb-4">
+                      <div className="space-y-2 mb-3 max-h-48 overflow-y-auto">
+                        {smsMessages.slice(-10).map((msg: SmsMessage) => (
+                          <div key={msg.id} className={cn('flex', msg.direction === 'outbound' ? 'justify-end' : 'justify-start')}>
+                            <div className={cn(
+                              'max-w-[75%] px-3 py-2 rounded-xl text-xs',
+                              msg.direction === 'outbound'
+                                ? 'bg-orange-500/20 text-orange-100 rounded-br-sm'
+                                : 'bg-zinc-800 text-zinc-200 rounded-bl-sm'
+                            )}>
+                              <p>{msg.body}</p>
+                              <p className="text-[10px] opacity-50 mt-0.5 font-data">{formatRelativeTime(msg.created_at)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          value={smsDraft}
+                          onChange={e => setSmsDraft(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey && smsDraft.trim()) {
+                              e.preventDefault();
+                              sendSms.mutate({ lead_id: lead.id, body: smsDraft.trim() });
+                              setSmsDraft('');
+                            }
+                          }}
+                          placeholder="Reply via SMS…"
+                          className="flex-1 bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40"
+                        />
+                        <button
+                          onClick={() => {
+                            if (!smsDraft.trim()) return;
+                            sendSms.mutate({ lead_id: lead.id, body: smsDraft.trim() });
+                            setSmsDraft('');
+                          }}
+                          disabled={!smsDraft.trim() || sendSms.isPending}
+                          className="px-3 py-2 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 text-white rounded-lg transition-colors"
+                        >
+                          <SendIcon className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => navigate('/sms', { state: { leadId: lead.id } })}
+                        className="mt-2 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                      >
+                        View full thread →
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Activity timeline */}
               {lead.activities && lead.activities.length > 0 && (
                 <div className="px-5 py-4">
-                  <p className="text-overline text-zinc-600 mb-3">Activity Log</p>
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="text-overline text-zinc-600">Activity Log</p>
+                    {activityTypeFilter && (
+                      <button
+                        onClick={() => setActivityTypeFilter(null)}
+                        className="flex items-center gap-1 text-[10px] text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded"
+                      >
+                        {activityTypeFilter.replace(/_/g, ' ')} ×
+                      </button>
+                    )}
+                  </div>
                   <div className="relative">
                     <div className="absolute left-[15px] top-4 bottom-0 w-px bg-gradient-to-b from-zinc-700 via-zinc-800 to-transparent" />
                     <div className="space-y-4">
-                      {lead.activities.map((a: any) => {
+                      {(activityTypeFilter
+                        ? lead.activities.filter((a: any) => a.type === activityTypeFilter)
+                        : lead.activities
+                      ).map((a: any) => {
                         const AIcon = ACTIVITY_ICONS[a.type as ActivityType] ?? RefreshCw;
                         const iconColor = ACTIVITY_COLORS[a.type as ActivityType] ?? 'text-zinc-400';
                         return (

@@ -393,6 +393,7 @@ export function Campaigns() {
                 onSkip={() => dismiss.mutate(item.enrollment_id)}
                 onSend={handleSend}
                 onAutomate={() => automateRest.mutate(item.enrollment_id)}
+                onOpenLead={(leadId) => navigate('/leads', { state: { openLeadId: leadId } })}
                 emailConfigured={emailConfigured}
                 smsConfigured={smsConfigured}
                 sending={isSending}
@@ -467,7 +468,7 @@ function canSendItem(item: OutreachQueueItem, emailConfigured: boolean, smsConfi
   return false;
 }
 
-function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, onAutomate, emailConfigured, smsConfigured, sending, automating }: {
+function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, onAutomate, onOpenLead, emailConfigured, smsConfigured, sending, automating }: {
   item: OutreachQueueItem;
   onPreview: (item: OutreachQueueItem) => void;
   onMarkSent: () => void;
@@ -475,6 +476,7 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
   onSkip: () => void;
   onSend: (item: OutreachQueueItem) => void;
   onAutomate: () => void;
+  onOpenLead: (leadId: number) => void;
   emailConfigured: boolean;
   smsConfigured: boolean;
   sending: boolean;
@@ -498,7 +500,7 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
         <ChannelIcon className="w-3.5 h-3.5" />
       </div>
 
-      <div className="flex-1 min-w-0">
+      <button onClick={() => onOpenLead(item.lead_id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
         <div className="flex items-center gap-2">
           <span className="text-sm text-zinc-200 font-medium truncate">{item.business_name}</span>
           {item.is_overdue && (
@@ -541,7 +543,7 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
             </>
           )}
         </div>
-      </div>
+      </button>
 
       <div className="flex items-center gap-1.5 flex-shrink-0">
         <button

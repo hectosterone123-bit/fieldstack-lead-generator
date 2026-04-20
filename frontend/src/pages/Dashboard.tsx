@@ -11,7 +11,7 @@ import { fetchStats } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatCurrency, formatRelativeTime, cn } from '../lib/utils';
 import type { Lead, LeadStatus, ActivityType, HotSignalLead, RepliedLead } from '../types';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
 import { useToast } from '../lib/toast';
 import { OutreachQueue } from '../components/sequences/OutreachQueue';
@@ -186,6 +186,7 @@ function OutreachPerformance({ summary, stepPerformance, requeueEligible }: {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const { data: stats, isLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: fetchStats,
@@ -196,6 +197,10 @@ export function Dashboard() {
   const patchStatus = usePatchStatus();
   const { toast } = useToast();
   const [scriptLead, setScriptLead] = useState<Lead | null>(null);
+
+  function goLeads(preset?: { status?: string; sort?: string; order?: 'asc' | 'desc' }, openLeadId?: number) {
+    navigate('/leads', { state: { preset, openLeadId } });
+  }
 
   if (isLoading) {
     return (
@@ -255,55 +260,58 @@ export function Dashboard() {
       {/* KPI Cards — Row 1: Lead Gen Health */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-3">
         {/* Leads Found This Week — hero card */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-orange-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads()} className="group relative overflow-hidden bg-gradient-to-br from-orange-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] hover:border-orange-500/30 rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-orange-500/10 blur-2xl pointer-events-none" />
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-500/15 text-orange-400">
               <Search className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-gradient-orange">
             {stats?.leads_found_this_week ?? 0}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Leads Found This Week</p>
-        </div>
+        </button>
 
         {/* Enrichment Rate */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ sort: 'heat_score', order: 'asc' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-violet-500/10 text-violet-400">
               <Database className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.enrichment_rate ?? 0}%
           </p>
           <p className="text-overline text-zinc-500 mt-1">Enrichment Rate</p>
           <p className="text-[10px] text-zinc-600 mt-1.5">phone or email on file</p>
-        </div>
+        </button>
 
         {/* Outreach Coverage */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'new' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400">
               <Send className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.outreach_coverage ?? 0}%
           </p>
           <p className="text-overline text-zinc-500 mt-1">Outreach Coverage</p>
           <p className="text-[10px] text-zinc-600 mt-1.5">leads past 'new' status</p>
-        </div>
+        </button>
 
         {/* Speed to Lead */}
-        <div className={cn(
-          'bg-zinc-900 border rounded-xl p-5 shadow-surface',
+        <button onClick={() => goLeads({ sort: 'contact_count', order: 'desc' })} className={cn(
+          'group bg-zinc-900 border rounded-xl p-5 shadow-surface text-left transition-all',
           stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes <= 5
-            ? 'border-emerald-500/20'
+            ? 'border-emerald-500/20 hover:border-emerald-500/40'
             : stats?.avg_speed_to_lead_minutes != null && stats.avg_speed_to_lead_minutes > 60
-              ? 'border-red-500/20'
-              : 'border-white/[0.06]',
+              ? 'border-red-500/20 hover:border-red-500/40'
+              : 'border-white/[0.06] hover:border-white/[0.12]',
         )}>
           <div className="flex items-start justify-between mb-4">
             <div className={cn(
@@ -316,6 +324,7 @@ export function Dashboard() {
             )}>
               <Zap className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.avg_speed_to_lead_minutes != null
@@ -332,117 +341,125 @@ export function Dashboard() {
               ? `avg response time (${stats.speed_to_lead_sample} leads)`
               : 'avg time to first contact'}
           </p>
-        </div>
+        </button>
       </div>
 
       {/* KPI Cards — Row 2: Pipeline */}
       <p className="text-overline text-zinc-500 mt-2 mb-3">Pipeline</p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
         {/* Pipeline Value */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'proposal_sent' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-400">
               <DollarSign className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {formatCurrency(stats?.pipeline_value ?? 0)}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Pipeline Value</p>
-        </div>
+        </button>
 
         {/* Total Leads */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads()} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-zinc-800 text-zinc-400">
               <Users className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.total_leads ?? 0}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Total Leads</p>
-        </div>
+        </button>
 
         {/* Hot Leads */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ sort: 'heat_score', order: 'desc' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-red-500/20 rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-red-500/10 text-red-400">
               <Flame className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.hot_leads_count ?? 0}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Hot Leads (70+)</p>
-        </div>
+        </button>
 
         {/* Conversion Rate */}
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'closed_won' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400">
               <TrendingUp className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.conversion_rate ?? 0}%
           </p>
           <p className="text-overline text-zinc-500 mt-1">Conversion Rate</p>
-        </div>
+        </button>
       </div>
 
       {/* KPI Cards — Row 3: Revenue */}
       <p className="text-overline text-zinc-500 mt-2 mb-3">Revenue</p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'closed_won', sort: 'close_date', order: 'desc' })} className="group relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-zinc-900 to-zinc-900 border border-white/[0.06] hover:border-emerald-500/30 rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/15 text-emerald-400">
               <DollarSign className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-gradient-orange">
             {formatCurrency(stats?.revenue_this_month ?? 0)}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Revenue This Month</p>
-        </div>
+        </button>
 
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'closed_won', sort: 'close_date', order: 'desc' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-zinc-800 text-zinc-400">
               <TrendingUp className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {stats?.deals_closed_this_month ?? 0}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Deals Closed This Month</p>
-        </div>
+        </button>
 
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'closed_won' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-amber-500/10 text-amber-400">
               <DollarSign className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {formatCurrency(stats?.avg_deal_size ?? 0)}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Avg Deal Size</p>
-        </div>
+        </button>
 
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+        <button onClick={() => goLeads({ status: 'proposal_sent', sort: 'updated_at', order: 'asc' })} className="group bg-zinc-900 border border-white/[0.06] hover:border-violet-500/20 rounded-xl p-5 shadow-surface text-left transition-all">
           <div className="flex items-start justify-between mb-4">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-violet-500/10 text-violet-400">
               <DollarSign className="w-4 h-4" />
             </div>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
           </div>
           <p className="text-2xl font-bold tracking-tight font-data text-white">
             {formatCurrency(stats?.proposals_open_value ?? 0)}
           </p>
           <p className="text-overline text-zinc-500 mt-1">Open Proposals</p>
           <p className="text-[10px] text-zinc-600 mt-1.5">{stats?.proposals_open_count ?? 0} proposals pending</p>
-        </div>
+        </button>
       </div>
 
       {/* Lead Sources */}
@@ -460,17 +477,18 @@ export function Dashboard() {
               const config = sourceLabels[source.source] || { label: source.source, icon: Globe, color: 'bg-zinc-500/10 text-zinc-400' };
               const Icon = config.icon;
               return (
-                <div key={source.source} className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 shadow-surface">
+                <button key={source.source} onClick={() => goLeads()} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
                   <div className="flex items-start justify-between mb-4">
                     <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center', config.color)}>
                       <Icon className="w-4 h-4" />
                     </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
                   </div>
                   <p className="text-2xl font-bold tracking-tight font-data text-white">
                     {source.count}
                   </p>
                   <p className="text-overline text-zinc-500 mt-1">{config.label}</p>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -563,7 +581,7 @@ export function Dashboard() {
               return (
                 <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-orange-500/[0.03] transition-colors">
                   <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500" />
-                  <div className="flex-1 min-w-0">
+                  <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
                       {hoursAgo !== null && (
@@ -577,7 +595,7 @@ export function Dashboard() {
                       {lead.service_type && <span>· {lead.service_type}</span>}
                       {lead.owner_name && <span>· {lead.owner_name}</span>}
                     </div>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button
                       onClick={() => setScriptLead(lead as unknown as Lead)}
@@ -640,7 +658,7 @@ export function Dashboard() {
                       isOverdue ? 'bg-red-500' : 'bg-amber-500',
                     )} />
 
-                    <div className="flex-1 min-w-0">
+                    <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
                         <span className={cn(
@@ -663,7 +681,7 @@ export function Dashboard() {
                         {lead.owner_name && <span>· {lead.owner_name}</span>}
                         <span>· {getOverdueText(lead.next_followup_at)}</span>
                       </div>
-                    </div>
+                    </button>
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
@@ -731,14 +749,14 @@ export function Dashboard() {
               return (
                 <div key={ghost.id} className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02] transition-colors">
                   <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-amber-500/40" />
-                  <div className="flex-1 min-w-0">
+                  <button onClick={() => goLeads(undefined, ghost.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
                     <span className="text-sm text-zinc-200 font-medium truncate block">{ghost.business_name}</span>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
                       {ghost.phone && <span>{ghost.phone}</span>}
                       <span>· {ghost.service_type}</span>
                       <span>· silent {daysSince}d</span>
                     </div>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <button
                       onClick={() => logActivity.mutate(
@@ -789,9 +807,13 @@ export function Dashboard() {
                 </Link>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {byStatus.map(s => (
-                  <div key={s.status} className="flex items-center gap-3">
+                  <button
+                    key={s.status}
+                    onClick={() => goLeads({ status: s.status })}
+                    className="flex items-center gap-3 w-full rounded-lg px-2 py-1 hover:bg-white/[0.03] transition-colors group"
+                  >
                     <StatusBadge status={s.status as LeadStatus} className="w-32 justify-center flex-shrink-0" />
                     <div className="flex-1 h-1.5 bg-zinc-800/60 rounded-full overflow-hidden">
                       <div
@@ -800,7 +822,8 @@ export function Dashboard() {
                       />
                     </div>
                     <span className="text-zinc-400 text-xs tabular-nums w-5 text-right font-data">{s.count}</span>
-                  </div>
+                    <ChevronRight className="w-3 h-3 text-zinc-700 group-hover:text-zinc-500 transition-colors flex-shrink-0" />
+                  </button>
                 ))}
               </div>
             )}
@@ -830,14 +853,17 @@ export function Dashboard() {
                         <div className="relative z-10 flex-shrink-0 w-8 h-8 rounded-full bg-zinc-800 border border-white/[0.06] flex items-center justify-center">
                           <ActivityIcon className={cn('w-3.5 h-3.5', iconColor)} />
                         </div>
-                        {/* Content */}
-                        <div className="flex-1 min-w-0 bg-zinc-800/40 rounded-lg px-3 py-2 border border-white/[0.04] hover:border-white/[0.08] transition-colors">
+                        {/* Content — clickable to open that lead's drawer */}
+                        <button
+                          onClick={() => goLeads(undefined, a.lead_id)}
+                          className="flex-1 min-w-0 bg-zinc-800/40 rounded-lg px-3 py-2 border border-white/[0.04] hover:border-white/[0.10] hover:bg-zinc-800/60 transition-colors text-left"
+                        >
                           <div className="text-xs text-zinc-300 leading-snug">
                             <span className="text-zinc-500">{a.business_name} · </span>
                             {a.title}
                           </div>
                           <div className="text-[10px] text-zinc-600 mt-1 font-data">{formatRelativeTime(a.created_at)}</div>
-                        </div>
+                        </button>
                       </div>
                     );
                   })}

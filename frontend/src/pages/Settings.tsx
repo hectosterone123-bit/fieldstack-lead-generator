@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ScoringRulesCard } from '../components/settings/ScoringRulesCard';
 import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
@@ -967,6 +968,9 @@ export function Settings() {
             </div>
           )}
         </div>
+
+        {/* Scoring Rules */}
+        <ScoringRulesCard />
 
         {/* Save */}
         <button

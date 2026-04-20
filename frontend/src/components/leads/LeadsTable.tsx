@@ -21,16 +21,23 @@ const STATUS_FILTERS: { label: string; value: string }[] = [
   { label: 'Lost', value: 'lost' },
 ];
 
-interface Props {
-  onRowClick: (lead: Lead) => void;
+interface Preset {
+  status?: string;
+  sort?: string;
+  order?: 'asc' | 'desc';
 }
 
-export function LeadsTable({ onRowClick }: Props) {
+interface Props {
+  onRowClick: (lead: Lead) => void;
+  preset?: Preset;
+}
+
+export function LeadsTable({ onRowClick, preset }: Props) {
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(preset?.status ?? 'all');
   const [serviceFilter, setServiceFilter] = useState('all');
-  const [sort, setSort] = useState('created_at');
-  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+  const [sort, setSort] = useState(preset?.sort ?? 'created_at');
+  const [order, setOrder] = useState<'asc' | 'desc'>(preset?.order ?? 'desc');
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState('');
   const [noResponseFilter, setNoResponseFilter] = useState(false);

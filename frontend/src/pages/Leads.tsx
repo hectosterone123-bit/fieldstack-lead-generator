@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Download, Upload, List, Columns3, Repeat, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Lead } from '../types';
@@ -8,10 +9,14 @@ import { LeadDrawer } from '../components/leads/LeadDrawer';
 import { importCsv } from '../lib/api';
 import { useCopilotContext } from '../lib/copilotContext';
 import { useSequences, useEnrollLeads } from '../hooks/useSequences';
+import { useLead } from '../hooks/useLeads';
 import { useToast } from '../lib/toast';
 import { cn } from '../lib/utils';
 
 export function Leads() {
+  const location = useLocation();
+  const navState = location.state as { preset?: { status?: string; sort?: string; order?: 'asc' | 'desc' }; openLeadId?: number } | null;
+
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [view, setView] = useState<'table' | 'kanban'>('table');
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -20,6 +25,12 @@ export function Leads() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const { setLeadContext } = useCopilotContext();
+
+  // Auto-open a specific lead drawer when navigated here with openLeadId
+  const { data: presetLead } = useLead(navState?.openLeadId ?? null);
+  useEffect(() => {
+    if (presetLead && !selectedLead) setSelectedLead(presetLead);
+  }, [presetLead]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (selectedLead) {
@@ -125,7 +136,7 @@ export function Leads() {
 
       <div className="flex-1 overflow-hidden">
         {view === 'table' ? (
-          <LeadsTable onRowClick={setSelectedLead} />
+          <LeadsTable onRowClick={setSelectedLead} preset={navState?.preset} />
         ) : (
           <KanbanBoard onLeadClick={setSelectedLead} />
         )}

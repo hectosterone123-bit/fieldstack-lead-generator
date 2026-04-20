@@ -5,6 +5,7 @@ const smsService = require('../services/smsService');
 const { renderTemplate } = require('../services/templateService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
 const reviewService = require('../services/reviewService');
+const { applyRules } = require('../services/scoringRulesService');
 
 // ─── SMS Status ──────────────────────────────────────────────────────────────
 
@@ -162,6 +163,8 @@ router.post('/webhook', express.urlencoded({ extended: false }), async (req, res
       );
     }
   }
+
+  if (lead) applyRules(lead.id, 'sms_replied');
 
   // Empty TwiML response (don't auto-reply — Sam AI will handle that separately)
   res.type('text/xml').send('<Response></Response>');

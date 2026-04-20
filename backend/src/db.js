@@ -395,6 +395,22 @@ async function initDb() {
   try { db.run('ALTER TABLE leads ADD COLUMN linkedin_url TEXT'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_link', '')"); } catch(e) {}
 
+  // Migration: configurable lead scoring rules
+  db.run(`CREATE TABLE IF NOT EXISTS scoring_rules (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    trigger         TEXT NOT NULL,
+    action          TEXT NOT NULL,
+    value           INTEGER NOT NULL,
+    condition_type  TEXT,
+    condition_value INTEGER,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value) VALUES (1, 'Email Opened', 'email_opened', 'add', 10)"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value) VALUES (2, 'Email Replied', 'email_replied', 'add', 20)"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value, condition_type, condition_value) VALUES (3, 'No Activity 14 Days', 'no_activity_days', 'subtract', 15, 'score_above', 20)"); } catch(e) {}
+
   // Seed default templates if table is empty
   seedDefaultTemplates();
 

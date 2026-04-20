@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2, LayoutTemplate, X, MessageSquare,
 } from 'lucide-react';
@@ -8,6 +9,7 @@ import { useSequences, useCreateSequence, useUpdateSequence, useDeleteSequence, 
 import type { Sequence, SequenceStep } from '../types';
 
 export function Sequences() {
+  const navigate = useNavigate();
   const { data: sequences, isLoading } = useSequences();
   const createSequence = useCreateSequence();
   const updateSequence = useUpdateSequence();
@@ -204,15 +206,15 @@ export function Sequences() {
                   {/* Totals */}
                   <div className="grid grid-cols-4 gap-3">
                     {[
-                      { label: 'Enrolled', value: analytics.totals.enrolled },
-                      { label: 'Active', value: analytics.totals.active },
-                      { label: 'Completed', value: analytics.totals.completed },
-                      { label: 'Cancelled', value: analytics.totals.cancelled },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="bg-zinc-800/50 rounded-lg p-3 text-center">
+                      { label: 'Enrolled', value: analytics.totals.enrolled, onClick: () => navigate('/campaigns') },
+                      { label: 'Active', value: analytics.totals.active, onClick: () => navigate('/campaigns') },
+                      { label: 'Completed', value: analytics.totals.completed, onClick: () => navigate('/leads', { state: { preset: { status: 'closed_won' } } }) },
+                      { label: 'Cancelled', value: analytics.totals.cancelled, onClick: () => navigate('/leads') },
+                    ].map(({ label, value, onClick }) => (
+                      <button key={label} onClick={onClick} className="bg-zinc-800/50 rounded-lg p-3 text-center hover:bg-zinc-800 transition-colors">
                         <p className="text-lg font-semibold text-zinc-100 font-data">{value}</p>
                         <p className="text-[10px] text-zinc-500 mt-0.5">{label}</p>
-                      </div>
+                      </button>
                     ))}
                   </div>
 

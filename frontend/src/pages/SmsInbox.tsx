@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   MessageSquare, Send, ArrowLeft, PhoneOff, PhoneMissed,
   User, Clock, AlertCircle, CheckCircle2, Star,
@@ -16,6 +17,7 @@ export function SmsInbox() {
   const { data: reviewSettings } = useReviewSettings();
   const sendSms = useSendSms();
 
+  const location = useLocation();
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -23,6 +25,11 @@ export function SmsInbox() {
   const { data: messages, isLoading: messagesLoading } = useSmsConversation(selectedLeadId);
 
   const selectedThread = threads?.find(t => t.lead_id === selectedLeadId) || null;
+
+  useEffect(() => {
+    const state = location.state as { leadId?: number } | null;
+    if (state?.leadId) setSelectedLeadId(state.leadId);
+  }, [location.state]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

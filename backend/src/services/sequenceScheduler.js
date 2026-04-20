@@ -4,6 +4,7 @@ const { renderTemplate } = require('./templateService');
 const emailService = require('./emailService');
 const smsService = require('./smsService');
 const { recomputeHeatScore } = require('./heatScoreService');
+const { applyNoActivityRules } = require('./scoringRulesService');
 
 const MAX_SENDS_PER_TICK = 20;
 
@@ -75,6 +76,7 @@ function startSequenceScheduler() {
     try {
       await sendDailyDigest();
       autoRequeueStaleLeads();
+      applyNoActivityRules();
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
     }
@@ -231,11 +233,11 @@ async function autoSendDueItems() {
 
     try {
       if (step.channel === 'email') {
-        if (!enrollment.email) { failed++; continue; }
+        if (!enrollment.email) { continue; } // no email on lead — silent skip, not a failure
         if (!emailService.isConfigured()) {
           db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
             ['Email not configured — add Resend API key in Settings', enrollment.id]);
-          failed++; continue;
+          continue;
         }
 
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
@@ -259,11 +261,11 @@ async function autoSendDueItems() {
            JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
-        if (!enrollment.phone) { failed++; continue; }
+        if (!enrollment.phone) { continue; } // no phone on lead — silent skip, not a failure
         if (!smsService.isConfigured()) {
           db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
             ['SMS not configured — add Twilio credentials in Settings', enrollment.id]);
-          failed++; continue;
+          continue;
         }
 
         const body = renderTemplate(template.body, enrollment);
@@ -331,10 +333,11 @@ async function autoSendDueItems() {
 
   if (sent > 0 || failed > 0) {
     console.log(`[Scheduler] Auto-send: ${sent} sent, ${failed} failed`);
-    if (failed > 0 && failed >= sent) {
+    // Only alert on actual API-level failures (not skips), and only when nothing got through
+    if (failed >= 3 && sent === 0) {
       sendAlert(
-        `High email failure rate (${failed} failed, ${sent} sent)`,
-        `The sequence scheduler had a high failure rate in the last tick.\n\nFailed: ${failed}\nSent: ${sent}\n\nCheck that your Resend API key is valid and your sending domain is verified.`
+        `Email send failures (${failed} failed)`,
+        `The sequence scheduler failed to send ${failed} email(s) and sent 0 successfully.\n\nCheck Railway logs for the specific error. Common causes: Resend API key invalid, sending domain not verified, or rate limit hit.`
       );
     }
   }
@@ -405,11 +408,11 @@ async function autoFlushOverdueItems() {
 
     try {
       if (step.channel === 'email') {
-        if (!enrollment.email) { failed++; continue; }
+        if (!enrollment.email) { continue; } // no email on lead — silent skip
         if (!emailService.isConfigured()) {
           db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
             ['Email not configured — add Resend API key in Settings', enrollment.id]);
-          failed++; continue;
+          continue;
         }
 
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
@@ -433,11 +436,11 @@ async function autoFlushOverdueItems() {
            JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
-        if (!enrollment.phone) { failed++; continue; }
+        if (!enrollment.phone) { continue; } // no phone on lead — silent skip
         if (!smsService.isConfigured()) {
           db.run('UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
             ['SMS not configured — add Twilio credentials in Settings', enrollment.id]);
-          failed++; continue;
+          continue;
         }
 
         const body = renderTemplate(template.body, enrollment);

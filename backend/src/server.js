@@ -48,6 +48,7 @@ async function start() {
   const scraperRouter = require('./routes/scraper');
   const cockpitRouter = require('./routes/cockpit');
   const callsRouter = require('./routes/calls');
+  const scoringRulesRouter = require('./routes/scoringRules');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
@@ -61,6 +62,7 @@ async function start() {
   app.use('/api/webhooks', webhooksRouter);
   app.use('/api/cockpit', cockpitRouter);
   app.use('/api/calls', callsRouter);
+  app.use('/api/scoring-rules', scoringRulesRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

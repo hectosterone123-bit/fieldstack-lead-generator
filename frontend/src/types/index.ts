@@ -512,6 +512,24 @@ export interface Call {
   source?: 'ai' | 'manual' | null;
 }
 
+// ─── Scoring Rules ────────────────────────────────────────────────────────────
+
+export type ScoringRuleTrigger = 'email_opened' | 'email_clicked' | 'email_replied' | 'sms_replied' | 'no_activity_days';
+export type ScoringRuleAction = 'add' | 'subtract' | 'set';
+export type ScoringRuleConditionType = 'score_below' | 'score_above' | null;
+
+export interface ScoringRule {
+  id: number;
+  name: string;
+  trigger: ScoringRuleTrigger;
+  action: ScoringRuleAction;
+  value: number;
+  condition_type: ScoringRuleConditionType;
+  condition_value: number | null;
+  enabled: 0 | 1;
+  created_at: string;
+}
+
 export interface CallQueueItem {
   id: number;
   lead_id: number;

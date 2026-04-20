@@ -4,6 +4,7 @@ const db = require('../db');
 const smsService = require('../services/smsService');
 const emailService = require('../services/emailService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
+const { applyRules } = require('../services/scoringRulesService');
 
 // Resend webhook signature verification (svix)
 function verifyResendSignature(req) {
@@ -101,6 +102,8 @@ router.post('/resend', async (req, res) => {
         [activity.lead_id]
       );
 
+      applyRules(activity.lead_id, 'email_opened');
+
       // Multi-open alert: SMS to user when lead opens 2+ times
       const openCount = db.get(
         `SELECT COUNT(*) as count FROM activities WHERE lead_id = ? AND type = 'email_opened'`,
@@ -138,6 +141,7 @@ router.post('/resend', async (req, res) => {
           db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, lead.id]);
         }
       }
+      applyRules(activity.lead_id, 'email_clicked');
     }
   }
 

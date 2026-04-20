@@ -1,4 +1,4 @@
-import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ReviewStats, ImportOptions, BatchSearchParams, BatchSearchMeta, Call, CallQueueItem } from '../types';
+import type { Lead, ScheduledEmail, FinderResult, Stats, Template, TemplatePreview, TemplateVariable, Conversation, ChatMessage, CopilotContext, Sequence, LeadSequenceEnrollment, OutreachQueueItem, QueueStats, SmsMessage, SmsThread, MissedCallSettings, ReviewRequestSettings, ReviewStats, ImportOptions, BatchSearchParams, BatchSearchMeta, Call, CallQueueItem, ScoringRule } from '../types';
 
 const BASE = '/api';
 
@@ -636,6 +636,28 @@ export async function coachCall(lead_id: number | null, objection: string, scrip
 
 export async function fetchTemplateStats(): Promise<Array<{ template_id: number; template_name: string; total: number; interested: number; callbacks: number; no_contact: number; not_interested: number; conversion_rate: number; callback_rate: number; no_contact_rate: number }>> {
   return request('/calls/stats/templates');
+}
+
+// ─── Scoring Rules ────────────────────────────────────────────────────────────
+
+export async function fetchScoringRules(): Promise<ScoringRule[]> {
+  return request('/scoring-rules');
+}
+
+export async function createScoringRule(data: Omit<ScoringRule, 'id' | 'created_at'>): Promise<ScoringRule> {
+  return request('/scoring-rules', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateScoringRule(id: number, data: Partial<Omit<ScoringRule, 'id' | 'created_at'>>): Promise<ScoringRule> {
+  return request(`/scoring-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteScoringRule(id: number): Promise<void> {
+  return request(`/scoring-rules/${id}`, { method: 'DELETE' });
+}
+
+export async function toggleScoringRule(id: number): Promise<ScoringRule> {
+  return request(`/scoring-rules/${id}/toggle`, { method: 'PATCH' });
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
