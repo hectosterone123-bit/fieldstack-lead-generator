@@ -1160,14 +1160,24 @@ export function Caller() {
                     <p className="text-[10px] text-zinc-600 mt-0.5">{selectedQueueIndex + 1} of {queueView.length}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => selectedScript && autoLoadQueue.mutate({ serviceType: undefined, count: 10, templateId: selectedScript })}
-                  disabled={!selectedScript || autoLoadQueue.isPending}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 transition-colors disabled:opacity-40"
-                >
-                  {autoLoadQueue.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
-                  Load
-                </button>
+                <div className="flex items-center gap-2">
+                  {queueView.length > 0 && (
+                    <button
+                      onClick={() => { clearQueue.mutate(); setQueueView([]); setManualLead(null); prevQueueLenRef.current = 0; }}
+                      className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    onClick={() => selectedScript && autoLoadQueue.mutate({ serviceType: undefined, count: 10, templateId: selectedScript })}
+                    disabled={!selectedScript || autoLoadQueue.isPending}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 transition-colors disabled:opacity-40"
+                  >
+                    {autoLoadQueue.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+                    Load
+                  </button>
+                </div>
               </div>
 
               {queueView.length === 0 ? (
