@@ -3,7 +3,7 @@ import {
   PhoneOutgoing, PhoneOff, Mic, MicOff, Play,
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
-  Bot, Zap, X, Square, Brain,
+  Bot, Zap, X, Square, Brain, Search,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -12,7 +12,7 @@ import {
   useBulkUpdateCallOutcomes, useAutoLoadQueue, useTemplateStats,
 } from '../hooks/useCalls';
 import { useUpdateLead } from '../hooks/useLeads';
-import { fetchLeads, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote } from '../lib/api';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote } from '../lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Template, Lead, Call } from '../types';
 import { cn, formatRelativeTime } from '../lib/utils';
@@ -66,6 +66,7 @@ export function Caller() {
   const [scripts, setScripts] = useState<Template[]>([]);
   const [selectedScript, setSelectedScript] = useState<number | null>(null);
   const [showAddLeads, setShowAddLeads] = useState(false);
+  const [showManualLeadBrowser, setShowManualLeadBrowser] = useState(false);
   const [availableLeads, setAvailableLeads] = useState<Lead[]>([]);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<number>>(new Set());
   const [leadSearch, setLeadSearch] = useState('');
@@ -528,8 +529,7 @@ export function Caller() {
     setSelectedQueueIndex(index);
     setManualCountdown(null); // Cancel any pending countdown
     try {
-      const { leads } = await fetchLeads({ search: queueItem.business_name });
-      const fullLead = leads.find(l => l.id === queueItem.lead_id);
+      const fullLead = await fetchLead(queueItem.lead_id);
       if (fullLead) {
         await selectManualLead(fullLead);
       }
@@ -1286,7 +1286,21 @@ export function Caller() {
           <div className="lg:col-span-2 space-y-4">
             {/* Lead selector */}
             <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Select Lead</p>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">Select Lead</p>
+                <button
+                  onClick={() => {
+                    setShowManualLeadBrowser(true);
+                    fetchLeads({ limit: 200, sort: 'heat_score', order: 'desc' }).then(r => {
+                      setAvailableLeads((r.leads || []).filter((l: Lead) => l.phone));
+                    }).catch(() => {});
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 border border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+                >
+                  <Search className="w-3 h-3" />
+                  Browse
+                </button>
+              </div>
               {manualLead ? (
                 <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/[0.06] border border-emerald-500/20">
                   <div>
@@ -2151,6 +2165,75 @@ export function Caller() {
         </div>
       )}
     </div>
+
+    {/* Manual Lead Browser Modal */}
+    {showManualLeadBrowser && (
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+        onClick={() => { setShowManualLeadBrowser(false); setLeadSearch(''); setLeadServiceFilter(''); }}
+      >
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] w-full max-w-lg max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+          <div className="px-5 py-4 border-b border-white/[0.04] flex items-center justify-between">
+            <h3 className="text-sm font-medium text-zinc-200">Select Lead</h3>
+            <button onClick={() => { setShowManualLeadBrowser(false); setLeadSearch(''); setLeadServiceFilter(''); }} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-4 py-3 border-b border-white/[0.04] flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search by name or city..."
+              value={leadSearch}
+              onChange={e => setLeadSearch(e.target.value)}
+              className="flex-1 px-3 py-1.5 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-orange-500/50 [color-scheme:dark]"
+              autoFocus
+            />
+            <select
+              value={leadServiceFilter}
+              onChange={e => setLeadServiceFilter(e.target.value)}
+              className="px-2 py-1.5 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-300 [color-scheme:dark]"
+            >
+              <option value="">All types</option>
+              <option value="hvac">HVAC</option>
+              <option value="roofing">Roofing</option>
+              <option value="plumbing">Plumbing</option>
+              <option value="electrical">Electrical</option>
+              <option value="landscaping">Landscaping</option>
+              <option value="pest_control">Pest Control</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+          <div className="max-h-80 overflow-y-auto p-2">
+            {availableLeads.length === 0 && (
+              <p className="text-xs text-zinc-600 text-center py-6">Loading leads...</p>
+            )}
+            {availableLeads
+              .filter(l =>
+                (!leadServiceFilter || l.service_type === leadServiceFilter) &&
+                (!leadSearch || l.business_name?.toLowerCase().includes(leadSearch.toLowerCase()) || l.city?.toLowerCase().includes(leadSearch.toLowerCase()))
+              )
+              .map(lead => (
+                <button
+                  key={lead.id}
+                  onClick={() => {
+                    selectManualLead(lead);
+                    setShowManualLeadBrowser(false);
+                    setLeadSearch('');
+                    setLeadServiceFilter('');
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-800/70 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-zinc-200 truncate">{lead.business_name}</p>
+                    <p className="text-xs text-zinc-500">{lead.phone}{lead.city ? ` · ${lead.city}` : ''}{lead.service_type ? ` · ${lead.service_type}` : ''}</p>
+                  </div>
+                  <span className="text-xs font-data text-zinc-600 shrink-0">{lead.heat_score}</span>
+                </button>
+              ))}
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Batch Start Modal (Phase 7) */}
     {showBatchStart && (

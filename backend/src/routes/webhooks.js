@@ -218,6 +218,8 @@ router.post('/email-inbound', (req, res) => {
     [leadId]
   );
 
+  applyRules(leadId, 'email_replied');
+
   res.json({ ok: true, lead_id: leadId });
 });
 

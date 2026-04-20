@@ -692,7 +692,8 @@ async function flushOverdueNow() {
 
     try {
       if (step.channel === 'email') {
-        if (!enrollment.email || !emailService.isConfigured()) { failed++; continue; }
+        if (!enrollment.email) { skipped++; continue; }
+        if (!emailService.isConfigured()) { failed++; continue; }
         const subject = renderTemplate(template.subject, enrollment);
         const body = renderTemplate(template.body, enrollment);
         const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
@@ -703,7 +704,8 @@ async function flushOverdueNow() {
            JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
         );
       } else if (step.channel === 'sms') {
-        if (!enrollment.phone || !smsService.isConfigured()) { failed++; continue; }
+        if (!enrollment.phone) { skipped++; continue; }
+        if (!smsService.isConfigured()) { failed++; continue; }
         const body = renderTemplate(template.body, enrollment);
         const result = await smsService.sendSms(enrollment.phone, body);
         if (!result.success) { failed++; continue; }
