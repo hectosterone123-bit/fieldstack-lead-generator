@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2, CheckCheck, MailOpen, Repeat } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2, CheckCheck, MailOpen, Repeat, CalendarClock } from 'lucide-react';
 import type { Lead, LeadStatus, ServiceType } from '../../types';
 import { STATUS_LABELS, SERVICE_LABELS, SERVICE_COLORS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -56,6 +56,8 @@ export function LeadsTable({ onRowClick, preset }: Props) {
   });
 
   const [enrollSeqId, setEnrollSeqId] = useState<number | ''>('');
+  const [showCallbackPicker, setShowCallbackPicker] = useState(false);
+  const [callbackAt, setCallbackAt] = useState('');
 
   const deleteLead = useDeleteLead();
   const bulkUpdate = useBulkUpdateLeads();
@@ -512,6 +514,59 @@ export function LeadsTable({ onRowClick, preset }: Props) {
             >
               <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> Mark Contacted
             </button>
+            {/* Schedule Callback */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowCallbackPicker(v => !v)}
+                disabled={bulkUpdate.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/[0.06] rounded-lg disabled:opacity-40 transition-colors"
+              >
+                <CalendarClock className="w-3.5 h-3.5 text-blue-400" /> Callback
+              </button>
+              {showCallbackPicker && (
+                <>
+                  <input
+                    type="datetime-local"
+                    value={callbackAt}
+                    onChange={e => setCallbackAt(e.target.value)}
+                    className="bg-zinc-800 border border-white/[0.08] rounded-lg px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
+                  />
+                  <button
+                    onClick={() => {
+                      if (!callbackAt) return;
+                      bulkUpdate.mutate(
+                        { ids: Array.from(selected), action: 'callback', value: new Date(callbackAt).toISOString() },
+                        { onSuccess: (data) => { toast(`Scheduled callback for ${(data as any).affected} lead(s)`); setShowCallbackPicker(false); setCallbackAt(''); setSelected(new Set()); } }
+                      );
+                    }}
+                    disabled={!callbackAt || bulkUpdate.isPending}
+                    className="px-2 py-1.5 text-sm bg-orange-500 hover:bg-orange-400 text-white rounded-lg disabled:opacity-40 transition-colors"
+                  >
+                    Set
+                  </button>
+                </>
+              )}
+            </div>
+            {/* Snooze */}
+            <select
+              onChange={e => {
+                if (!e.target.value) return;
+                const days = e.target.value;
+                bulkUpdate.mutate(
+                  { ids: Array.from(selected), action: 'snooze', value: days },
+                  { onSuccess: (data) => { toast(`Snoozed ${(data as any).affected} lead(s) by ${days}d`); setSelected(new Set()); } }
+                );
+                e.target.value = '';
+              }}
+              disabled={bulkUpdate.isPending}
+              className="appearance-none bg-zinc-800 border border-white/[0.08] rounded-lg pl-3 pr-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:ring-1 focus:ring-orange-500/40 cursor-pointer"
+            >
+              <option value="">Snooze...</option>
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+            </select>
             <div className="flex items-center gap-1.5">
               <select
                 value={enrollSeqId}

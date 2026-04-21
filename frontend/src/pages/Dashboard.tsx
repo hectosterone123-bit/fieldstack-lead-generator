@@ -4,7 +4,7 @@ import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
-  ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map,
+  ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map, AlertTriangle,
 } from 'lucide-react';
 import { CallBriefModal } from '../components/leads/CallBriefModal';
 import { fetchStats } from '../lib/api';
@@ -256,6 +256,19 @@ export function Dashboard() {
           <Search className="w-4 h-4" /> Find Leads
         </Link>
       </div>
+
+      {/* Overdue callbacks alert */}
+      {(followups?.overdue?.length ?? 0) > 0 && (
+        <div className="mb-5 flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="text-sm font-medium">
+            {followups!.overdue.length} lead{followups!.overdue.length !== 1 ? 's' : ''} overdue for callback
+          </span>
+          <Link to="/callbacks" className="ml-auto text-xs text-red-400 hover:text-red-300 underline underline-offset-2">
+            View callbacks →
+          </Link>
+        </div>
+      )}
 
       {/* KPI Cards — Row 1: Lead Gen Health */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-3">

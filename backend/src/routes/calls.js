@@ -599,11 +599,13 @@ router.post('/schedule-callback', async (req, res) => {
       [lead_id, 'note', 'Callback scheduled', `Callback scheduled for ${callback_datetime}${notes ? `. ${notes}` : ''}`]
     );
 
-    // Send confirmation SMS if phone + configured
+    // Send confirmation SMS if phone + configured + setting enabled (default ON)
     let smsSent = false;
     try {
+      const autoSmsRow = db.get('SELECT value FROM settings WHERE key = ?', ['callback_auto_sms_enabled']);
+      const autoSmsEnabled = autoSmsRow?.value !== '0';
       const smsService = require('../services/smsService');
-      if (smsService.isConfigured() && lead.phone) {
+      if (autoSmsEnabled && smsService.isConfigured() && lead.phone) {
         const dt = new Date(callback_datetime);
         const formatted = dt.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
         const msg = `Got it! We'll call you back on ${formatted}. Talk soon.`;

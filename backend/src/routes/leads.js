@@ -166,6 +166,32 @@ router.patch('/bulk', (req, res, next) => {
       return res.json({ success: true, data: { affected } });
     }
 
+    if (action === 'callback') {
+      if (!value) return res.status(400).json({ success: false, error: 'value (ISO datetime) required' });
+      let affected = 0;
+      for (const id of ids) {
+        const lead = db.get('SELECT id FROM leads WHERE id = ?', [id]);
+        if (!lead) continue;
+        db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [value, id]);
+        affected++;
+      }
+      return res.json({ success: true, data: { affected } });
+    }
+
+    if (action === 'snooze') {
+      const days = parseInt(value, 10) || 1;
+      let affected = 0;
+      for (const id of ids) {
+        const lead = db.get('SELECT next_followup_at FROM leads WHERE id = ?', [id]);
+        if (!lead) continue;
+        const base = lead.next_followup_at ? new Date(lead.next_followup_at) : new Date();
+        base.setDate(base.getDate() + days);
+        db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [base.toISOString(), id]);
+        affected++;
+      }
+      return res.json({ success: true, data: { affected } });
+    }
+
     return res.status(400).json({ success: false, error: 'Invalid action' });
   } catch (err) { next(err); }
 });

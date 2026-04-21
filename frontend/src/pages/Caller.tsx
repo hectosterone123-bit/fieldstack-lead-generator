@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   PhoneOutgoing, PhoneOff, Mic, MicOff, Play,
   Phone, Clock, CheckCircle2, ArrowRight,
@@ -179,6 +180,7 @@ export function Caller() {
 
   const vapiRef = useRef<Vapi | null>(null);
   const activeCall = activeCalls.length > 0 ? activeCalls[0] : null;
+  const [searchParams] = useSearchParams();
 
   function decodeMulaw(encoded: Uint8Array): Float32Array {
     const pcm = new Float32Array(encoded.length);
@@ -510,6 +512,18 @@ export function Caller() {
       } catch { setManualScriptBody(''); }
     }
   };
+
+  // Pre-load a specific lead when navigating from /callbacks?lead_id=X
+  useEffect(() => {
+    const preloadId = searchParams.get('lead_id');
+    if (!preloadId) return;
+    fetchLead(Number(preloadId)).then(lead => {
+      if (lead) {
+        setCallerMode('manual');
+        selectManualLead(lead);
+      }
+    }).catch(() => {});
+  }, []); // mount-only
 
   const handleCoach = async (objection: string) => {
     if (!objection.trim()) return;

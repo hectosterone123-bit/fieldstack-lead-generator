@@ -54,6 +54,7 @@ export function Settings() {
   const [vapiCampaignCallsPerDay, setVapiCampaignCallsPerDay] = useState('0');
   const [missedCallTextbackEnabled, setMissedCallTextbackEnabled] = useState(false);
   const [missedCallTextbackMessage, setMissedCallTextbackMessage] = useState('');
+  const [callbackAutoSmsEnabled, setCallbackAutoSmsEnabled] = useState(true);
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [inboundCopied, setInboundCopied] = useState(false);
 
@@ -105,6 +106,7 @@ export function Settings() {
       setVapiCampaignCallsPerDay(settings.vapi_campaign_calls_per_day || '0');
       setMissedCallTextbackEnabled(settings.missed_call_textback_enabled === '1');
       setMissedCallTextbackMessage(settings.missed_call_textback_message || '');
+      setCallbackAutoSmsEnabled(settings.callback_auto_sms_enabled !== '0');
     }
   }, [settings]);
 
@@ -160,6 +162,7 @@ export function Settings() {
       { key: 'vapi_campaign_calls_per_day', value: vapiCampaignCallsPerDay },
       { key: 'missed_call_textback_enabled', value: missedCallTextbackEnabled ? '1' : '0' },
       { key: 'missed_call_textback_message', value: missedCallTextbackMessage },
+      { key: 'callback_auto_sms_enabled', value: callbackAutoSmsEnabled ? '1' : '0' },
     ]);
   }
 
@@ -967,6 +970,25 @@ export function Settings() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Callback Auto-SMS */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <PhoneOutgoing className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Callback Confirmation SMS</h2>
+            </div>
+            <button
+              onClick={() => setCallbackAutoSmsEnabled(!callbackAutoSmsEnabled)}
+              className={`relative w-9 h-5 rounded-full transition-colors ${callbackAutoSmsEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${callbackAutoSmsEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mt-2">
+            Auto-sends an SMS to the lead when you schedule a callback from the Caller page. Message: "Got it! We'll call you back on [date]. Talk soon."
+          </p>
         </div>
 
         {/* Scoring Rules */}

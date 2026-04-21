@@ -448,6 +448,9 @@ async function initDb() {
   // Migration: seed pre-built sequence template library
   seedTemplateLibrary();
 
+  // Migration: ensure Auto Outreach sequence templates exist and clear stale errors
+  repairAutoOutreachSequence();
+
   saveDb();
   return db;
 }
@@ -473,7 +476,7 @@ function repairSequenceTemplateIds() {
       const exists = get('SELECT id FROM templates WHERE id = ?', [step.template_id]);
       if (!exists) {
         const replacement = get(
-          'SELECT id FROM templates WHERE step_order = ? AND channel = ? AND is_default = 1 ORDER BY id ASC LIMIT 1',
+          'SELECT id FROM templates WHERE step_order = ? AND channel = ? ORDER BY is_default DESC, id ASC LIMIT 1',
           [step.order, step.channel]
         );
         if (replacement) {
@@ -484,11 +487,80 @@ function repairSequenceTemplateIds() {
     }
     if (changed) {
       db.run('UPDATE sequences SET steps = ? WHERE id = ?', [JSON.stringify(steps), seq.id]);
+      db.run(
+        "UPDATE lead_sequences SET last_error = NULL, last_error_at = NULL WHERE sequence_id = ? AND last_error LIKE 'Template not found%'",
+        [seq.id]
+      );
       repaired++;
       console.log(`[DB] Repaired template IDs in sequence: ${seq.name}`);
     }
   }
   if (repaired > 0) console.log(`[DB] Repaired ${repaired} sequence(s) with broken template references`);
+}
+
+function repairAutoOutreachSequence() {
+  const sequence = get("SELECT * FROM sequences WHERE name = 'Auto Outreach (5-Step)'");
+  if (!sequence) return;
+
+  const TEMPLATE_DEFS = [
+    {
+      order: 1, name: 'Auto Outreach — Hook',
+      subject: 'question for {business_name}',
+      body: `Hey {first_name},\n\nQuick question — when a homeowner fills out your contact form at 7pm on a Tuesday, how fast does {business_name} follow up?\n\nMost {service_type} contractors take 12–47 hours. By that time, the homeowner has called two other companies.\n\nI built an AI that texts back every new lead within 90 seconds, books the appointment, and works 24/7 while you're on job sites. Worth a 15-minute call this week?\n\n— {sender_name}\nFieldStack`,
+    },
+    {
+      order: 2, name: 'Auto Outreach — Proof',
+      subject: 'Re: question for {business_name}',
+      body: `{first_name}, following up —\n\nOne of my {service_type} clients in Texas was leaving roughly $8,000/month on the table from unanswered web leads. We turned on the AI response system and they booked 6 extra jobs the first month — same website traffic, zero extra ad spend.\n\nHappy to show you what that looks like for {business_name}: {booking_link}\n\n— {sender_name}`,
+    },
+    {
+      order: 3, name: 'Auto Outreach — Audit',
+      subject: 'free lead-response audit for {business_name}',
+      body: `{first_name}, different ask this time —\n\nI'll run a free lead-response audit for {business_name}. I'll test your contact form, measure the response time, and show you exactly how many leads you're likely losing per week.\n\nTakes 10 minutes to set up, no pitch. Want me to run it?\n\n— {sender_name}\nFieldStack`,
+    },
+    {
+      order: 4, name: 'Auto Outreach — Scarcity',
+      subject: 'one spot left in {city}',
+      body: `{first_name}, I keep my contractor count small by market so results stay strong.\n\nI have one open spot for {city} this month. If {business_name} wants it before another {service_type} company grabs it: {booking_link}\n\nIf not, no hard feelings.\n\n— {sender_name}`,
+    },
+    {
+      order: 5, name: 'Auto Outreach — Breakup',
+      subject: 'closing your file',
+      body: `{first_name}, I'll stop reaching out after this.\n\nIf {business_name} ever decides to stop losing jobs to slow response times, I'm one reply away.\n\n— {sender_name}\nFieldStack`,
+    },
+  ];
+
+  let steps;
+  try { steps = JSON.parse(sequence.steps || '[]'); } catch { return; }
+
+  let changed = false;
+  for (const step of steps) {
+    const exists = step.template_id && get('SELECT id FROM templates WHERE id = ?', [step.template_id]);
+    if (exists) continue;
+
+    const def = TEMPLATE_DEFS.find(d => d.order === step.order);
+    if (!def) continue;
+
+    let template = get('SELECT id FROM templates WHERE name = ?', [def.name]);
+    if (!template) {
+      const result = db.run(
+        'INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)',
+        [def.name, 'email', 'new', step.order, def.subject, def.body]
+      );
+      template = { id: Number(result.lastInsertRowid) };
+    }
+    step.template_id = template.id;
+    changed = true;
+  }
+
+  if (changed) {
+    db.run('UPDATE sequences SET steps = ? WHERE id = ?', [JSON.stringify(steps), sequence.id]);
+    db.run(
+      "UPDATE lead_sequences SET last_error = NULL, last_error_at = NULL WHERE sequence_id = ? AND last_error LIKE 'Template not found%'",
+      [sequence.id]
+    );
+    console.log('[DB] Repaired Auto Outreach (5-Step) template references and cleared stale errors');
+  }
 }
 
 function getLoomScriptTemplates() {

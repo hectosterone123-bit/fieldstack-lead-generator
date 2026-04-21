@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing, BookOpen, PhoneIncoming } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useFollowups } from '../../hooks/useLeads';
 
 const navGroups = [
   {
@@ -16,6 +17,7 @@ const navGroups = [
     label: 'Outreach',
     items: [
       { to: '/caller', icon: PhoneOutgoing, label: 'AI Caller' },
+      { to: '/callbacks', icon: PhoneIncoming, label: 'Callbacks' },
       { to: '/prospecting', icon: BookOpen, label: 'My Script' },
       { to: '/campaigns', icon: Target, label: 'Campaigns' },
       { to: '/sms', icon: MessageSquare, label: 'SMS Inbox' },
@@ -32,6 +34,9 @@ const navGroups = [
 ];
 
 export function Sidebar() {
+  const { data: followups } = useFollowups();
+  const callbackCount = (followups?.overdue?.length ?? 0) + (followups?.due_today?.length ?? 0);
+
   return (
     <aside className="w-56 flex-shrink-0 bg-zinc-950 border-r border-white/[0.04] flex flex-col h-screen sticky top-0 relative">
       {/* Top accent line */}
@@ -77,6 +82,11 @@ export function Sidebar() {
                       )}
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="font-medium">{label}</span>
+                      {to === '/callbacks' && callbackCount > 0 && (
+                        <span className="ml-auto text-[10px] font-semibold bg-orange-500/20 text-orange-400 rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none">
+                          {callbackCount}
+                        </span>
+                      )}
                     </>
                   )}
                 </NavLink>
