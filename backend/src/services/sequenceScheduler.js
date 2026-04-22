@@ -79,6 +79,7 @@ function startSequenceScheduler() {
       applyNoActivityRules();
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
+      await sendAlert('Daily digest error', `Digest failed: ${err.message}`);
     }
   }, TZ);
 
@@ -105,6 +106,7 @@ function startSequenceScheduler() {
       console.log('[Campaign] Auto-dialed next in queue');
     } catch (err) {
       console.error('[Campaign] Error:', err.message);
+      await sendAlert('Campaign auto-dial error', `Campaign cron failed: ${err.message}`);
     }
   }, TZ);
 
@@ -134,6 +136,7 @@ function startSequenceScheduler() {
       }
     } catch (err) {
       console.error('[Scheduler] Callback alarm error:', err.message);
+      await sendAlert('Callback alarm error', `Callback alarm failed: ${err.message}`);
     }
   });
 

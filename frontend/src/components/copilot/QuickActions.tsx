@@ -7,12 +7,14 @@ interface Props {
 const SUGGESTIONS: Record<string, string[]> = {
   '/': [
     'What should I focus on today?',
-    'Send the intro email to all new leads',
+    "Show today's call history",
     'Which leads need follow-up?',
+    'Text all new leads: [your message]',
   ],
   '/leads': [
     'Find my hottest leads',
     'Show overdue follow-ups',
+    'Add a new lead',
     'What sequences are available?',
   ],
   '/finder': [
@@ -31,8 +33,10 @@ export function QuickActions({ onSelect }: Props) {
   const leadSuggestions = context.lead_id && context.lead_name
     ? [
         `Summarize ${context.lead_name}`,
-        `Send ${context.lead_name} an email`,
+        `Call ${context.lead_name} now`,
         `Send ${context.lead_name} an SMS`,
+        `Show SMS thread for ${context.lead_name}`,
+        `Show call history for ${context.lead_name}`,
         `Enroll ${context.lead_name} in a sequence`,
       ]
     : null;

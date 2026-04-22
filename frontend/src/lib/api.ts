@@ -216,6 +216,17 @@ export async function fetchStats(): Promise<Stats> {
   return request('/stats');
 }
 
+export async function fetchSetupStatus(): Promise<{
+  complete: boolean;
+  checks: {
+    resend_configured: boolean; twilio_configured: boolean;
+    has_leads: boolean; has_sequence: boolean;
+    has_enrollments: boolean; booking_link_set: boolean;
+  };
+}> {
+  return request('/stats/setup');
+}
+
 // ─── Chat / Copilot ─────────────────────────────────────────────────────────
 
 export async function fetchConversations(): Promise<Conversation[]> {
@@ -606,8 +617,8 @@ export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string)
   return request('/calls/bulk/outcome', { method: 'PATCH', body: JSON.stringify({ call_ids: callIds, outcome }) });
 }
 
-export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number): Promise<{ queued: number }> {
-  return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId }) });
+export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number, filter?: string): Promise<{ queued: number }> {
+  return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId, filter }) });
 }
 
 export async function logManualCall(leadId: number, outcome?: string, durationSeconds?: number, templateId?: number): Promise<{ call_id: number }> {
@@ -636,6 +647,14 @@ export async function coachCall(lead_id: number | null, objection: string, scrip
 
 export async function fetchTemplateStats(): Promise<Array<{ template_id: number; template_name: string; total: number; interested: number; callbacks: number; no_contact: number; not_interested: number; conversion_rate: number; callback_rate: number; no_contact_rate: number }>> {
   return request('/calls/stats/templates');
+}
+
+export async function fetchCallFunnel(days = 30): Promise<{
+  days: number; total: number; pickups: number; interested: number;
+  connect_rate: number; interest_rate: number;
+  no_answer: number; voicemail: number; not_interested: number; gatekeeper: number; avg_duration: number;
+}> {
+  return request(`/calls/funnel?days=${days}`);
 }
 
 // ─── Scoring Rules ────────────────────────────────────────────────────────────

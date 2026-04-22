@@ -34,35 +34,16 @@ Work through **one item at a time**. Mark done with ✅.
 ## Sprint 4 — Analytics (est. ~5-7 hrs total)
 *Coaching + accountability*
 
-- [ ] **4A. Call outcome funnel** (3-4 hrs)
-  - New widget in Dashboard or `/analytics` page
-  - Shows: Total Dials → Pickups → Interested → Booked (with %)
-  - Backend: `GET /api/calls/funnel` aggregates by outcome_type
-  - Frontend: simple funnel bars (no heavy chart library needed)
-
-- [ ] **4B. Sequence funnel analytics** (3-4 hrs)
-  - Per-sequence: Step 1 sent → opened → clicked → replied (%)
-  - Backend: query `email_events` grouped by `sequence_step`
-  - Frontend: table view in `Campaigns.tsx` or new Analytics tab
+- ✅ **4A. Call outcome funnel** — `GET /api/calls/funnel` endpoint + `CallFunnel` widget on Dashboard (Dials → Pickups → Interested bars, Connect Rate / Interest Rate KPIs)
+- ✅ **4B. Sequence funnel analytics** — Already built: Sequences page has full Analytics tab with per-step sent/opened/clicked/replied bars
 
 ---
 
 ## Sprint 5 — Polish (est. ~5 hrs total)
 
-- [ ] **5A. Caller queue presets** (1.5-2 hrs)
-  - Quick-start presets in Caller "Add Leads" modal: [All New], [HVAC Hot], [Callbacks Due], [This Week]
-  - Frontend: preset chips above lead list in Add Leads modal
-  - No backend changes needed
-
-- [ ] **5B. Call recording playback** (2-3 hrs)
-  - If `recording_url` exists on call activity → show `<audio>` player
-  - Check if VAPI stores this; if yes, fetch + render in `LeadDrawer.tsx`
-  - No backend changes if URL is already stored in activities metadata
-
-- [ ] **5C. Missed call text-back** (2 hrs)
-  - When Twilio reports a missed inbound call → auto-send SMS to that number
-  - "Hey, I just tried to reach you about your [service] request — good time to talk?"
-  - Backend: Twilio voice webhook handler → detect `CallStatus=no-answer` on inbound
+- ✅ **5A. Caller queue presets** — 4 preset chips (All New, HVAC Hot, Callbacks Due, This Week) in Add Leads modal; backend `auto-load` extended with `filter` param for callbacks_due/this_week queries
+- ✅ **5B. Call recording playback** — `call_attempt` activities in LeadDrawer now show duration, outcome badge, and `<audio>` player if `recording_url` exists in activity metadata
+- ✅ **5C. Missed call text-back** — Fixed webhook to use `smsService.sendSms()` instead of email; Settings UI + DB seed already existed
 
 ---
 

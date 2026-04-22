@@ -2,17 +2,18 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
-  Clock, CheckCircle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
+  Clock, CheckCircle, CheckCircle2, Circle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
   ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map, AlertTriangle,
 } from 'lucide-react';
 import { CallBriefModal } from '../components/leads/CallBriefModal';
-import { fetchStats } from '../lib/api';
+import { fetchStats, fetchSetupStatus } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatCurrency, formatRelativeTime, cn } from '../lib/utils';
 import type { Lead, LeadStatus, ActivityType, HotSignalLead, RepliedLead } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
 import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
+import { useCallFunnel } from '../hooks/useCalls';
 import { useToast } from '../lib/toast';
 import { OutreachQueue } from '../components/sequences/OutreachQueue';
 
@@ -85,6 +86,98 @@ interface SeqPerf {
   sequence_id: number;
   sequence_name: string;
   steps: StepPerf[];
+}
+
+const CHECKLIST_ITEMS = [
+  { key: 'resend_configured',  label: 'Connect email (Resend)',        desc: 'Add API key + sender address',              href: '/settings' },
+  { key: 'twilio_configured',  label: 'Connect calling & SMS (Twilio)', desc: 'Add account SID, auth token, phone number', href: '/settings' },
+  { key: 'has_leads',          label: 'Import your first leads',        desc: 'Use the Finder or CSV import',              href: '/finder' },
+  { key: 'has_sequence',       label: 'Create a sequence',              desc: 'Set up your outreach cadence',              href: '/sequences' },
+  { key: 'has_enrollments',    label: 'Enroll leads in a sequence',     desc: 'Start your outreach campaign',              href: '/campaigns' },
+  { key: 'booking_link_set',   label: 'Add your booking link',          desc: 'Used as {booking_link} in templates',       href: '/settings' },
+];
+
+function OnboardingChecklist({ checks }: { checks: Record<string, boolean> }) {
+  const done = Object.values(checks).filter(Boolean).length;
+  const total = Object.keys(checks).length;
+  return (
+    <div className="bg-zinc-900 border border-orange-500/20 rounded-xl shadow-surface mb-6 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+        <CheckCircle2 className="w-4 h-4 text-orange-400" />
+        <h2 className="text-zinc-300 font-medium text-sm">Setup Checklist</h2>
+        <span className="ml-auto text-xs text-zinc-500">{done}/{total} complete</span>
+      </div>
+      <div className="divide-y divide-white/[0.03]">
+        {CHECKLIST_ITEMS.map(item => {
+          const isDone = checks[item.key];
+          return (
+            <div key={item.key} className="flex items-center gap-3 px-5 py-3">
+              {isDone
+                ? <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                : <Circle className="w-4 h-4 text-zinc-600 flex-shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <p className={cn('text-sm', isDone ? 'text-zinc-500 line-through' : 'text-zinc-300')}>{item.label}</p>
+                {!isDone && <p className="text-[10px] text-zinc-600 mt-0.5">{item.desc}</p>}
+              </div>
+              {!isDone && (
+                <Link to={item.href} className="text-[10px] text-orange-400 hover:text-orange-300 transition-colors flex-shrink-0">
+                  Set up →
+                </Link>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CallFunnel({ funnel }: {
+  funnel: { total: number; pickups: number; interested: number; connect_rate: number; interest_rate: number };
+}) {
+  const bars = [
+    { label: 'Dials',      value: funnel.total,      pct: 100, color: 'bg-blue-500/60' },
+    { label: 'Pickups',    value: funnel.pickups,    pct: funnel.total > 0 ? Math.round((funnel.pickups / funnel.total) * 100) : 0, color: 'bg-violet-500/60' },
+    { label: 'Interested', value: funnel.interested, pct: funnel.total > 0 ? Math.round((funnel.interested / funnel.total) * 100) : 0, color: 'bg-emerald-500/60' },
+  ];
+  const pills = [
+    { label: 'Total Dials',    value: funnel.total,                                  color: 'text-blue-400',    bg: 'bg-blue-500/10' },
+    { label: 'Connect Rate',   value: `${funnel.connect_rate}%`,  color: funnel.connect_rate >= 30 ? 'text-emerald-400' : 'text-amber-400',   bg: funnel.connect_rate >= 30 ? 'bg-emerald-500/10' : 'bg-amber-500/10' },
+    { label: 'Interest Rate',  value: `${funnel.interest_rate}%`, color: funnel.interest_rate >= 20 ? 'text-emerald-400' : funnel.interest_rate >= 10 ? 'text-amber-400' : 'text-red-400', bg: funnel.interest_rate >= 20 ? 'bg-emerald-500/10' : funnel.interest_rate >= 10 ? 'bg-amber-500/10' : 'bg-red-500/10' },
+  ];
+  return (
+    <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+        <Phone className="w-4 h-4 text-orange-400" />
+        <h2 className="text-zinc-300 font-medium text-sm">Call Funnel</h2>
+        <span className="ml-auto text-[10px] text-zinc-600 bg-zinc-800 px-2 py-0.5 rounded-full">Last 30 days</span>
+      </div>
+      <div className="grid grid-cols-3 gap-3 px-5 py-4">
+        {pills.map(p => (
+          <div key={p.label} className="flex items-center gap-2.5">
+            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0', p.bg)}>
+              <Phone className={cn('w-3.5 h-3.5', p.color)} />
+            </div>
+            <div>
+              <p className="text-lg font-bold font-data text-white leading-none">{p.value}</p>
+              <p className="text-[10px] text-zinc-500 mt-0.5">{p.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-white/[0.04] px-5 py-4 space-y-3">
+        {bars.map(b => (
+          <div key={b.label} className="flex items-center gap-3">
+            <span className="text-[10px] text-zinc-500 w-16 flex-shrink-0">{b.label}</span>
+            <div className="flex-1 h-2 bg-zinc-800/60 rounded-full overflow-hidden">
+              <div className={cn('h-full rounded-full', b.color)} style={{ width: `${b.pct}%` }} />
+            </div>
+            <span className="text-xs font-data text-zinc-400 w-8 text-right">{b.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function OutreachPerformance({ summary, stepPerformance, requeueEligible }: {
@@ -192,6 +285,12 @@ export function Dashboard() {
     queryFn: fetchStats,
   });
   const { data: followups } = useFollowups();
+  const { data: callFunnel } = useCallFunnel();
+  const { data: setupStatus } = useQuery({
+    queryKey: ['setup-status'],
+    queryFn: fetchSetupStatus,
+    staleTime: 60_000,
+  });
   const snoozeLead = useSnoozeLead();
   const logActivity = useLogActivity();
   const patchStatus = usePatchStatus();
@@ -256,6 +355,11 @@ export function Dashboard() {
           <Search className="w-4 h-4" /> Find Leads
         </Link>
       </div>
+
+      {/* Setup Checklist — shown until all items complete */}
+      {setupStatus && !setupStatus.complete && (
+        <OnboardingChecklist checks={setupStatus.checks} />
+      )}
 
       {/* Overdue callbacks alert */}
       {(followups?.overdue?.length ?? 0) > 0 && (
@@ -515,6 +619,11 @@ export function Dashboard() {
           stepPerformance={stats.step_performance || []}
           requeueEligible={stats.requeue_eligible || 0}
         />
+      )}
+
+      {/* Call Funnel */}
+      {callFunnel && callFunnel.total > 0 && (
+        <CallFunnel funnel={callFunnel} />
       )}
 
       {/* Reply Alerts — leads who replied to email, no follow-up yet */}

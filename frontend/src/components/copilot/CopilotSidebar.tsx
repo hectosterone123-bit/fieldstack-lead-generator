@@ -24,6 +24,14 @@ const TOOL_LABELS: Record<string, string> = {
   enroll_in_sequence: 'Enrolling in sequence',
   send_email: 'Sending email',
   bulk_send_email: 'Sending bulk emails',
+  start_ai_call: 'Starting AI call',
+  get_call_history: 'Loading call history',
+  create_lead: 'Creating lead',
+  get_sms_conversation: 'Loading SMS thread',
+  bulk_sms: 'Sending bulk SMS',
+  validate_phone: 'Validating phone',
+  schedule_callback: 'Scheduling callback',
+  set_dnc: 'Marking Do Not Call',
 };
 
 interface Props {

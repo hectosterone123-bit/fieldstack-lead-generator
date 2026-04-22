@@ -501,7 +501,7 @@ router.post('/twilio-call-status', async (req, res) => {
   const enabledSetting = db.get("SELECT value FROM settings WHERE key = 'missed_call_textback_enabled'");
   if (!enabledSetting || enabledSetting.value !== '1') return res.sendStatus(200);
 
-  if (!emailService.isConfigured()) return res.sendStatus(200);
+  if (!smsService.isConfigured()) return res.sendStatus(200);
 
   // Find lead by phone number
   const normalizedTo = toNumber.replace(/\D/g, '');
@@ -509,7 +509,7 @@ router.post('/twilio-call-status', async (req, res) => {
     "SELECT * FROM leads WHERE replace(replace(replace(replace(phone, ' ', ''), '-', ''), '(', ''), ')', '') LIKE ?",
     [`%${normalizedTo.slice(-10)}`]
   );
-  if (!lead || !lead.email || lead.unsubscribed_at || lead.email_invalid_at) return res.sendStatus(200);
+  if (!lead || !lead.phone) return res.sendStatus(200);
 
   // Get custom message or use default
   const msgSetting = db.get("SELECT value FROM settings WHERE key = 'missed_call_textback_message'");
@@ -524,14 +524,13 @@ router.post('/twilio-call-status', async (req, res) => {
   // Simple variable substitution
   body = body.replace(/{sender_name}/g, senderName).replace(/{service_type}/g, serviceType);
 
-  const subject = `Tried reaching you — ${lead.business_name || lead.first_name || 'Hi'}`;
-  const result = await emailService.sendEmail(lead.email, subject, body, { leadId: lead.id });
+  const smsResult = await smsService.sendSms(lead.phone, body);
 
-  if (result.success) {
+  if (smsResult.success) {
     db.run(
       'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-      [lead.id, 'email_sent', 'Missed call follow-up', `Auto-email sent after ${callStatus} call`,
-       JSON.stringify({ resend_message_id: result.messageId, call_status: callStatus })]
+      [lead.id, 'sms_sent', 'Missed call text-back', `Auto-SMS sent after ${callStatus} call`,
+       JSON.stringify({ twilio_sid: smsResult.sid, call_status: callStatus })]
     );
     db.run(
       'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',

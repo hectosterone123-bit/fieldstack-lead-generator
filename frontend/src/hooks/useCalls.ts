@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchActiveCalls, fetchCallHistory, fetchCallQueue, fetchTemplateStats,
+  fetchActiveCalls, fetchCallHistory, fetchCallQueue, fetchTemplateStats, fetchCallFunnel,
   startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
   bulkUpdateCallOutcomes, autoLoadQueue, whisperCall,
 } from '../lib/api';
@@ -18,6 +18,13 @@ export function useCallHistory() {
   return useQuery({
     queryKey: ['call-history'],
     queryFn: fetchCallHistory,
+  });
+}
+
+export function useCallFunnel(days = 30) {
+  return useQuery({
+    queryKey: ['call-funnel', days],
+    queryFn: () => fetchCallFunnel(days),
   });
 }
 
@@ -152,8 +159,8 @@ export function useAutoLoadQueue() {
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ serviceType, count, templateId }: { serviceType?: string; count?: number; templateId: number }) =>
-      autoLoadQueue(serviceType, count, templateId),
+    mutationFn: ({ serviceType, count, templateId, filter }: { serviceType?: string; count?: number; templateId: number; filter?: string }) =>
+      autoLoadQueue(serviceType, count, templateId, filter),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['call-queue'] });
       toast(`${data.queued} leads queued`);

@@ -2122,6 +2122,31 @@ export function Caller() {
               <h3 className="text-sm font-medium text-zinc-200">Add Leads to Queue</h3>
               <span className="text-xs text-zinc-500">{selectedLeadIds.size} selected</span>
             </div>
+            {/* Quick presets */}
+            <div className="px-4 py-2.5 border-b border-white/[0.04] flex flex-wrap gap-2 items-center">
+              <span className="text-[10px] text-zinc-600 mr-1">Quick load:</span>
+              {[
+                { label: 'All New', serviceType: undefined as string | undefined, filter: undefined as string | undefined },
+                { label: 'HVAC Hot', serviceType: 'hvac', filter: undefined as string | undefined },
+                { label: 'Callbacks Due', serviceType: undefined as string | undefined, filter: 'callbacks_due' },
+                { label: 'This Week', serviceType: undefined as string | undefined, filter: 'this_week' },
+              ].map(p => (
+                <button
+                  key={p.label}
+                  disabled={!selectedScript}
+                  onClick={() => {
+                    if (!selectedScript) return;
+                    autoLoadQueue.mutate(
+                      { serviceType: p.serviceType, count: 10, templateId: selectedScript, filter: p.filter },
+                      { onSuccess: () => setShowAddLeads(false) }
+                    );
+                  }}
+                  className="px-3 py-1 rounded-full text-xs border border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-orange-500/40 transition-colors disabled:opacity-30"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
             <div className="px-4 py-3 border-b border-white/[0.04] flex items-center gap-2">
               <input
                 type="text"

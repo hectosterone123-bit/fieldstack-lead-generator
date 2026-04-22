@@ -57,7 +57,10 @@ IMPORTANT RULES FOR ACTIONS:
 - Before calling bulk_send_email: call search_leads with the same status/service_type filter to show which leads will receive it and the count. Say "I'll send [template name] to X leads: [list names]. Should I proceed?" Wait for explicit confirmation before sending.
 - Never bulk send email without confirming the count and template name first.
 - Before calling bulk_personalized_send: call search_leads first to show the user which leads will be targeted. Say "I'll send personalized emails to X leads: [list names] using [template]. Each email will be uniquely written. Should I proceed?" Wait for explicit confirmation.
-- Use personalize_email to preview a single personalized email before sending. Show the user the subject and first 200 chars of the body.`;
+- Use personalize_email to preview a single personalized email before sending. Show the user the subject and first 200 chars of the body.
+- Before calling start_ai_call: use get_lead to confirm the lead's name and phone number. Ask "Should I start an AI call to [Name] at [phone]?" and wait for explicit confirmation (yes, call them, go ahead) before calling the tool.
+- Before calling bulk_sms: call search_leads with the same status/service_type filter to show which leads will receive it. Say "I'll text [X] leads: [list names]. Message: '[msg]'. Should I proceed?" Wait for explicit confirmation before sending.
+- Before calling set_dnc: confirm the lead name. Say "Are you sure you want to mark [Name] as Do Not Call? This will stop all future calls and pause their sequences." Wait for yes.`;
 
 // Tool definitions (converted to OpenAI function format)
 const tools = [
@@ -313,6 +316,132 @@ const tools = [
           service_type: { type: 'string', description: 'Filter by service type (optional). E.g. "hvac", "roofing"' }
         },
         required: ['template_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_ai_call',
+      description: 'Start a VAPI AI call to a lead. IMPORTANT: Always confirm the lead name and phone number first. Ask "Should I start an AI call to [Name] at [phone]?" and wait for explicit yes before calling.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'ID of the lead to call' },
+          template_id: { type: 'integer', description: 'Optional call script template ID to use' }
+        },
+        required: ['lead_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_call_history',
+      description: 'Get past call records. If lead_id is provided, returns calls for that lead. Otherwise returns today\'s calls across all leads.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'Optional lead ID to filter calls for a specific lead' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_lead',
+      description: 'Create a new lead in the CRM. Use when the user says "add a lead", "create a contact", or provides business details to add.',
+      parameters: {
+        type: 'object',
+        properties: {
+          business_name: { type: 'string', description: 'Business name (required)' },
+          phone: { type: 'string', description: 'Phone number' },
+          email: { type: 'string', description: 'Email address' },
+          city: { type: 'string', description: 'City' },
+          state: { type: 'string', description: 'State abbreviation (e.g. TX)' },
+          service_type: { type: 'string', enum: ['hvac', 'plumbing', 'electrical', 'roofing', 'landscaping', 'pest_control', 'general'], description: 'Service type (default: hvac)' },
+          website: { type: 'string', description: 'Website URL' },
+          notes: { type: 'string', description: 'Initial notes' },
+          estimated_value: { type: 'integer', description: 'Estimated deal value in dollars (default: 2000)' }
+        },
+        required: ['business_name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_sms_conversation',
+      description: 'Get the SMS message thread for a lead. Shows all inbound and outbound texts.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' }
+        },
+        required: ['lead_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bulk_sms',
+      description: 'Send an SMS to multiple leads matching a filter. IMPORTANT: Always call search_leads first with same filters to show which leads will receive it. Say "I\'ll text X leads: [names]. Message: [msg]. Should I proceed?" and wait for explicit yes before calling.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'SMS message body. Max 160 characters. No emojis.' },
+          status: { type: 'string', enum: ['new', 'contacted', 'qualified', 'proposal_sent', 'booked', 'lost', 'closed_won'], description: 'Filter by lead status (optional)' },
+          service_type: { type: 'string', enum: ['hvac', 'plumbing', 'electrical', 'roofing', 'landscaping', 'pest_control', 'general'], description: 'Filter by service type (optional)' },
+          limit: { type: 'integer', description: 'Max leads to text (default 10, max 25)' }
+        },
+        required: ['message']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'validate_phone',
+      description: 'Validate a lead\'s phone number using Twilio Lookup v2. Checks if the number is valid and identifies the line type (mobile, landline, voip).',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' }
+        },
+        required: ['lead_id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'schedule_callback',
+      description: 'Schedule a callback for a lead at a specific date and time. Updates the lead\'s follow-up date and optionally sends a confirmation SMS.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          callback_datetime: { type: 'string', description: 'ISO 8601 datetime string for the callback (e.g. 2026-04-23T14:00:00)' },
+          notes: { type: 'string', description: 'Optional notes about the callback' }
+        },
+        required: ['lead_id', 'callback_datetime']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_dnc',
+      description: 'Mark a lead as Do Not Call (DNC). Stops all future calling attempts and pauses any active sequences for that lead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'integer', description: 'The lead ID' },
+          reason: { type: 'string', description: 'Optional reason for the DNC (e.g. "asked not to be called", "wrong number")' }
+        },
+        required: ['lead_id']
       }
     }
   }
@@ -713,6 +842,218 @@ async function executeTool(toolName, input) {
       }
 
       return { success: true, message: `Sent ${sent} email${sent !== 1 ? 's' : ''}${failed > 0 ? `, ${failed} failed` : ''}. New leads auto-advanced to "contacted".` };
+    }
+
+    case 'start_ai_call': {
+      const { lead_id, template_id } = input;
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (!lead.phone) return { error: `${lead.business_name} has no phone number on file` };
+      if (lead.dnc_at) return { error: `${lead.business_name} is on the Do Not Call list` };
+
+      const vapiService = require('./vapiService');
+      if (!vapiService.isConfigured()) return { error: 'VAPI is not configured (missing VAPI_API_KEY)' };
+
+      let scriptBody = 'You are a sales representative making a cold call. Be direct, professional, and value-focused. Keep the conversation under 3 minutes.';
+      if (template_id) {
+        const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+        if (template) {
+          const { renderTemplate } = require('./templateService');
+          scriptBody = renderTemplate(template.body, lead);
+        }
+      }
+
+      const contextPrefix = `You are calling ${lead.business_name || 'a contractor'}${lead.city ? ` in ${lead.city}, ${lead.state}` : ''}. Their service type is ${lead.service_type || 'general contracting'}.\n\n`;
+      const fullScript = contextPrefix + scriptBody;
+
+      const result = await vapiService.startCall(lead, fullScript);
+      if (!result.success) return { error: result.error || 'Failed to start call' };
+
+      db.run(
+        'INSERT INTO calls (lead_id, template_id, vapi_call_id, status, monitor_listen_url, monitor_control_url, started_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        [lead_id, template_id || null, result.callId, result.status || 'queued', result.listenUrl || null, result.controlUrl || null]
+      );
+
+      return { success: true, message: `AI call started to ${lead.business_name} (${lead.phone}). Status: ${result.status}`, vapi_call_id: result.callId };
+    }
+
+    case 'get_call_history': {
+      const { lead_id } = input;
+      let calls;
+      if (lead_id) {
+        calls = db.all(
+          `SELECT c.id, c.status, c.outcome, c.duration_seconds, c.summary, substr(c.transcript, 1, 300) as transcript_preview, c.started_at, c.ended_at, c.source, l.business_name, l.phone
+           FROM calls c JOIN leads l ON l.id = c.lead_id
+           WHERE c.lead_id = ? ORDER BY c.created_at DESC LIMIT 10`,
+          [lead_id]
+        );
+      } else {
+        calls = db.all(
+          `SELECT c.id, c.status, c.outcome, c.duration_seconds, c.summary, substr(c.transcript, 1, 300) as transcript_preview, c.started_at, c.ended_at, c.source, l.business_name, l.phone
+           FROM calls c JOIN leads l ON l.id = c.lead_id
+           WHERE date(c.created_at) = date('now') ORDER BY c.created_at DESC LIMIT 10`
+        );
+      }
+      return { calls, count: calls.length };
+    }
+
+    case 'create_lead': {
+      const {
+        business_name, phone, email, city, state,
+        service_type = 'hvac', website, notes, estimated_value = 2000
+      } = input;
+
+      if (!business_name) return { error: 'business_name is required' };
+
+      const has_website = website ? 1 : 0;
+      const result = db.run(
+        `INSERT INTO leads (business_name, phone, email, city, state, service_type, website, has_website, estimated_value, notes, source, status, heat_score)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', 'new', 0)`,
+        [business_name, phone || null, email || null, city || null, state || null, service_type, website || null, has_website, estimated_value, notes || null]
+      );
+
+      const newLead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
+      if (!newLead) return { error: 'Failed to create lead' };
+
+      const { computeInitialHeatScore } = require('./heatScoreService');
+      const score = computeInitialHeatScore(newLead);
+      db.run('UPDATE leads SET heat_score = ? WHERE id = ?', [score, newLead.id]);
+
+      db.run(
+        "INSERT INTO activities (lead_id, type, title) VALUES (?, 'import', 'Lead created via Sam AI')",
+        [newLead.id]
+      );
+
+      return { success: true, lead: { ...newLead, heat_score: score }, message: `Created lead: ${business_name} (ID: ${newLead.id}, heat score: ${score})` };
+    }
+
+    case 'get_sms_conversation': {
+      const { lead_id } = input;
+      const lead = db.get('SELECT id, business_name, phone FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      const messages = db.all(
+        'SELECT id, direction, body, status, created_at FROM sms_messages WHERE lead_id = ? ORDER BY created_at ASC LIMIT 20',
+        [lead_id]
+      );
+
+      return { lead: { id: lead.id, business_name: lead.business_name, phone: lead.phone }, messages, count: messages.length };
+    }
+
+    case 'bulk_sms': {
+      const { message, status, service_type, limit } = input;
+      if (!message || message.length > 160) return { error: 'Message must be 1–160 characters' };
+
+      const smsService = require('./smsService');
+      if (!smsService.isConfigured()) return { error: 'SMS not configured (missing TWILIO_ACCOUNT_SID)' };
+
+      const conditions = ["phone IS NOT NULL AND phone != ''"];
+      const params = [];
+      if (status) { conditions.push('status = ?'); params.push(status); }
+      if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
+
+      const maxLeads = Math.min(limit || 10, 25);
+      const leads = db.all(
+        `SELECT id, business_name, phone FROM leads WHERE ${conditions.join(' AND ')} AND dnc_at IS NULL ORDER BY heat_score DESC LIMIT ?`,
+        [...params, maxLeads]
+      );
+
+      if (leads.length === 0) return { error: 'No leads match that filter with a valid phone number' };
+
+      let sent = 0, failed = 0;
+      for (const lead of leads) {
+        try {
+          const result = await smsService.sendSms(lead.phone, message);
+          if (result.success) {
+            sent++;
+            const normalized = smsService.normalizePhone(lead.phone);
+            db.run(
+              "INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status) VALUES (?, 'outbound', ?, ?, ?, ?, 'sent')",
+              [lead.id, process.env.TWILIO_PHONE_NUMBER || '', normalized, message, result.sid]
+            );
+            db.run(
+              "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'sms_sent', 'Bulk SMS sent via Sam AI', ?)",
+              [lead.id, message.substring(0, 100)]
+            );
+          } else { failed++; }
+        } catch { failed++; }
+      }
+
+      return { success: true, message: `Sent SMS to ${sent} lead${sent !== 1 ? 's' : ''}${failed > 0 ? `, ${failed} failed` : ''}.` };
+    }
+
+    case 'validate_phone': {
+      const { lead_id } = input;
+      const lead = db.get('SELECT id, business_name, phone FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (!lead.phone) return { error: `${lead.business_name} has no phone number on file` };
+
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      if (!accountSid || !authToken) return { error: 'Twilio credentials not configured' };
+
+      const phone = lead.phone.replace(/[^\d+]/g, '');
+      const e164 = phone.startsWith('+') ? phone : '+1' + phone.replace(/^1/, '');
+
+      const twilioClient = require('twilio')(accountSid, authToken);
+      const lookup = await twilioClient.lookups.v2.phoneNumbers(e164).fetch({ fields: 'line_type_intelligence' });
+      const lineType = lookup.lineTypeIntelligence?.type || null;
+      const valid = lookup.valid !== false && !['voip', 'nonFixedVoip'].includes(lineType);
+
+      db.run('UPDATE leads SET phone_valid = ?, phone_line_type = ? WHERE id = ?', [valid ? 1 : 0, lineType, lead_id]);
+
+      return { phone: e164, phone_valid: valid, phone_line_type: lineType, message: `${lead.business_name}: ${e164} is ${valid ? 'valid' : 'invalid'} (${lineType || 'unknown type'})` };
+    }
+
+    case 'schedule_callback': {
+      const { lead_id, callback_datetime, notes } = input;
+      const lead = db.get('SELECT id, business_name, phone FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+
+      db.run(
+        'UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [callback_datetime, lead_id]
+      );
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Callback scheduled', ?)",
+        [lead_id, `Callback scheduled for ${callback_datetime}${notes ? `. ${notes}` : ''}`]
+      );
+
+      let smsSent = false;
+      try {
+        const autoSmsRow = db.get("SELECT value FROM settings WHERE key = 'callback_auto_sms_enabled'");
+        const autoSmsEnabled = autoSmsRow?.value !== '0';
+        const smsService = require('./smsService');
+        if (autoSmsEnabled && smsService.isConfigured() && lead.phone) {
+          const dt = new Date(callback_datetime);
+          const formatted = dt.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+          const msg = `Got it! We'll call you back on ${formatted}. Talk soon.`;
+          await smsService.sendSms(lead.phone, msg);
+          smsSent = true;
+        }
+      } catch { /* ignore SMS failure */ }
+
+      return { success: true, scheduled: true, sms_sent: smsSent, message: `Callback scheduled for ${lead.business_name} on ${callback_datetime}${smsSent ? '. Confirmation SMS sent.' : '.'}` };
+    }
+
+    case 'set_dnc': {
+      const { lead_id, reason } = input;
+      const lead = db.get('SELECT id, business_name, dnc_at FROM leads WHERE id = ?', [lead_id]);
+      if (!lead) return { error: 'Lead not found' };
+      if (lead.dnc_at) return { error: `${lead.business_name} is already on the Do Not Call list (since ${lead.dnc_at.slice(0, 10)})` };
+
+      db.run('UPDATE leads SET dnc_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [lead_id]);
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Marked as Do Not Call', ?)",
+        [lead_id, reason || 'Added to DNC list via Sam AI']
+      );
+      db.run(
+        "UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
+        [lead_id]
+      );
+
+      const updated = db.get('SELECT dnc_at FROM leads WHERE id = ?', [lead_id]);
+      return { success: true, business_name: lead.business_name, dnc_at: updated.dnc_at, message: `${lead.business_name} has been added to the Do Not Call list. Active sequences paused.` };
     }
 
     default:

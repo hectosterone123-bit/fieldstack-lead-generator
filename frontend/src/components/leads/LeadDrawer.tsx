@@ -1172,6 +1172,32 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                                 <div className="text-xs text-zinc-500 mt-0.5">{a.description}</div>
                               )}
                               <div className="text-[10px] text-zinc-600 mt-1 font-data">{formatRelativeTime(a.created_at)}</div>
+                              {a.type === 'call_attempt' && (() => {
+                                let meta: { duration?: number; outcome?: string; recording_url?: string } = {};
+                                try { meta = JSON.parse(a.metadata || '{}'); } catch { /* noop */ }
+                                if (!meta.duration && !meta.outcome && !meta.recording_url) return null;
+                                return (
+                                  <div className="mt-1.5 space-y-1.5">
+                                    {(meta.duration || meta.outcome) && (
+                                      <div className="flex items-center gap-2">
+                                        {meta.duration != null && (
+                                          <span className="text-[10px] text-zinc-600 font-data">
+                                            {Math.floor(meta.duration / 60)}m {meta.duration % 60}s
+                                          </span>
+                                        )}
+                                        {meta.outcome && (
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                                            {meta.outcome.replace(/_/g, ' ')}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {meta.recording_url && (
+                                      <audio controls src={meta.recording_url} className="w-full h-7 [color-scheme:dark]" />
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         );

@@ -323,4 +323,21 @@ router.get('/', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/stats/setup — setup checklist status
+router.get('/setup', (req, res) => {
+  const checks = {
+    resend_configured: !!(process.env.RESEND_API_KEY &&
+      db.get("SELECT value FROM settings WHERE key = 'resend_from'")?.value),
+    twilio_configured: !!(process.env.TWILIO_ACCOUNT_SID &&
+      process.env.TWILIO_AUTH_TOKEN &&
+      process.env.TWILIO_PHONE_NUMBER),
+    has_leads: (db.get('SELECT COUNT(*) as c FROM leads')?.c || 0) > 0,
+    has_sequence: (db.get("SELECT COUNT(*) as c FROM sequences WHERE is_template = 0 AND is_active = 1")?.c || 0) > 0,
+    has_enrollments: (db.get('SELECT COUNT(*) as c FROM lead_sequences')?.c || 0) > 0,
+    booking_link_set: !!(db.get("SELECT value FROM settings WHERE key = 'booking_link'")?.value),
+  };
+  const complete = Object.values(checks).every(Boolean);
+  res.json({ success: true, data: { complete, checks } });
+});
+
 module.exports = router;

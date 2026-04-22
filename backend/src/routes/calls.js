@@ -164,23 +164,34 @@ router.post('/queue', (req, res) => {
   res.json({ success: true, data: { queued } });
 });
 
-// POST /api/calls/queue/auto-load — auto-load top N new leads by heat_score
+// POST /api/calls/queue/auto-load — auto-load top N leads by heat_score
 router.post('/queue/auto-load', (req, res) => {
-  const { service_type, count = 10, template_id } = req.body;
+  const { service_type, count = 10, template_id, filter } = req.body;
   if (!template_id) {
     return res.status(400).json({ success: false, error: 'template_id required' });
   }
   const limitCount = Math.min(Math.max(parseInt(count) || 10, 1), 100); // 1–100, default 10
 
-  // Query: new leads with valid phones, sorted by heat_score DESC
-  const leads = db.all(`
-    SELECT id, phone, dnc_at, phone_valid
-    FROM leads
-    WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)
-    ${service_type ? 'AND service_type = ?' : ''}
-    ORDER BY heat_score DESC
-    LIMIT ?
-  `, service_type ? [service_type, limitCount] : [limitCount]);
+  let whereClause, whereParams;
+  if (filter === 'callbacks_due') {
+    whereClause = `WHERE next_followup_at IS NOT NULL AND next_followup_at <= datetime('now')
+                   AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
+    whereParams = [limitCount];
+  } else if (filter === 'this_week') {
+    whereClause = `WHERE status = 'new' AND created_at >= datetime('now', '-7 days')
+                   AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
+    whereParams = [limitCount];
+  } else {
+    whereClause = `WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL
+                   AND (phone_valid IS NULL OR phone_valid != 0)
+                   ${service_type ? 'AND service_type = ?' : ''}`;
+    whereParams = service_type ? [service_type, limitCount] : [limitCount];
+  }
+
+  const leads = db.all(
+    `SELECT id, phone FROM leads ${whereClause} ORDER BY heat_score DESC LIMIT ?`,
+    whereParams
+  );
 
   // Clear existing queue
   db.run("DELETE FROM call_queue WHERE status = 'pending'");
@@ -679,19 +690,7 @@ router.post('/voice-note', async (req, res) => {
   }
 });
 
-router.get('/:callId', (req, res) => {
-  const call = db.get(`
-    SELECT c.*, l.business_name, l.phone, l.city, l.state, l.service_type, l.email
-    FROM calls c
-    JOIN leads l ON l.id = c.lead_id
-    WHERE c.id = ?
-  `, [req.params.callId]);
-
-  if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
-  res.json({ success: true, data: call });
-});
-
-// GET /api/calls/template-stats — Script A/B testing stats
+// GET /api/calls/template-stats — Script A/B testing stats (must be before /:callId)
 router.get('/stats/templates', (req, res) => {
   const rows = db.all(`
     SELECT c.template_id, t.name as template_name,
@@ -715,6 +714,59 @@ router.get('/stats/templates', (req, res) => {
   }));
 
   res.json({ success: true, data: withRates });
+});
+
+// GET /api/calls/funnel — call outcome funnel (must be before /:callId)
+router.get('/funnel', (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  const row = db.get(`
+    SELECT
+      COUNT(*)                                                                         as total,
+      SUM(CASE WHEN outcome NOT IN ('no_answer','voicemail','gatekeeper') AND outcome IS NOT NULL
+               THEN 1 ELSE 0 END)                                                     as pickups,
+      SUM(CASE WHEN outcome IN ('interested','callback_requested') THEN 1 ELSE 0 END) as interested,
+      SUM(CASE WHEN outcome = 'no_answer'      THEN 1 ELSE 0 END)                    as no_answer,
+      SUM(CASE WHEN outcome = 'voicemail'      THEN 1 ELSE 0 END)                    as voicemail,
+      SUM(CASE WHEN outcome = 'not_interested' THEN 1 ELSE 0 END)                    as not_interested,
+      SUM(CASE WHEN outcome = 'gatekeeper'     THEN 1 ELSE 0 END)                    as gatekeeper,
+      ROUND(AVG(duration_seconds))                                                    as avg_duration
+    FROM calls
+    WHERE status = 'completed'
+    AND created_at >= datetime('now', '-' || ? || ' days')
+  `, [days]);
+
+  const total = row?.total || 0;
+  const pickups = row?.pickups || 0;
+  const interested = row?.interested || 0;
+
+  res.json({
+    success: true,
+    data: {
+      days,
+      total,
+      pickups,
+      interested,
+      connect_rate: total > 0 ? Math.round((pickups / total) * 100) : 0,
+      interest_rate: pickups > 0 ? Math.round((interested / pickups) * 100) : 0,
+      no_answer: row?.no_answer || 0,
+      voicemail: row?.voicemail || 0,
+      not_interested: row?.not_interested || 0,
+      gatekeeper: row?.gatekeeper || 0,
+      avg_duration: row?.avg_duration || 0,
+    },
+  });
+});
+
+router.get('/:callId', (req, res) => {
+  const call = db.get(`
+    SELECT c.*, l.business_name, l.phone, l.city, l.state, l.service_type, l.email
+    FROM calls c
+    JOIN leads l ON l.id = c.lead_id
+    WHERE c.id = ?
+  `, [req.params.callId]);
+
+  if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+  res.json({ success: true, data: call });
 });
 
 module.exports = router;
