@@ -5,6 +5,8 @@ const emailService = require('./emailService');
 const smsService = require('./smsService');
 const { recomputeHeatScore } = require('./heatScoreService');
 const { applyNoActivityRules } = require('./scoringRulesService');
+const { generatePersonalizedEmail } = require('./claudeService');
+const { getTimezone, isInSendWindow } = require('./timezoneService');
 
 const MAX_SENDS_PER_TICK = 20;
 
@@ -24,7 +26,7 @@ async function sendAlert(subject, body) {
 }
 
 function getWarmupLimit(startDate) {
-  const dayNum = Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1;
+  const dayNum = Math.max(1, Math.floor((Date.now() - new Date(startDate).getTime()) / 86400000) + 1);
   if (dayNum <= 3) return 5;
   if (dayNum <= 7) return 15;
   if (dayNum <= 14) return 30;
@@ -37,15 +39,29 @@ function getRemainingBudget() {
   const warmupDate = db.get("SELECT value FROM settings WHERE key = 'warmup_start_date'");
 
   let dailyLimit = parseInt(limitSetting?.value) || 50;
+  let isWarmup = false;
+  let warmupDay = null;
+  let warmupNextLimit = null;
 
   if (warmupDate?.value) {
+    const dayNum = Math.max(1, Math.floor((Date.now() - new Date(warmupDate.value).getTime()) / 86400000) + 1);
     const warmupLimit = getWarmupLimit(warmupDate.value);
-    dailyLimit = Math.min(dailyLimit, warmupLimit);
+    if (warmupLimit < dailyLimit) {
+      isWarmup = true;
+      warmupDay = dayNum;
+      // Next tier
+      let nextLimit = dailyLimit;
+      if (dayNum <= 3) nextLimit = 15;
+      else if (dayNum <= 7) nextLimit = 30;
+      else if (dayNum <= 14) nextLimit = 50;
+      warmupNextLimit = Math.min(nextLimit, dailyLimit);
+      dailyLimit = warmupLimit;
+    }
   }
 
   const sent = db.get("SELECT COUNT(*) as count FROM activities WHERE type = 'email_sent' AND created_at >= date('now')");
   const remaining = Math.max(0, dailyLimit - (sent?.count || 0));
-  return { remaining, dailyLimit, sentToday: sent?.count || 0 };
+  return { remaining, dailyLimit, sentToday: sent?.count || 0, isWarmup, warmupDay, warmupNextLimit };
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -71,15 +87,25 @@ function startSequenceScheduler() {
     }
   }, TZ);
 
-  // Daily digest + re-queue at 7am CT
+  // Daily digest + re-queue + hot lead decay alerts at 7am CT
   cron.schedule('0 7 * * *', async () => {
     try {
       await sendDailyDigest();
+      await sendHotLeadDecayAlerts();
       autoRequeueStaleLeads();
       applyNoActivityRules();
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
       await sendAlert('Daily digest error', `Digest failed: ${err.message}`);
+    }
+  }, TZ);
+
+  // Monthly ROI report on 1st of each month at 9am CT
+  cron.schedule('0 9 1 * *', async () => {
+    try {
+      await sendMonthlyRoiReport();
+    } catch (err) {
+      console.error('[Scheduler] Monthly report error:', err.message);
     }
   }, TZ);
 
@@ -178,7 +204,7 @@ async function autoSendDueItems() {
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website, l.loom_url
+           l.contact_count, l.estimated_value, l.website, l.loom_url, l.timezone
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -225,11 +251,18 @@ async function autoSendDueItems() {
 
     if (dueDate > now) continue; // not due yet
 
-    const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+    // Timezone-aware send window: only send 8am-6pm lead's local time
+    const leadTz = enrollment.timezone || getTimezone(enrollment.state);
+    if (!isInSendWindow(leadTz)) continue; // outside send window, will retry on next tick
+
+    const useAlt1 = step.alt_template_id && Math.random() < 0.5;
+    const selectedTid1 = useAlt1 ? step.alt_template_id : step.template_id;
+    const tVariant1 = step.alt_template_id ? (useAlt1 ? 'B' : 'A') : undefined;
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [selectedTid1]);
     if (!template) {
       db.run(
         'UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [`Template not found for step ${step.order} (template_id=${step.template_id})`, enrollment.id]
+        [`Template not found for step ${step.order} (template_id=${selectedTid1})`, enrollment.id]
       );
       continue;
     }
@@ -246,8 +279,22 @@ async function autoSendDueItems() {
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
         await sleep(3000 + Math.floor(Math.random() * 5000));
 
-        const subject = renderTemplate(template.subject, enrollment);
-        const body = renderTemplate(template.body, enrollment);
+        let subject, body, aiPersonalized = false;
+        if (step.ai_personalize && process.env.GEMINI_API_KEY) {
+          try {
+            const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+            const personalized = await generatePersonalizedEmail(lead || enrollment, template);
+            subject = personalized.subject;
+            body = personalized.body;
+            aiPersonalized = true;
+          } catch {
+            subject = renderTemplate(template.subject, enrollment);
+            body = renderTemplate(template.body, enrollment);
+          }
+        } else {
+          subject = renderTemplate(template.subject, enrollment);
+          body = renderTemplate(template.body, enrollment);
+        }
         const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
 
         if (!result.success) {
@@ -261,7 +308,7 @@ async function autoSendDueItems() {
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order, ai_personalized: aiPersonalized, ...(tVariant1 && { template_variant: tVariant1, template_id: selectedTid1 }) })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { continue; } // no phone on lead — silent skip, not a failure
@@ -289,7 +336,7 @@ async function autoSendDueItems() {
         );
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid })]
+          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Auto-sent via sequence: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid, sequence_id: enrollment.sequence_id, step_order: step.order, ...(tVariant1 && { template_variant: tVariant1, template_id: selectedTid1 }) })]
         );
       } else {
         // call_script / loom_script can't be auto-sent, skip
@@ -355,7 +402,7 @@ async function autoFlushOverdueItems() {
            l.id as lead_id_real, l.business_name, l.first_name, l.last_name, l.email, l.phone,
            l.city, l.state, l.service_type, l.status as lead_status,
            l.has_website, l.website_live, l.rating, l.review_count,
-           l.contact_count, l.estimated_value, l.website, l.loom_url
+           l.contact_count, l.estimated_value, l.website, l.loom_url, l.timezone
     FROM lead_sequences ls
     JOIN sequences s ON ls.sequence_id = s.id
     JOIN leads l ON ls.lead_id = l.id
@@ -400,11 +447,18 @@ async function autoFlushOverdueItems() {
 
     if (dueDate > now) continue; // not overdue yet
 
-    const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+    // Timezone-aware send window: only send 8am-6pm lead's local time
+    const leadTz2 = enrollment.timezone || getTimezone(enrollment.state);
+    if (!isInSendWindow(leadTz2)) continue;
+
+    const useAlt2 = step.alt_template_id && Math.random() < 0.5;
+    const selectedTid2 = useAlt2 ? step.alt_template_id : step.template_id;
+    const tVariant2 = step.alt_template_id ? (useAlt2 ? 'B' : 'A') : undefined;
+    const template = db.get('SELECT * FROM templates WHERE id = ?', [selectedTid2]);
     if (!template) {
       db.run(
         'UPDATE lead_sequences SET last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [`Template not found for step ${step.order} (template_id=${step.template_id})`, enrollment.id]
+        [`Template not found for step ${step.order} (template_id=${selectedTid2})`, enrollment.id]
       );
       continue;
     }
@@ -421,8 +475,22 @@ async function autoFlushOverdueItems() {
         // Jitter: small random delay between sends to avoid bulk-send fingerprint
         await sleep(3000 + Math.floor(Math.random() * 5000));
 
-        const subject = renderTemplate(template.subject, enrollment);
-        const body = renderTemplate(template.body, enrollment);
+        let subject, body, aiPersonalized = false;
+        if (step.ai_personalize && process.env.GEMINI_API_KEY) {
+          try {
+            const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+            const personalized = await generatePersonalizedEmail(lead || enrollment, template);
+            subject = personalized.subject;
+            body = personalized.body;
+            aiPersonalized = true;
+          } catch {
+            subject = renderTemplate(template.subject, enrollment);
+            body = renderTemplate(template.body, enrollment);
+          }
+        } else {
+          subject = renderTemplate(template.subject, enrollment);
+          body = renderTemplate(template.body, enrollment);
+        }
         const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
 
         if (!result.success) {
@@ -436,7 +504,7 @@ async function autoFlushOverdueItems() {
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order, ai_personalized: aiPersonalized, ...(tVariant2 && { template_variant: tVariant2, template_id: selectedTid2 }) })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { continue; } // no phone on lead — silent skip
@@ -464,7 +532,7 @@ async function autoFlushOverdueItems() {
         );
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid })]
+          [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Auto-flushed via sequence: ${enrollment.sequence_name}`, JSON.stringify({ twilio_sid: result.sid, sequence_id: enrollment.sequence_id, step_order: step.order, ...(tVariant2 && { template_variant: tVariant2, template_id: selectedTid2 }) })]
         );
       }
 
@@ -697,14 +765,28 @@ async function flushOverdueNow() {
       if (step.channel === 'email') {
         if (!enrollment.email) { skipped++; continue; }
         if (!emailService.isConfigured()) { failed++; continue; }
-        const subject = renderTemplate(template.subject, enrollment);
-        const body = renderTemplate(template.body, enrollment);
+        let subject, body, aiPersonalized = false;
+        if (step.ai_personalize && process.env.GEMINI_API_KEY) {
+          try {
+            const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
+            const personalized = await generatePersonalizedEmail(lead || enrollment, template);
+            subject = personalized.subject;
+            body = personalized.body;
+            aiPersonalized = true;
+          } catch {
+            subject = renderTemplate(template.subject, enrollment);
+            body = renderTemplate(template.body, enrollment);
+          }
+        } else {
+          subject = renderTemplate(template.subject, enrollment);
+          body = renderTemplate(template.body, enrollment);
+        }
         const result = await emailService.sendEmail(enrollment.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
         if (!result.success) { failed++; continue; }
         db.run(
           'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
           [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `On-demand flush: ${enrollment.sequence_name}`,
-           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
+           JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order, ai_personalized: aiPersonalized })]
         );
       } else if (step.channel === 'sms') {
         if (!enrollment.phone) { skipped++; continue; }
@@ -826,6 +908,149 @@ function autoRequeueStaleLeads() {
     console.log(`[ReQueue] Re-queued ${enrolled} of ${eligible.length} eligible leads into sequence #${seqId}`);
   } catch (err) {
     console.error('[ReQueue] Error:', err.message);
+  }
+}
+
+// ─── Monthly ROI Report ──────────────────────────────────────────────────────
+
+async function sendMonthlyRoiReport() {
+  const digestEmail = db.get("SELECT value FROM settings WHERE key = 'digest_email'")?.value;
+  const enabled = db.get("SELECT value FROM settings WHERE key = 'monthly_report_enabled'")?.value;
+  if (!digestEmail || enabled === '0' || !emailService.isConfigured()) return;
+
+  const now = new Date();
+  const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthStr = firstOfLastMonth.toISOString().slice(0, 10);
+  const thisMonthStr = firstOfThisMonth.toISOString().slice(0, 10);
+  const monthName = firstOfLastMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+  const leadsFound = db.get(`SELECT COUNT(*) as c FROM leads WHERE created_at >= ? AND created_at < ?`, [lastMonthStr, thisMonthStr])?.c || 0;
+  const leadsContacted = db.get(`SELECT COUNT(*) as c FROM leads WHERE last_contacted_at >= ? AND last_contacted_at < ?`, [lastMonthStr, thisMonthStr])?.c || 0;
+  const emailsSent = db.get(`SELECT COUNT(*) as c FROM activities WHERE type = 'email_sent' AND created_at >= ? AND created_at < ?`, [lastMonthStr, thisMonthStr])?.c || 0;
+  const dealsClosed = db.get(`SELECT COUNT(*) as c FROM leads WHERE status = 'closed_won' AND updated_at >= ? AND updated_at < ?`, [lastMonthStr, thisMonthStr])?.c || 0;
+  const revenue = db.get(`SELECT COALESCE(SUM(won_amount),0) as r FROM leads WHERE status = 'closed_won' AND updated_at >= ? AND updated_at < ?`, [lastMonthStr, thisMonthStr])?.r || 0;
+  const avgDeal = dealsClosed > 0 ? Math.round(revenue / dealsClosed) : 0;
+  const openProposals = db.get(`SELECT COUNT(*) as c FROM leads WHERE status = 'proposal_sent'`)?.c || 0;
+  const monthlyCost = parseFloat(db.get("SELECT value FROM settings WHERE key = 'monthly_plan_cost'")?.value || '0');
+  const roiX = monthlyCost > 0 && revenue > 0 ? (revenue / monthlyCost).toFixed(1) : null;
+
+  const fmt = (n) => n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n}`;
+
+  const subject = `FieldStack ${monthName} Report — ${dealsClosed} deals · ${revenue > 0 ? fmt(revenue) : 'pipeline growing'}`;
+  const html = `
+<div style="font-family: system-ui, sans-serif; max-width: 520px; background: #09090b; color: #e4e4e7; padding: 24px; border-radius: 12px;">
+  <h2 style="color: #f97316; margin: 0 0 4px 0; font-size: 18px;">FieldStack Monthly Report</h2>
+  <p style="color: #71717a; margin: 0 0 20px 0; font-size: 13px;">${monthName}</p>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+    <div style="background: #18181b; border-radius: 8px; padding: 14px; text-align: center;">
+      <div style="font-size: 24px; font-weight: 700; color: #f97316;">${leadsFound}</div>
+      <div style="font-size: 11px; color: #71717a; margin-top: 4px;">Leads Found</div>
+    </div>
+    <div style="background: #18181b; border-radius: 8px; padding: 14px; text-align: center;">
+      <div style="font-size: 24px; font-weight: 700; color: #e4e4e7;">${dealsClosed}</div>
+      <div style="font-size: 11px; color: #71717a; margin-top: 4px;">Deals Closed</div>
+    </div>
+    <div style="background: #18181b; border-radius: 8px; padding: 14px; text-align: center;">
+      <div style="font-size: 24px; font-weight: 700; color: #10b981;">${revenue > 0 ? fmt(revenue) : '—'}</div>
+      <div style="font-size: 11px; color: #71717a; margin-top: 4px;">Revenue</div>
+    </div>
+  </div>
+
+  <div style="background: #18181b; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+    <p style="margin: 4px 0; color: #a1a1aa; font-size: 13px;">Emails sent: <strong style="color: #e4e4e7;">${emailsSent}</strong></p>
+    <p style="margin: 4px 0; color: #a1a1aa; font-size: 13px;">Leads contacted: <strong style="color: #e4e4e7;">${leadsContacted}</strong></p>
+    <p style="margin: 4px 0; color: #a1a1aa; font-size: 13px;">Avg deal size: <strong style="color: #e4e4e7;">${avgDeal > 0 ? fmt(avgDeal) : '—'}</strong></p>
+    <p style="margin: 4px 0; color: #a1a1aa; font-size: 13px;">Open proposals: <strong style="color: #e4e4e7;">${openProposals}</strong></p>
+  </div>
+
+  ${roiX ? `
+  <div style="background: #14532d; border-radius: 8px; padding: 14px; margin-bottom: 16px; text-align: center;">
+    <div style="font-size: 28px; font-weight: 700; color: #10b981;">${roiX}x ROI</div>
+    <div style="font-size: 12px; color: #6ee7b7; margin-top: 4px;">${fmt(revenue)} revenue vs ${fmt(monthlyCost)} plan cost</div>
+  </div>` : ''}
+
+  <p style="color: #71717a; font-size: 11px; margin: 0;">— FieldStack Autopilot</p>
+</div>`.trim();
+
+  const result = await emailService.sendEmail(digestEmail, subject, html);
+  if (result.success) {
+    console.log(`[Scheduler] Monthly ROI report sent to ${digestEmail} for ${monthName}`);
+  } else {
+    console.error(`[Scheduler] Monthly report failed: ${result.error}`);
+  }
+}
+
+// ─── Hot Lead Decay Alert ────────────────────────────────────────────────────
+
+async function sendHotLeadDecayAlerts() {
+  const digestEmail = db.get("SELECT value FROM settings WHERE key = 'digest_email'")?.value;
+  const enabled = db.get("SELECT value FROM settings WHERE key = 'hot_alert_enabled'")?.value;
+  if (!digestEmail || enabled === '0' || !emailService.isConfigured()) return;
+
+  const threshold = parseInt(db.get("SELECT value FROM settings WHERE key = 'hot_alert_threshold'")?.value || '70');
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const hotLeads = db.all(`
+    SELECT l.id, l.business_name, l.city, l.state, l.phone, l.heat_score, l.status, l.last_contacted_at
+    FROM leads l
+    WHERE l.heat_score >= ?
+      AND l.status NOT IN ('lost', 'closed_won', 'booked')
+      AND (l.last_contacted_at IS NULL OR l.last_contacted_at < ?)
+      AND (l.next_followup_at IS NULL OR l.next_followup_at <= datetime('now'))
+      AND NOT EXISTS (
+        SELECT 1 FROM activities a
+        WHERE a.lead_id = l.id AND a.type = 'hot_alert' AND a.created_at >= ?
+      )
+    ORDER BY l.heat_score DESC
+    LIMIT 20
+  `, [threshold, cutoff, cutoff]);
+
+  if (hotLeads.length === 0) return;
+
+  const rows = hotLeads.map(l => {
+    const lastContact = l.last_contacted_at
+      ? `${Math.round((Date.now() - new Date(l.last_contacted_at).getTime()) / 86400000)}d ago`
+      : 'Never';
+    return `<tr>
+      <td style="padding: 8px 12px; color: #e4e4e7; font-size: 13px;">${l.business_name}${l.city ? ` · ${l.city}` : ''}</td>
+      <td style="padding: 8px 12px; color: #f97316; font-size: 13px; font-weight: 600; text-align: center;">${l.heat_score}</td>
+      <td style="padding: 8px 12px; color: #a1a1aa; font-size: 13px; text-align: center;">${lastContact}</td>
+    </tr>`;
+  }).join('');
+
+  const subject = `🔥 ${hotLeads.length} hot lead${hotLeads.length !== 1 ? 's' : ''} going cold — call them now`;
+  const html = `
+<div style="font-family: system-ui, sans-serif; max-width: 520px; background: #09090b; color: #e4e4e7; padding: 24px; border-radius: 12px;">
+  <h2 style="color: #f97316; margin: 0 0 4px 0; font-size: 18px;">Hot Leads Going Cold</h2>
+  <p style="color: #a1a1aa; margin: 0 0 16px 0; font-size: 13px;">${hotLeads.length} lead${hotLeads.length !== 1 ? 's' : ''} with heat score ≥ ${threshold} haven't been contacted in 24+ hours.</p>
+
+  <table style="width: 100%; border-collapse: collapse; background: #18181b; border-radius: 8px; overflow: hidden; margin-bottom: 16px;">
+    <thead>
+      <tr style="background: #27272a;">
+        <th style="padding: 8px 12px; text-align: left; font-size: 11px; color: #71717a; font-weight: 600; text-transform: uppercase;">Business</th>
+        <th style="padding: 8px 12px; text-align: center; font-size: 11px; color: #71717a; font-weight: 600; text-transform: uppercase;">Score</th>
+        <th style="padding: 8px 12px; text-align: center; font-size: 11px; color: #71717a; font-weight: 600; text-transform: uppercase;">Last Contact</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <p style="color: #71717a; font-size: 11px; margin: 0;">— FieldStack Autopilot · Reply STOP to unsubscribe</p>
+</div>`.trim();
+
+  const result = await emailService.sendEmail(digestEmail, subject, html);
+  if (result.success) {
+    console.log(`[Scheduler] Hot lead decay alert sent — ${hotLeads.length} leads`);
+    for (const lead of hotLeads) {
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+        [lead.id, 'hot_alert', 'Hot lead decay alert sent', `Heat score ${lead.heat_score} — not contacted in 24h`]
+      );
+    }
+  } else {
+    console.error(`[Scheduler] Hot lead alert failed: ${result.error}`);
   }
 }
 

@@ -3,11 +3,13 @@ const router = express.Router();
 const db = require('../db');
 const overpassService = require('../services/overpassService');
 const googlePlacesService = require('../services/googlePlacesService');
+const eventBus = require('../services/eventBus');
 const { enrichBatch } = require('../services/enrichService');
 const { computeInitialHeatScore, recomputeHeatScore } = require('../services/heatScoreService');
 const { computeProspectScore } = require('../services/prospectScoreService');
 const { scrapeWebsite } = require('../services/scrapeService');
 const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
+const { getTimezone } = require('../services/timezoneService');
 
 function hasGoogleKey() {
   const key = process.env.GOOGLE_PLACES_API_KEY;
@@ -195,8 +197,8 @@ router.post('/import', (req, res, next) => {
       const dbSource = isGoogle ? 'google_places' : 'osm_finder';
 
       db.run(
-        `INSERT INTO leads (business_name, phone, email, website, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, has_website, website_live, google_maps_url, source, osm_id, osm_type, google_place_id, rating, review_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, 2000, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO leads (business_name, phone, email, website, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, has_website, website_live, google_maps_url, source, osm_id, osm_type, google_place_id, rating, review_count, timezone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, 2000, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           lead.business_name, lead.phone || null, lead.email || null, lead.website || null,
           lead.address || null, lead.city || null, lead.state || null, lead.zip || null,
@@ -205,6 +207,7 @@ router.post('/import', (req, res, next) => {
           lead.website_live ? 1 : 0, lead.google_maps_url || null,
           dbSource, lead.osm_id || null, lead.osm_type || null,
           lead.google_place_id || null, lead.rating || null, lead.review_count || null,
+          getTimezone(lead.state),
         ]
       );
 
@@ -273,6 +276,10 @@ router.post('/import', (req, res, next) => {
       setImmediate(() => {
         autoEnrollLeads(newLeadIds, enrollSeqId);
       });
+    }
+
+    if (imported > 0) {
+      eventBus.emit({ type: 'new_leads', count: imported });
     }
 
     res.json({ success: true, data: { imported, skipped, auto_enrich, auto_enroll } });

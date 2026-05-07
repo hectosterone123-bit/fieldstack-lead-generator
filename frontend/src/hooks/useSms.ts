@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchSmsStatus, fetchSmsConversation, fetchSmsInbox, sendSms, fetchSmsThreads, fetchMissedCallSettings, fetchReviewSettings } from '../lib/api';
+import { fetchSmsStatus, fetchSmsConversation, fetchSmsInbox, sendSms, fetchSmsThreads, fetchMissedCallSettings, fetchReviewSettings, draftSmsReply } from '../lib/api';
 
 export function useSmsStatus() {
   return useQuery({
@@ -43,6 +43,12 @@ export function useSendSms() {
       qc.invalidateQueries({ queryKey: ['sms-inbox'] });
       qc.invalidateQueries({ queryKey: ['sms-threads'] });
     },
+  });
+}
+
+export function useDraftSmsReply() {
+  return useMutation({
+    mutationFn: (lead_id: number) => draftSmsReply(lead_id),
   });
 }
 

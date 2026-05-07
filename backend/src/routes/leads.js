@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { scrapeWebsite } = require('../services/scrapeService');
+const { scrapeWebsite, extractRecentHighlights } = require('../services/scrapeService');
 const { recomputeHeatScore, computeInitialHeatScore } = require('../services/heatScoreService');
+const eventBus = require('../services/eventBus');
 const smsService = require('../services/smsService');
 const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
+const { getTimezone } = require('../services/timezoneService');
+const { analyzeGaps } = require('../services/gapService');
+const { generatePitch, generateColdWrite } = require('../services/claudeService');
 
 function formatResponseTime(minutes) {
   if (minutes < 60) return `${minutes}m`;
@@ -361,6 +365,78 @@ router.post('/bulk/send-email', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/leads/daily-queue — top 40 leads to cold call today, ranked by priority
+router.get('/daily-queue', (req, res, next) => {
+  try {
+    const now = Date.now();
+    const leads = db.all(
+      `SELECT * FROM leads
+       WHERE phone IS NOT NULL AND phone != ''
+         AND status NOT IN ('booked', 'lost', 'closed_won')
+         AND (dnc_at IS NULL)
+         AND (next_followup_at IS NULL OR datetime(next_followup_at) <= datetime('now'))
+       ORDER BY heat_score DESC`
+    );
+
+    const scored = leads.map(lead => {
+      let score = (lead.heat_score || 0) * 0.4;
+
+      // Status weight
+      const sw = { new: 20, contacted: 30, qualified: 40, proposal_sent: 35 };
+      score += sw[lead.status] || 0;
+
+      // Never contacted — high priority
+      if (!lead.last_contacted_at) score += 30;
+
+      // Recency of last contact
+      if (lead.last_contacted_at) {
+        const days = Math.floor((now - new Date(lead.last_contacted_at).getTime()) / 86400000);
+        if (days >= 3 && days <= 14) score += 20;
+        else if (days > 14 && days <= 30) score += 10;
+        else if (days > 30) score -= 10;
+      }
+
+      // Overdue follow-up
+      if (lead.next_followup_at && new Date(lead.next_followup_at).getTime() <= now) score += 25;
+
+      // New lead bonus (added in last 48h)
+      const ageHrs = (now - new Date(lead.created_at).getTime()) / 3600000;
+      if (ageHrs <= 24) score += 30;
+      else if (ageHrs <= 48) score += 15;
+
+      // High rating bonus
+      if (lead.rating >= 4.5) score += 5;
+
+      // Build reason label
+      let reason = 'Follow up';
+      if (ageHrs <= 48 && !lead.last_contacted_at) reason = 'New lead — never contacted';
+      else if (ageHrs <= 48) reason = 'New lead';
+      else if (lead.next_followup_at && new Date(lead.next_followup_at).getTime() <= now) reason = 'Follow-up overdue';
+      else if (!lead.last_contacted_at) reason = 'Never contacted';
+      else {
+        const days = Math.floor((now - new Date(lead.last_contacted_at).getTime()) / 86400000);
+        reason = `${days}d since last contact`;
+      }
+      if (lead.status === 'qualified') reason = `Qualified — ${reason}`;
+      else if (lead.status === 'proposal_sent') reason = `Proposal sent — ${reason}`;
+
+      return { ...lead, _priority: Math.round(score), _reason: reason };
+    });
+
+    scored.sort((a, b) => b._priority - a._priority);
+    const queue = scored.slice(0, 40);
+
+    // New leads in last 24h (for alert banner)
+    const newLeads24h = db.all(
+      `SELECT id, business_name, phone, service_type, heat_score, created_at FROM leads
+       WHERE datetime(created_at) >= datetime('now', '-24 hours')
+       ORDER BY created_at DESC`
+    );
+
+    res.json({ success: true, data: { queue, new_leads_24h: newLeads24h } });
+  } catch (err) { next(err); }
+});
+
 // GET /api/leads/followups/today — leads due for follow-up
 router.get('/followups/today', (req, res, next) => {
   try {
@@ -372,6 +448,24 @@ router.get('/followups/today', (req, res, next) => {
     const overdue = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) < today);
     const due_today = leads.filter(l => l.next_followup_at && l.next_followup_at.slice(0, 10) === today);
     res.json({ success: true, data: { overdue, due_today } });
+  } catch (err) { next(err); }
+});
+
+// GET /api/leads/replied — leads with email_replied activity in the last 14 days
+router.get('/replied', (req, res, next) => {
+  try {
+    const leads = db.all(`
+      SELECT l.* FROM leads l
+      WHERE EXISTS (
+        SELECT 1 FROM activities a
+        WHERE a.lead_id = l.id
+          AND a.type = 'email_replied'
+          AND datetime(a.created_at) > datetime('now', '-14 days')
+      )
+      AND l.status NOT IN ('lost', 'closed_won')
+      ORDER BY l.heat_score DESC
+    `, []);
+    res.json({ success: true, data: leads });
   } catch (err) { next(err); }
 });
 
@@ -491,12 +585,30 @@ router.post('/import-csv', (req, res, next) => {
       const leadForScore = { has_website: website ? 1 : 0, website_live: 0, phone, email, rating: null, review_count: 0 };
       const heat_score = !isNaN(rawScore) ? Math.min(100, Math.max(0, rawScore)) : computeInitialHeatScore(leadForScore);
 
+      // Dedup: phone → email → business_name+city
+      if (phone) {
+        const dup = db.get('SELECT id FROM leads WHERE phone = ?', [phone]);
+        if (dup) { skipped++; continue; }
+      }
+      if (email) {
+        const dup = db.get('SELECT id FROM leads WHERE email = ?', [email]);
+        if (dup) { skipped++; continue; }
+      }
+      {
+        const dup = db.get(
+          "SELECT id FROM leads WHERE LOWER(business_name) = LOWER(?) AND LOWER(COALESCE(city,'')) = LOWER(COALESCE(?,?))",
+          [business_name, get('city') || '', '']
+        );
+        if (dup) { skipped++; continue; }
+      }
+
+      const csvState = get('state') || null;
       const result = db.run(
-        `INSERT INTO leads (business_name, phone, email, website, address, city, state, zip, service_type, status, heat_score, estimated_value, has_website, notes, source)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'csv_import')`,
+        `INSERT INTO leads (business_name, phone, email, website, address, city, state, zip, service_type, status, heat_score, estimated_value, has_website, notes, source, timezone)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'csv_import', ?)`,
         [business_name, phone, email, website, get('address') || null, get('city') || null,
-         get('state') || null, get('zip') || null, service_type, status, heat_score,
-         estimated_value, website ? 1 : 0, get('notes') || null]
+         csvState, get('zip') || null, service_type, status, heat_score,
+         estimated_value, website ? 1 : 0, get('notes') || null, getTimezone(csvState)]
       );
       db.run(
         `INSERT INTO activities (lead_id, type, title) VALUES (?, 'import', 'Lead imported from CSV')`,
@@ -562,9 +674,9 @@ router.post('/', (req, res, next) => {
     if (!business_name) return res.status(400).json({ success: false, error: 'business_name is required' });
 
     const result = db.run(
-      `INSERT INTO leads (business_name, first_name, last_name, email, phone, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, website, has_website, website_live, google_maps_url, source, osm_id, osm_type, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [business_name, first_name || null, last_name || null, email || null, phone || null, address || null, city || null, state || null, zip || null, latitude || null, longitude || null, service_type, status, heat_score, estimated_value, website || null, has_website ? 1 : 0, website_live ? 1 : 0, google_maps_url || null, source, osm_id || null, osm_type || null, notes || null]
+      `INSERT INTO leads (business_name, first_name, last_name, email, phone, address, city, state, zip, latitude, longitude, service_type, status, heat_score, estimated_value, website, has_website, website_live, google_maps_url, source, osm_id, osm_type, notes, timezone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [business_name, first_name || null, last_name || null, email || null, phone || null, address || null, city || null, state || null, zip || null, latitude || null, longitude || null, service_type, status, heat_score, estimated_value, website || null, has_website ? 1 : 0, website_live ? 1 : 0, google_maps_url || null, source, osm_id || null, osm_type || null, notes || null, getTimezone(state)]
     );
 
     const lead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
@@ -586,6 +698,8 @@ router.post('/', (req, res, next) => {
         db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, 1, 'pending')", [lead.id, speedTemplateId]);
       }
     }
+
+    eventBus.emit({ type: 'new_lead', id: lead.id, name: lead.business_name });
 
     res.status(201).json({ success: true, data: lead });
   } catch (err) { next(err); }
@@ -716,6 +830,15 @@ router.post('/:id/enrich', async (req, res, next) => {
     if (!lead.email && result.emails && result.emails.length > 0) {
       db.run('UPDATE leads SET email = ? WHERE id = ?', [result.emails[0], req.params.id]);
     }
+
+    // Auto-fill owner_name if not set and scrape found one (extractTeamNames filters for owner/founder/president/CEO)
+    let ownerAutoFilled = false;
+    if (!lead.owner_name && result.team_names?.length > 0) {
+      db.run('UPDATE leads SET owner_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [result.team_names[0], req.params.id]);
+      ownerAutoFilled = true;
+    }
+
     autoUpdateHeatScore(req.params.id);
 
     // Build activity description
@@ -725,8 +848,11 @@ router.post('/:id/enrich', async (req, res, next) => {
     } else {
       if (result.emails?.length) parts.push(`${result.emails.length} email(s)`);
       if (result.team_names?.length) parts.push(`${result.team_names.length} team name(s)`);
+      if (ownerAutoFilled) parts.push(`owner auto-filled: ${result.team_names[0]}`);
       if (result.services?.length) parts.push(`${result.services.length} service(s)`);
       if (result.tech_stack) parts.push(`Tech: ${result.tech_stack}`);
+      const toolsDetected = Object.values(result.detected_tools || {}).filter(Boolean);
+      if (toolsDetected.length) parts.push(`Tools: ${toolsDetected.join(', ')}`);
     }
 
     db.run(
@@ -734,9 +860,76 @@ router.post('/:id/enrich', async (req, res, next) => {
       [req.params.id, parts.join(', ') || 'No data extracted']
     );
 
+    // Auto-generate gap pitch (non-blocking — enrichment succeeds even if this fails)
+    let pitchJson = null;
+    try {
+      const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+      const gapAnalysis = analyzeGaps(freshLead, result);
+      const pitch = await generatePitch(freshLead, gapAnalysis);
+      pitchJson = JSON.stringify(pitch);
+      db.run('UPDATE leads SET pitch_data = ? WHERE id = ?', [pitchJson, req.params.id]);
+    } catch (pitchErr) {
+      console.error('[Enrich] Pitch generation failed (non-fatal):', pitchErr.message);
+    }
+
     const updated = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     const activities = db.all('SELECT * FROM activities WHERE lead_id = ? ORDER BY created_at DESC', [req.params.id]);
     res.json({ success: true, data: { ...updated, activities } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/pitch — regenerate gap pitch on demand
+router.post('/:id/pitch', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    let enrichment = null;
+    try { enrichment = lead.enrichment_data ? JSON.parse(lead.enrichment_data) : null; } catch {}
+
+    const gapAnalysis = analyzeGaps(lead, enrichment);
+    const pitch = await generatePitch(lead, gapAnalysis);
+    const pitchJson = JSON.stringify(pitch);
+    db.run('UPDATE leads SET pitch_data = ? WHERE id = ?', [pitchJson, lead.id]);
+
+    res.json({ success: true, data: pitch });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/cold-write — generate hyper-personalized cold outreach using website scraping + Gemini
+router.post('/:id/cold-write', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    let enrichment = null;
+    if (lead.enrichment_data) {
+      try { enrichment = JSON.parse(lead.enrichment_data); } catch {}
+    }
+
+    // Scrape recent highlights from website (non-fatal if fails)
+    let recentHighlights = [];
+    if (lead.website) {
+      try {
+        const fetch = require('node-fetch');
+        const cheerio = require('cheerio');
+        const r = await fetch(lead.website, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FieldStack/1.0)' },
+          signal: AbortSignal.timeout(6000),
+        });
+        if (r.ok) {
+          const $ = cheerio.load(await r.text());
+          recentHighlights = await extractRecentHighlights($, lead.website);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    const result = await generateColdWrite(lead, enrichment, recentHighlights);
+
+    db.run('UPDATE leads SET cold_write_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [JSON.stringify(result), req.params.id]);
+
+    res.json({ success: true, data: result });
   } catch (err) { next(err); }
 });
 
@@ -810,6 +1003,37 @@ router.post('/:id/find-email', async (req, res, next) => {
     );
 
     res.json({ success: true, data: { emails, saved } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/quick-email — send a one-off email from the caller page (no template needed)
+router.post('/:id/quick-email', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!lead.email) return res.status(400).json({ success: false, error: 'Lead has no email address' });
+
+    const { subject, body } = req.body;
+    if (!subject || !body) return res.status(400).json({ success: false, error: 'subject and body required' });
+
+    const emailService = require('../services/emailService');
+    if (!emailService.isConfigured()) return res.status(400).json({ success: false, error: 'Email not configured (missing RESEND_API_KEY)' });
+
+    const result = await emailService.sendEmail(lead.email, subject, body);
+    if (!result.success) return res.status(502).json({ success: false, error: result.error || 'Send failed' });
+
+    db.run(
+      `INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, 'email_sent', ?, ?, ?)`,
+      [lead.id, `Email sent: ${subject}`, body.slice(0, 200), JSON.stringify({ resend_message_id: result.messageId, quick_send: true })]
+    );
+    db.run(
+      `UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP,
+       first_contacted_at = COALESCE(first_contacted_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [lead.id]
+    );
+
+    res.json({ success: true, data: { message_id: result.messageId } });
   } catch (err) { next(err); }
 });
 
@@ -1040,6 +1264,112 @@ router.post('/:id/activities', (req, res, next) => {
 
     const activity = db.get('SELECT * FROM activities WHERE lead_id = ? ORDER BY id DESC LIMIT 1', [req.params.id]);
     res.status(201).json({ success: true, data: activity });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/:id/call-prep — AI-generated call prep for a lead
+router.post('/:id/call-prep', async (req, res, next) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'GEMINI_API_KEY not configured' });
+    }
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+
+    // Get recent activities for context
+    const activities = db.all(
+      `SELECT type, title, description, created_at FROM activities WHERE lead_id = ? ORDER BY created_at DESC LIMIT 5`,
+      [req.params.id]
+    );
+
+    // Parse enrichment data if it exists
+    let enrichmentStr = '';
+    if (lead.enrichment_data) {
+      try {
+        const enrichment = JSON.parse(lead.enrichment_data);
+        enrichmentStr = `Website info: ${enrichment.services?.join(', ') || 'N/A'}. Tech stack: ${enrichment.tech_stack?.join(', ') || 'N/A'}`;
+      } catch {}
+    }
+
+    // Build context string
+    const activitySummary = activities
+      .map(a => `${new Date(a.created_at).toLocaleDateString()}: ${a.type} — ${a.title}`)
+      .join('\n');
+
+    const prompt = `You are a sales coach helping a contractor prepare for a cold call.
+
+Lead details:
+- Business: ${lead.business_name}
+- City: ${lead.city}, ${lead.state}
+- Service type: ${lead.service_type}
+- Rating: ${lead.rating || 'N/A'} stars
+- Heat score: ${lead.heat_score}
+${enrichmentStr ? `- ${enrichmentStr}` : ''}
+
+Recent activity:
+${activitySummary || 'No prior contact'}
+
+Generate a JSON object with:
+{
+  "opener": "First sentence to say on the call (max 2 sentences)",
+  "context": "Key business insight or hook (1-2 sentences)",
+  "objections": ["Likely objection 1", "Likely objection 2", "Likely objection 3"],
+  "goal": "Specific outcome to push for"
+}
+
+Be specific to this business, not generic.`;
+
+    const body = {
+      model: 'gemini-2.5-flash',
+      max_tokens: 512,
+      messages: [{ role: 'user', content: prompt }],
+    };
+
+    const geminiRes = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      console.error('[Leads] Gemini error:', err);
+      return res.status(500).json({ success: false, error: 'Gemini API error' });
+    }
+
+    const data = await geminiRes.json();
+    const content = data.choices?.[0]?.message?.content || '{}';
+
+    let prep;
+    try {
+      prep = JSON.parse(content);
+    } catch {
+      // Try to extract JSON from the response
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      prep = jsonMatch ? JSON.parse(jsonMatch[0]) : {
+        opener: content,
+        context: '',
+        objections: [],
+        goal: '',
+      };
+    }
+
+    res.json({
+      success: true,
+      data: {
+        opener: prep.opener || '',
+        context: prep.context || '',
+        objections: Array.isArray(prep.objections) ? prep.objections : [],
+        goal: prep.goal || '',
+      },
+    });
   } catch (err) { next(err); }
 });
 

@@ -4,18 +4,20 @@ import {
   Users, Flame, DollarSign, TrendingUp, Search, Phone,
   Clock, CheckCircle, CheckCircle2, Circle, RefreshCw, FileText, Mail, MailOpen, MessageSquare as MessageSquareIcon, Thermometer,
   Download, Sparkles, ChevronRight, Database, Send, Zap, UserX, Reply, BarChart3, Eye, MessageCircle, Repeat,
-  ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map, AlertTriangle,
+  ChevronDown, MousePointerClick, MailX, ShieldAlert, Globe, Upload, Map, AlertTriangle, ListChecks, Star, RadioTower,
 } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { CallBriefModal } from '../components/leads/CallBriefModal';
 import { fetchStats, fetchSetupStatus } from '../lib/api';
 import { StatusBadge } from '../components/shared/StatusBadge';
 import { formatCurrency, formatRelativeTime, cn } from '../lib/utils';
 import type { Lead, LeadStatus, ActivityType, HotSignalLead, RepliedLead } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
-import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus } from '../hooks/useLeads';
+import { useFollowups, useSnoozeLead, useLogActivity, usePatchStatus, useDailyQueue } from '../hooks/useLeads';
 import { useCallFunnel } from '../hooks/useCalls';
 import { useToast } from '../lib/toast';
 import { OutreachQueue } from '../components/sequences/OutreachQueue';
+import { InsightsCockpit } from '../components/dashboard/InsightsCockpit';
 
 // Per-status bar colors for the distribution chart
 const STATUS_BAR_COLORS: Record<LeadStatus, string> = {
@@ -286,6 +288,7 @@ export function Dashboard() {
   });
   const { data: followups } = useFollowups();
   const { data: callFunnel } = useCallFunnel();
+  const { data: dailyQueue } = useDailyQueue();
   const { data: setupStatus } = useQuery({
     queryKey: ['setup-status'],
     queryFn: fetchSetupStatus,
@@ -579,38 +582,98 @@ export function Dashboard() {
         </button>
       </div>
 
-      {/* Lead Sources */}
-      {stats?.by_source && stats.by_source.length > 0 && (
-        <div>
-          <p className="text-overline text-zinc-500 mt-2 mb-3">Lead Sources</p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
-            {stats.by_source.map((source: { source: string; count: number }) => {
-              const sourceLabels: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-                manual: { label: 'Manual', icon: FileText, color: 'bg-zinc-500/10 text-zinc-400' },
-                osm_finder: { label: 'OSM Finder', icon: Search, color: 'bg-blue-500/10 text-blue-400' },
-                csv_import: { label: 'CSV Import', icon: Upload, color: 'bg-amber-500/10 text-amber-400' },
-                google_places: { label: 'Google Places', icon: Map, color: 'bg-emerald-500/10 text-emerald-400' },
-              };
-              const config = sourceLabels[source.source] || { label: source.source, icon: Globe, color: 'bg-zinc-500/10 text-zinc-400' };
-              const Icon = config.icon;
-              return (
-                <button key={source.source} onClick={() => goLeads()} className="group bg-zinc-900 border border-white/[0.06] hover:border-white/[0.12] rounded-xl p-5 shadow-surface text-left transition-all">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center', config.color)}>
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors mt-0.5" />
-                  </div>
-                  <p className="text-2xl font-bold tracking-tight font-data text-white">
-                    {source.count}
-                  </p>
-                  <p className="text-overline text-zinc-500 mt-1">{config.label}</p>
-                </button>
-              );
-            })}
+      {/* Lead Source Performance */}
+      {stats?.source_performance && stats.source_performance.length > 0 && (() => {
+        const SOURCE_LABEL: Record<string, string> = {
+          manual: 'Manual', osm_finder: 'OSM Finder', csv_import: 'CSV Import',
+          google_places: 'Google Places', website: 'Website Widget',
+          sam_ai: 'Sam AI', missed_call: 'Missed Call',
+        };
+        const SOURCE_ICON: Record<string, React.ElementType> = {
+          manual: FileText, osm_finder: Search, csv_import: Upload,
+          google_places: Map, website: RadioTower, sam_ai: Sparkles, missed_call: Phone,
+        };
+        return (
+          <div className="mb-6">
+            <p className="text-overline text-zinc-500 mt-2 mb-3">Lead Source Performance</p>
+            <div className="bg-zinc-900 border border-white/[0.06] rounded-xl overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-white/[0.04]">
+                    <th className="text-left px-4 py-2.5 text-zinc-500 font-medium">Source</th>
+                    <th className="text-right px-4 py-2.5 text-zinc-500 font-medium">Leads</th>
+                    <th className="text-right px-4 py-2.5 text-zinc-500 font-medium">Pipeline</th>
+                    <th className="text-right px-4 py-2.5 text-zinc-500 font-medium">Booked</th>
+                    <th className="text-right px-4 py-2.5 text-zinc-500 font-medium">Conv %</th>
+                    <th className="text-right px-4 py-2.5 text-zinc-500 font-medium">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.source_performance.map(row => {
+                    const conv = row.total_leads > 0 ? Math.round((row.booked / row.total_leads) * 100) : 0;
+                    const Icon = SOURCE_ICON[row.source] || Globe;
+                    return (
+                      <tr key={row.source} className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02] cursor-pointer" onClick={() => goLeads()}>
+                        <td className="px-4 py-2.5">
+                          <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
+                            <Icon className="w-3 h-3 text-zinc-500" />
+                            {SOURCE_LABEL[row.source] ?? row.source}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-zinc-400">{row.total_leads}</td>
+                        <td className="px-4 py-2.5 text-right text-zinc-400">{row.pipeline}</td>
+                        <td className="px-4 py-2.5 text-right text-emerald-400 font-medium">{row.booked}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <span className={conv > 0 ? 'text-orange-400 font-medium' : 'text-zinc-600'}>{conv}%</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-zinc-300">{row.revenue > 0 ? formatCurrency(row.revenue) : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
+        );
+      })()}
+
+      {/* Deal Velocity Chart */}
+      {stats?.monthly_velocity && stats.monthly_velocity.length > 1 && (
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-overline text-zinc-500">Deal Velocity</p>
+              <p className="text-xs text-zinc-600 mt-0.5">Avg days from lead → booked · last 12 months</p>
+            </div>
+            {stats.monthly_velocity[0] && (
+              <div className="text-right">
+                <span className="text-2xl font-bold text-zinc-100 font-data">{stats.monthly_velocity[0].avg_days}</span>
+                <span className="text-xs text-zinc-500 ml-1">days avg</span>
+              </div>
+            )}
+          </div>
+          <ResponsiveContainer width="100%" height={130}>
+            <LineChart data={[...stats.monthly_velocity].reverse()}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="month" tick={{ fill: '#71717a', fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
+              <YAxis tick={{ fill: '#71717a', fontSize: 10 }} width={28} />
+              <Tooltip
+                contentStyle={{ background: '#18181b', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 11 }}
+                labelStyle={{ color: '#a1a1aa' }}
+                formatter={((val: number, name: string) => [
+                  name === 'avg_days' ? `${val} days` : val,
+                  name === 'avg_days' ? 'Avg close time' : 'Deals closed',
+                ]) as any}
+              />
+              <Line type="monotone" dataKey="avg_days" stroke="#f97316" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="deals_closed" stroke="#22c55e" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
+
+      {/* Strategy Cockpit */}
+      <InsightsCockpit />
 
       {/* Outreach Performance */}
       {stats?.outreach_summary && stats.outreach_summary.total_emails_sent > 0 && (
@@ -739,6 +802,99 @@ export function Dashboard() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* New Leads Alert — added in last 24h */}
+      {dailyQueue && dailyQueue.new_leads_24h.length > 0 && (
+        <div className="bg-zinc-900 border border-blue-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Star className="w-4 h-4 text-blue-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">New Leads</h2>
+            <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-medium">
+              {dailyQueue.new_leads_24h.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">added in last 24 hours — reach out now</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {dailyQueue.new_leads_24h.slice(0, 5).map(lead => (
+              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-blue-500/[0.02] transition-colors">
+                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-blue-500" />
+                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                    <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">New</span>
+                    {lead.heat_score >= 60 && <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0 flex items-center gap-1"><Flame className="w-2.5 h-2.5" />{lead.heat_score}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                    {lead.phone && <span className="font-data">{lead.phone}</span>}
+                    {lead.service_type && <span>· {lead.service_type}</span>}
+                    {lead.city && <span>· {lead.city}</span>}
+                  </div>
+                </button>
+                <button
+                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+                >
+                  <Phone className="w-3 h-3" /> Call Now
+                </button>
+              </div>
+            ))}
+          </div>
+          {dailyQueue.new_leads_24h.length > 5 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <button onClick={() => goLeads({ sort: 'created_at', order: 'desc' })} className="text-xs text-zinc-500 hover:text-blue-400 transition-colors">
+                +{dailyQueue.new_leads_24h.length - 5} more new leads → view all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Daily Call Queue — top 40 to call today */}
+      {dailyQueue && dailyQueue.queue.length > 0 && (
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <ListChecks className="w-4 h-4 text-orange-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Today's Call Queue</h2>
+            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
+              {dailyQueue.queue.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">ranked by priority · top {Math.min(dailyQueue.queue.length, 40)}</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {dailyQueue.queue.slice(0, 8).map((lead, i) => (
+              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-white/[0.02] transition-colors">
+                <span className="text-[11px] font-bold font-data text-zinc-600 w-5 text-center flex-shrink-0">{i + 1}</span>
+                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500/40" />
+                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                    <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded flex-shrink-0">{lead._reason}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                    {lead.phone && <span className="font-data">{lead.phone}</span>}
+                    {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    {lead.city && <span>· {lead.city}</span>}
+                    <span className="text-orange-400/60">· score {lead._priority}</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+                >
+                  <Phone className="w-3 h-3" /> Log Call
+                </button>
+              </div>
+            ))}
+          </div>
+          {dailyQueue.queue.length > 8 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <button onClick={() => goLeads()} className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
+                +{dailyQueue.queue.length - 8} more in queue → view all leads
+              </button>
+            </div>
+          )}
         </div>
       )}
 

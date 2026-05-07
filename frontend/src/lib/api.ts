@@ -7,6 +7,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     ...options,
   });
+
+  if (!res.ok) {
+    let errorMsg = `Server error (${res.status})`;
+    try {
+      const json = await res.json();
+      errorMsg = json.error || errorMsg;
+    } catch {
+      // Response body wasn't JSON, use HTTP status message
+    }
+    throw new Error(errorMsg);
+  }
+
   const json = await res.json();
   if (!json.success) throw new Error(json.error || 'Request failed');
   return json.data as T;
@@ -45,6 +57,10 @@ export async function fetchLead(id: number): Promise<Lead & { activities: any[] 
   return request(`/leads/${id}`);
 }
 
+export async function fetchRepliedLeads(): Promise<Lead[]> {
+  return request('/leads/replied');
+}
+
 export async function createLead(data: Partial<Lead>): Promise<Lead> {
   return request('/leads', { method: 'POST', body: JSON.stringify(data) });
 }
@@ -71,6 +87,23 @@ export async function logActivity(leadId: number, data: { type: string; title: s
 
 export async function enrichLead(id: number): Promise<Lead & { activities: any[] }> {
   return request(`/leads/${id}/enrich`, { method: 'POST' });
+}
+
+export async function quickEmail(id: number, subject: string, body: string): Promise<{ message_id: string }> {
+  return request(`/leads/${id}/quick-email`, { method: 'POST', body: JSON.stringify({ subject, body }) });
+}
+
+export async function regeneratePitch(id: number): Promise<import('../types').PitchData> {
+  return request(`/leads/${id}/pitch`, { method: 'POST' });
+}
+
+export async function generateColdWrite(id: number): Promise<{
+  hook: string;
+  email: { subject: string; body: string };
+  sms: string;
+  call_opener: string;
+}> {
+  return request(`/leads/${id}/cold-write`, { method: 'POST' });
 }
 
 export async function bulkUpdateLeads(ids: number[], action: string, value?: string): Promise<{ affected: number }> {
@@ -124,6 +157,29 @@ export interface GbpReview { author: string; rating: number; text: string; ago: 
 export interface GbpData { found: boolean; maps_url?: string; phone?: string; reviews?: GbpReview[]; }
 export async function fetchGbpData(id: number): Promise<GbpData> {
   return request(`/leads/${id}/fetch-gbp`, { method: 'POST' });
+}
+
+export interface QueueLead {
+  id: number; business_name: string; phone: string; service_type: string;
+  heat_score: number; status: string; city: string | null; state?: string | null;
+  owner_name: string | null; contact_count?: number | null;
+  last_contacted_at: string | null; created_at: string;
+  _priority: number; _reason: string;
+  pitch_data?: string | null;
+}
+export interface DailyQueueData { queue: QueueLead[]; new_leads_24h: QueueLead[]; }
+export async function fetchDailyQueue(): Promise<DailyQueueData> {
+  return request('/leads/daily-queue');
+}
+
+export interface CallPrep {
+  opener: string;
+  context: string;
+  objections: string[];
+  goal: string;
+}
+export async function fetchCallPrep(leadId: number): Promise<CallPrep> {
+  return request(`/leads/${leadId}/call-prep`, { method: 'POST' });
 }
 
 // ─── Finder ───────────────────────────────────────────────────────────────────
@@ -208,6 +264,26 @@ export async function previewTemplate(templateId: number, leadId: number): Promi
 
 export async function fetchTemplateVariables(): Promise<TemplateVariable[]> {
   return request('/templates/variables');
+}
+
+// ─── Insights ─────────────────────────────────────────────────────────────────
+
+export interface Insight {
+  id: string;
+  type: 'warning' | 'tip' | 'info' | 'good';
+  priority: 1 | 2 | 3;
+  title: string;
+  description: string;
+  metric: { label: string; value: string; benchmark: string };
+  action: string;
+  action_href: string;
+}
+export interface InsightsData { insights: Insight[]; metrics: Record<string, number> }
+export async function fetchInsights(): Promise<InsightsData> {
+  return request('/insights');
+}
+export async function fetchAiInsightSummary(): Promise<{ summary: string }> {
+  return request('/insights/ai-summary', { method: 'POST' });
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -325,8 +401,9 @@ export async function fetchSequence(id: number): Promise<Sequence> {
   return request(`/sequences/${id}`);
 }
 
+export interface AbVariantStats { sent: number; opened: number; replied: number; reply_rate: number; open_rate: number; }
 export async function fetchSequenceAnalytics(id: number): Promise<{
-  steps: { step: number; label: string; sent: number; opened: number; clicked: number; replied: number; bounced: number }[];
+  steps: { step: number; label: string; sent: number; opened: number; clicked: number; replied: number; bounced: number; ab_data?: { A: AbVariantStats; B: AbVariantStats } }[];
   totals: { enrolled: number; active: number; completed: number; cancelled: number };
 }> {
   return request(`/sequences/${id}/analytics`);
@@ -405,6 +482,10 @@ export async function setAutopilot(enabled: boolean): Promise<{ sequences_update
   return request('/sequences/autopilot', { method: 'POST', body: JSON.stringify({ enabled }) });
 }
 
+export async function repairSequenceTemplates(): Promise<{ repaired_sequences: number; cleared_errors: number }> {
+  return request('/sequences/repair-templates', { method: 'POST' });
+}
+
 export async function markQueueItemSent(enrollmentId: number): Promise<void> {
   return request(`/sequences/queue/${enrollmentId}/mark-sent`, { method: 'POST' });
 }
@@ -435,8 +516,16 @@ export async function sendSms(lead_id: number, body?: string, template_id?: numb
   return request('/sms/send', { method: 'POST', body: JSON.stringify({ lead_id, body, template_id }) });
 }
 
+export async function bulkSendSms(data: { lead_ids: number[]; body?: string; template_id?: number }): Promise<{ sent: number; skipped: number; failed: number; total: number }> {
+  return request('/sms/bulk-send', { method: 'POST', body: JSON.stringify(data) });
+}
+
 export async function fetchSmsConversation(leadId: number): Promise<SmsMessage[]> {
   return request(`/sms/conversation/${leadId}`);
+}
+
+export async function draftSmsReply(lead_id: number): Promise<{ suggested_reply: string }> {
+  return request('/sms/draft-reply', { method: 'POST', body: JSON.stringify({ lead_id }) });
 }
 
 export async function fetchSmsInbox(limit?: number): Promise<SmsMessage[]> {
@@ -532,6 +621,8 @@ export interface CockpitAlerts {
     business_name: string;
     phone: string | null;
     status: string;
+    channel: 'sms' | 'email';
+    message: string | null;
   }>;
   upcoming_demos: Array<{
     id: number;
@@ -561,6 +652,10 @@ export async function fetchCockpitHotLeads(): Promise<HotLead[]> {
 
 export async function fetchCockpitAlerts(): Promise<CockpitAlerts> {
   return request('/cockpit/alerts');
+}
+
+export async function fetchMorningBrief(): Promise<{ brief: string; add_leads: boolean; add_leads_reason: string; pipeline_stats: { totalCallable: number; newToday: number; overdue: number; avg_heat: number } }> {
+  return request('/cockpit/morning-brief', { method: 'POST' });
 }
 
 // ─── AI Cold Caller ──────────────────────────────────────────────────────────

@@ -5,19 +5,20 @@ import {
   Star, Loader2, Search, Mail, Users, Wrench, Code,
   RefreshCw, AlertCircle, Calendar, Tag, Plus,
   FileText, Thermometer, Download, Sparkles, Send, Video, Clock, Timer, CalendarClock, Reply, Bot,
-  MailOpen, MousePointerClick, MailX, ShieldAlert, Linkedin,
+  MailOpen, MousePointerClick, MailX, ShieldAlert, Linkedin, Flame, Copy,
   ChevronDown, ChevronUp, Send as SendIcon,
 } from 'lucide-react';
 import { TemplatePreviewModal } from './TemplatePreviewModal';
 import { CallBriefModal } from './CallBriefModal';
 import { EnrollmentPanel } from '../sequences/EnrollmentPanel';
-import type { Lead, LeadStatus, EnrichmentData, ActivityType, SmsMessage } from '../../types';
+import type { Lead, LeadStatus, EnrichmentData, PitchData, ActivityType, SmsMessage } from '../../types';
 import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
 import { HeatScore } from '../shared/HeatScore';
 import { formatCurrency, formatRelativeTime, cn } from '../../lib/utils';
-import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail, useFetchGbpData } from '../../hooks/useLeads';
-import { useSmsConversation, useSendSms, useSmsStatus } from '../../hooks/useSms';
+import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useRegeneratePitch, useGenerateColdWrite, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail, useFetchGbpData } from '../../hooks/useLeads';
+import { useSmsConversation, useSendSms, useSmsStatus, useDraftSmsReply } from '../../hooks/useSms';
+import { useTemplates } from '../../hooks/useTemplates';
 import type { GbpData } from '../../lib/api';
 import { useToast } from '../../lib/toast';
 
@@ -89,6 +90,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const logActivity = useLogActivity();
   const updateLead = useUpdateLead();
   const enrichLead = useEnrichLead();
+  const regeneratePitch = useRegeneratePitch();
   const testSubmit = useTestSubmitLead();
   const testRespond = useTestRespondLead();
   const { data: scheduledEmails } = useScheduledEmails(leadId);
@@ -99,6 +101,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const smsStatus = useSmsStatus();
   const { data: smsMessages } = useSmsConversation(leadId);
   const sendSms = useSendSms();
+  const draftReply = useDraftSmsReply();
 
   const [noteText, setNoteText] = useState('');
   const [editValue, setEditValue] = useState<number | null>(null);
@@ -111,13 +114,26 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const [activityTypeFilter, setActivityTypeFilter] = useState<string | null>(null);
   const [smsOpen, setSmsOpen] = useState(true);
   const [smsDraft, setSmsDraft] = useState('');
+  const [smsTemplatePicker, setSmsTemplatePicker] = useState(false);
+  const { data: smsTemplates } = useTemplates({ channel: 'sms' });
 
   const lead = data as (Lead & { activities: any[] }) | undefined;
+
+  const [pitchTab, setPitchTab] = useState<'call' | 'sms' | 'email'>('call');
+  const coldWriteMutation = useGenerateColdWrite();
+  const [coldWrite, setColdWrite] = useState<{ hook: string; email: { subject: string; body: string }; sms: string; call_opener: string } | null>(null);
+  const [coldWriteTab, setColdWriteTab] = useState<'email' | 'sms' | 'call'>('email');
+  const [pitchCopied, setPitchCopied] = useState(false);
 
   const enrichment = useMemo<EnrichmentData | null>(() => {
     if (!lead?.enrichment_data) return null;
     try { return JSON.parse(lead.enrichment_data); } catch { return null; }
   }, [lead?.enrichment_data]);
+
+  const pitch = useMemo<PitchData | null>(() => {
+    if (!lead?.pitch_data) return null;
+    try { return JSON.parse(lead.pitch_data); } catch { return null; }
+  }, [lead?.pitch_data]);
 
   if (leadId === null) return null;
 
@@ -422,6 +438,20 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                       placeholder="e.g. John"
                       className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
                     />
+                    {!(lead as any).owner_name && (
+                      <div className="flex gap-1.5 mt-1.5">
+                        <a
+                          href={`https://www.google.com/search?q=${encodeURIComponent(`${lead.business_name} ${lead.city || ''} owner`)}`}
+                          target="_blank" rel="noreferrer"
+                          className="text-[9px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 border border-white/[0.06] transition-colors"
+                        >Google</a>
+                        <a
+                          href={`https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${lead.business_name} owner`)}`}
+                          target="_blank" rel="noreferrer"
+                          className="text-[9px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 border border-white/[0.06] transition-colors"
+                        >LinkedIn</a>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="text-[10px] text-zinc-600 block mb-1">Direct / Mobile</label>
@@ -933,6 +963,111 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 )}
               </div>
 
+              {/* Pitch */}
+              {pitch && (
+                <div className="px-5 py-4 border-b border-white/[0.04]">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <p className="text-overline text-zinc-600">Pitch</p>
+                      <span className={cn(
+                        'text-xs font-semibold px-1.5 py-0.5 rounded',
+                        pitch.recommended_offer === 'sam_ai'   && 'bg-orange-500/15 text-orange-400',
+                        pitch.recommended_offer === 'website'  && 'bg-blue-500/10 text-blue-400',
+                        pitch.recommended_offer === 'reviews'  && 'bg-yellow-500/10 text-yellow-400',
+                        pitch.recommended_offer === 'google_ads' && 'bg-emerald-500/10 text-emerald-400',
+                      )}>
+                        {{
+                          sam_ai:     'Sam AI',
+                          website:    'Website',
+                          reviews:    'Reviews',
+                          google_ads: 'Google Ads',
+                        }[pitch.recommended_offer]}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => lead && regeneratePitch.mutate(lead.id, { onSuccess: () => toast('Pitch regenerated'), onError: () => toast('Pitch failed', 'error') })}
+                      disabled={regeneratePitch.isPending}
+                      className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-40 transition-colors"
+                    >
+                      <RefreshCw className={cn('w-3 h-3', regeneratePitch.isPending && 'animate-spin')} />
+                      Regenerate
+                    </button>
+                  </div>
+
+                  {/* Gap callout */}
+                  <div className="flex items-start gap-2 bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2 mb-3">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-300/90 leading-relaxed">{pitch.pitch_angle}</p>
+                  </div>
+
+                  {/* Detected tools */}
+                  {pitch.detected_tools && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {Object.entries(pitch.detected_tools).map(([key, val]) =>
+                        val ? (
+                          <span key={key} className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-xs rounded-md ring-1 ring-emerald-500/20">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            {val}
+                          </span>
+                        ) : null
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tabs */}
+                  <div className="flex gap-1 mb-2">
+                    {(['call', 'sms', 'email'] as const).map(tab => (
+                      <button
+                        key={tab}
+                        onClick={() => { setPitchTab(tab); setPitchCopied(false); }}
+                        className={cn(
+                          'px-3 py-1 text-xs font-semibold rounded-md transition-colors',
+                          pitchTab === tab
+                            ? 'bg-orange-500/15 text-orange-400 ring-1 ring-orange-500/30'
+                            : 'text-zinc-500 hover:text-zinc-300',
+                        )}
+                      >
+                        {tab === 'call' ? 'Call' : tab === 'sms' ? 'SMS' : 'Email'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Pitch content */}
+                  <div className="relative bg-zinc-800/60 rounded-lg p-3 border border-white/[0.05]">
+                    {pitchTab === 'call' && (
+                      <p className="text-sm text-zinc-200 leading-relaxed pr-8">{pitch.call_opener}</p>
+                    )}
+                    {pitchTab === 'sms' && (
+                      <p className="text-sm text-zinc-200 leading-relaxed pr-8">{pitch.sms}</p>
+                    )}
+                    {pitchTab === 'email' && (
+                      <div className="pr-8">
+                        <p className="text-xs font-semibold text-zinc-400 mb-0.5">Subject</p>
+                        <p className="text-sm text-zinc-200 mb-2">{pitch.email.subject}</p>
+                        <p className="text-xs font-semibold text-zinc-400 mb-0.5">Body</p>
+                        <p className="text-sm text-zinc-200 whitespace-pre-line leading-relaxed">{pitch.email.body}</p>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        const text = pitchTab === 'call' ? pitch.call_opener
+                          : pitchTab === 'sms' ? pitch.sms
+                          : `Subject: ${pitch.email.subject}\n\n${pitch.email.body}`;
+                        navigator.clipboard.writeText(text);
+                        setPitchCopied(true);
+                        setTimeout(() => setPitchCopied(false), 2000);
+                      }}
+                      className="absolute top-2 right-2 p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.06] transition-colors"
+                    >
+                      {pitchCopied
+                        ? <span className="text-emerald-400 text-xs font-medium">✓</span>
+                        : <FileText className="w-3.5 h-3.5" />
+                      }
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Notes */}
               <div className="px-5 py-4 border-b border-white/[0.04]">
                 <div className="flex items-center justify-between mb-3">
@@ -996,7 +1131,8 @@ export function LeadDrawer({ leadId, onClose }: Props) {
 
               {/* Email engagement summary */}
               {lead.activities && (() => {
-                const emailSent = lead.activities.filter((a: any) => a.type === 'email_sent').length;
+                const emailSentActivities = lead.activities.filter((a: any) => a.type === 'email_sent');
+                const emailSent = emailSentActivities.length;
                 const emailOpens = lead.activities.filter((a: any) => a.type === 'email_opened').length;
                 const emailClicks = lead.activities.filter((a: any) => a.type === 'email_clicked').length;
                 const emailReplied = lead.activities.filter((a: any) => a.type === 'email_replied').length;
@@ -1004,6 +1140,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                 const emailComplained = lead.activities.some((a: any) => a.type === 'email_complained');
                 const openRate = emailSent > 0 ? Math.round((emailOpens / emailSent) * 100) : 0;
                 const firstOpenedRel = lead.email_opened_at ? formatRelativeTime(lead.email_opened_at) : null;
+                const isHot = emailOpens >= 2;
+                const lastSentActivity = emailSentActivities[emailSentActivities.length - 1];
+                const lastSentRel = lastSentActivity ? formatRelativeTime(lastSentActivity.created_at) : null;
 
                 if (!emailSent && !emailOpens && !emailClicks && !emailReplied && !emailBounced && !emailComplained) return null;
 
@@ -1025,7 +1164,15 @@ export function LeadDrawer({ leadId, onClose }: Props) {
 
                 return (
                   <div className="px-5 py-3 border-t border-white/[0.04]">
-                    <p className="text-overline text-zinc-600 mb-2">Email Engagement <span className="text-zinc-700 normal-case font-normal text-[10px]">· click to filter log</span></p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <p className="text-overline text-zinc-600">Email Engagement</p>
+                      {isHot && (
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded">
+                          <Flame className="w-3 h-3" /> {emailOpens}× opens
+                        </span>
+                      )}
+                      <span className="text-zinc-700 normal-case font-normal text-[10px]">· click to filter log</span>
+                    </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge type="email_sent" className="text-zinc-400">
                         <Mail className="w-3.5 h-3.5 text-violet-400" />
@@ -1062,6 +1209,9 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                         </Badge>
                       )}
                     </div>
+                    {lastSentRel && (
+                      <p className="text-[10px] text-zinc-600 mt-1.5">Last sent {lastSentRel}</p>
+                    )}
                   </div>
                 );
               })()}
@@ -1101,7 +1251,42 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                           </div>
                         ))}
                       </div>
+                      {/* SMS Template Picker */}
+                      {smsTemplatePicker && smsTemplates && smsTemplates.length > 0 && (
+                        <div className="mb-2 bg-zinc-900 border border-white/[0.06] rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                          {smsTemplates.map((tpl) => (
+                            <button
+                              key={tpl.id}
+                              onClick={() => {
+                                const rendered = tpl.body
+                                  .replace(/{business_name}/g, lead.business_name)
+                                  .replace(/{first_name}/g, lead.first_name || lead.business_name)
+                                  .replace(/{city}/g, lead.city || '')
+                                  .replace(/{sender_name}/g, 'Your team');
+                                setSmsDraft(rendered);
+                                setSmsTemplatePicker(false);
+                              }}
+                              className="w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors border-b border-white/[0.04] last:border-0"
+                            >
+                              <p className="font-medium text-zinc-200 truncate">{tpl.name}</p>
+                              <p className="text-zinc-500 truncate mt-0.5">{tpl.body.slice(0, 60)}…</p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex gap-2">
+                        <button
+                          onClick={() => setSmsTemplatePicker(v => !v)}
+                          title="Insert template"
+                          className={cn(
+                            'px-2.5 py-2 rounded-lg border text-zinc-400 transition-colors',
+                            smsTemplatePicker
+                              ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                              : 'bg-zinc-800 border-white/[0.06] hover:text-zinc-200'
+                          )}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
                         <input
                           value={smsDraft}
                           onChange={e => setSmsDraft(e.target.value)}
@@ -1115,6 +1300,14 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                           placeholder="Reply via SMS…"
                           className="flex-1 bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40"
                         />
+                        <button
+                          onClick={() => draftReply.mutate(lead.id, { onSuccess: (d) => setSmsDraft(d.suggested_reply) })}
+                          disabled={draftReply.isPending}
+                          title="Draft with AI"
+                          className="px-2.5 py-2 bg-violet-500/10 hover:bg-violet-500/20 disabled:opacity-40 text-violet-400 rounded-lg transition-colors border border-violet-500/20"
+                        >
+                          {draftReply.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                        </button>
                         <button
                           onClick={() => {
                             if (!smsDraft.trim()) return;
@@ -1135,6 +1328,59 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Cold Write results panel */}
+              {coldWrite && (
+                <div className="border-t border-white/[0.04] px-5 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-overline text-zinc-600">Cold Outreach</p>
+                    <button onClick={() => setColdWrite(null)} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {coldWrite.hook && (
+                    <div className="flex items-start gap-1.5 mb-2 text-[11px] text-amber-400 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg px-2.5 py-2">
+                      <Sparkles className="w-3 h-3 shrink-0 mt-0.5" />
+                      <span>{coldWrite.hook}</span>
+                    </div>
+                  )}
+                  <div className="flex gap-1 mb-2">
+                    {(['email', 'sms', 'call'] as const).map(tab => (
+                      <button key={tab} onClick={() => setColdWriteTab(tab)}
+                        className={cn('text-[10px] px-2 py-0.5 rounded transition-colors capitalize',
+                          coldWriteTab === tab ? 'bg-orange-500/15 text-orange-400' : 'text-zinc-500 hover:text-zinc-300')}
+                      >{tab}</button>
+                    ))}
+                  </div>
+                  <div className="relative">
+                    {coldWriteTab === 'email' && (
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] text-zinc-500">Subject: <span className="text-zinc-300">{coldWrite.email.subject}</span></div>
+                        <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed bg-zinc-800/60 rounded-lg p-2.5 max-h-40 overflow-y-auto pr-7">{coldWrite.email.body}</pre>
+                      </div>
+                    )}
+                    {coldWriteTab === 'sms' && (
+                      <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed bg-zinc-800/60 rounded-lg p-2.5 pr-7">{coldWrite.sms}</pre>
+                    )}
+                    {coldWriteTab === 'call' && (
+                      <pre className="text-[11px] text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed bg-zinc-800/60 rounded-lg p-2.5 pr-7">{coldWrite.call_opener}</pre>
+                    )}
+                    <button
+                      onClick={() => {
+                        const text = coldWriteTab === 'email'
+                          ? `Subject: ${coldWrite.email.subject}\n\n${coldWrite.email.body}`
+                          : coldWriteTab === 'sms' ? coldWrite.sms : coldWrite.call_opener;
+                        navigator.clipboard.writeText(text);
+                        toast('Copied');
+                      }}
+                      className="absolute top-1.5 right-1.5 p-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
+                      title="Copy"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1172,6 +1418,25 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                                 <div className="text-xs text-zinc-500 mt-0.5">{a.description}</div>
                               )}
                               <div className="text-[10px] text-zinc-600 mt-1 font-data">{formatRelativeTime(a.created_at)}</div>
+                              {a.type === 'email_sent' && (() => {
+                                let meta: { ai_personalized?: boolean; template_variant?: string } = {};
+                                try { meta = JSON.parse(a.metadata || '{}'); } catch { /* noop */ }
+                                if (!meta.ai_personalized && !meta.template_variant) return null;
+                                return (
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    {meta.ai_personalized && (
+                                      <span className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                        <Sparkles className="w-2.5 h-2.5" /> AI written
+                                      </span>
+                                    )}
+                                    {meta.template_variant && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                                        Variant {meta.template_variant}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                               {a.type === 'call_attempt' && (() => {
                                 let meta: { duration?: number; outcome?: string; recording_url?: string } = {};
                                 try { meta = JSON.parse(a.metadata || '{}'); } catch { /* noop */ }
@@ -1257,6 +1522,18 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                   <Globe className="w-4 h-4" />
                 </a>
               )}
+              <button
+                onClick={async () => {
+                  const result = await coldWriteMutation.mutateAsync(lead.id);
+                  setColdWrite(result);
+                  setColdWriteTab('email');
+                }}
+                disabled={coldWriteMutation.isPending}
+                title="AI cold write"
+                className="px-3 py-2.5 rounded-lg text-sm font-medium bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/20 transition-colors flex items-center gap-2 disabled:opacity-40"
+              >
+                {coldWriteMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              </button>
               {lead.phone && (
                 <a
                   href={`tel:${lead.phone}`}

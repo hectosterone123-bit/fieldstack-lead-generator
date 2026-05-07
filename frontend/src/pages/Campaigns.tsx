@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Send, Users, Mail, MessageSquare, Clock, AlertTriangle, CheckCircle,
   SkipForward, Eye, X, Zap, Target, TrendingUp, MailOpen,
-  PhoneCall, Play, Gauge, Reply, Settings as SettingsIcon,
+  PhoneCall, Play, Gauge, Reply, Settings as SettingsIcon, Sparkles,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
   useOutreachQueue, useQueueStats, useMarkSent, useDismissQueueItem,
   useSendEmail, useSendSms, useEmailStatus, useSmsStatus,
-  useSetEnrollmentAutoSend, useSequences, useEnrollLeads, useFlushOverdue, useMarkReplied, useAutopilot,
+  useSetEnrollmentAutoSend, useSequences, useEnrollLeads, useFlushOverdue, useMarkReplied, useAutopilot, useRepairTemplates,
 } from '../hooks/useSequences';
 import { fetchLeads, type LeadsFilters } from '../lib/api';
 import { useQuery } from '@tanstack/react-query';
@@ -46,6 +46,7 @@ export function Campaigns() {
   const enrollLeads = useEnrollLeads();
   const flushOverdue = useFlushOverdue();
   const { status: autopilotQuery, toggle: toggleAutopilot } = useAutopilot();
+  const repairTemplates = useRepairTemplates();
   const autopilot = autopilotQuery.data;
   const { toast } = useToast();
 
@@ -230,29 +231,60 @@ export function Campaigns() {
           color={stats?.sends_remaining === 0 ? 'text-red-400' : 'text-blue-400'}
           bgColor={stats?.sends_remaining === 0 ? 'bg-red-500/10' : 'bg-blue-500/10'}
           onClick={() => navigate('/settings')}
+          progress={stats && stats.daily_limit > 0 ? stats.sent_today / stats.daily_limit : undefined}
         />
       </div>
 
       {/* Send Limit Warning */}
-      {emailConfigured && stats && stats.daily_limit > 0 && stats.sends_remaining <= 10 && (
+      {emailConfigured && stats && stats.daily_limit > 0 && (stats.sends_remaining <= 10 || stats.is_warmup) && (
         <div className={cn(
           'flex items-center gap-2 px-5 py-2.5 border-b border-white/[0.04] text-xs',
           stats.sends_remaining === 0
             ? 'bg-red-500/[0.06] text-red-400'
-            : 'bg-amber-500/[0.06] text-amber-400'
+            : stats.sends_remaining <= 10
+              ? 'bg-amber-500/[0.06] text-amber-400'
+              : 'bg-zinc-800/60 text-zinc-500'
         )}>
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1">
             {stats.sends_remaining === 0
               ? 'Daily send limit reached — emails won\'t send until midnight.'
-              : `${stats.sends_remaining} email send${stats.sends_remaining === 1 ? '' : 's'} remaining today (${stats.sent_today}/${stats.daily_limit} used).`
+              : stats.sends_remaining <= 10
+                ? `${stats.sends_remaining} email send${stats.sends_remaining === 1 ? '' : 's'} remaining today (${stats.sent_today}/${stats.daily_limit} used).`
+                : null
             }
+            {stats.is_warmup && stats.warmup_day != null && (
+              <span className={stats.sends_remaining <= 10 ? 'ml-2 opacity-70' : ''}>
+                Warmup Day {stats.warmup_day} — limit is {stats.daily_limit}/day
+                {stats.warmup_next_limit != null && stats.warmup_next_limit > stats.daily_limit && ` (increases to ${stats.warmup_next_limit} next tier)`}.
+              </span>
+            )}
           </span>
           <button
             onClick={() => navigate('/settings')}
-            className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity"
+            className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity shrink-0"
           >
             <SettingsIcon className="w-3 h-3" /> Adjust limit
+          </button>
+        </div>
+      )}
+
+      {/* Missing Template Warning */}
+      {queue && queue.some(item => item.template_name === 'Unknown template') && (
+        <div className="flex items-center gap-2 px-5 py-2.5 border-b border-white/[0.04] bg-red-500/[0.06] text-xs text-red-400">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex-1">
+            {queue.filter(i => i.template_name === 'Unknown template').length} queue item(s) have missing templates — sequence steps reference deleted templates and can't send.
+          </span>
+          <button
+            onClick={() => repairTemplates.mutate(undefined, {
+              onSuccess: (data: { repaired_sequences: number; cleared_errors: number }) => toast(`Fixed ${data.repaired_sequences} sequence(s), cleared ${data.cleared_errors} error(s)`),
+              onError: (err) => toast(err.message, 'error'),
+            })}
+            disabled={repairTemplates.isPending}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-500/20 hover:bg-red-500/30 transition-colors disabled:opacity-50 shrink-0"
+          >
+            {repairTemplates.isPending ? 'Fixing…' : 'Fix Now'}
           </button>
         </div>
       )}
@@ -438,16 +470,16 @@ export function Campaigns() {
   );
 }
 
-function StatCard({ label, value, icon: Icon, color, bgColor, onClick, active }: {
+function StatCard({ label, value, icon: Icon, color, bgColor, onClick, active, progress }: {
   label: string; value: number | string; icon: React.ElementType; color: string; bgColor: string;
-  onClick?: () => void; active?: boolean;
+  onClick?: () => void; active?: boolean; progress?: number;
 }) {
   const Tag = onClick ? 'button' : 'div';
   return (
     <Tag
       onClick={onClick}
       className={cn(
-        'rounded-xl px-4 py-3 border transition-all text-left w-full',
+        'rounded-xl px-4 py-3 border transition-all text-left w-full overflow-hidden relative',
         bgColor,
         active ? 'border-orange-500/30 ring-1 ring-orange-500/20' : 'border-white/[0.04]',
         onClick && 'hover:brightness-110 hover:border-white/[0.10] cursor-pointer',
@@ -458,6 +490,14 @@ function StatCard({ label, value, icon: Icon, color, bgColor, onClick, active }:
         <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</span>
       </div>
       <p className={cn('text-xl font-semibold font-data', color)}>{value}</p>
+      {progress !== undefined && (
+        <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-white/[0.04]">
+          <div
+            className={cn('h-full transition-all', progress >= 1 ? 'bg-red-500/70' : progress >= 0.7 ? 'bg-amber-500/70' : 'bg-blue-500/60')}
+            style={{ width: `${Math.min(100, progress * 100)}%` }}
+          />
+        </div>
+      )}
     </Tag>
   );
 }
@@ -534,6 +574,11 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
           <span>Step {item.current_step}/{item.total_steps}</span>
           <span>·</span>
           <span>{item.step_label}</span>
+          {item.ai_personalize && (
+            <span className="flex items-center gap-0.5 text-violet-400 font-medium">
+              <Sparkles className="w-2.5 h-2.5" /> AI
+            </span>
+          )}
           <span>·</span>
           <span>{item.sequence_name}</span>
           {item.lead_email && item.channel === 'email' && (

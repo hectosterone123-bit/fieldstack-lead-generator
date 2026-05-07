@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ScoringRulesCard } from '../components/settings/ScoringRulesCard';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon, Code2, FlaskConical, Trash2, MessageSquare } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
 import { useToast } from '../lib/toast';
@@ -33,6 +33,10 @@ export function Settings() {
   const [digestEmail, setDigestEmail] = useState('');
   const [alertPhone, setAlertPhone] = useState('');
   const [dailySendLimit, setDailySendLimit] = useState('20');
+  const [monthlyReportEnabled, setMonthlyReportEnabled] = useState(true);
+  const [monthlyPlanCost, setMonthlyPlanCost] = useState('');
+  const [hotAlertEnabled, setHotAlertEnabled] = useState(true);
+  const [hotAlertThreshold, setHotAlertThreshold] = useState('70');
   const [warmupStartDate, setWarmupStartDate] = useState('');
   const [requeueEnabled, setRequeueEnabled] = useState(false);
   const [requeueDelayDays, setRequeueDelayDays] = useState('30');
@@ -55,8 +59,13 @@ export function Settings() {
   const [missedCallTextbackEnabled, setMissedCallTextbackEnabled] = useState(false);
   const [missedCallTextbackMessage, setMissedCallTextbackMessage] = useState('');
   const [callbackAutoSmsEnabled, setCallbackAutoSmsEnabled] = useState(true);
+  const [samAutoReplyEnabled, setSamAutoReplyEnabled] = useState(false);
+  const [widgetEnabled, setWidgetEnabled] = useState(true);
+  const [widgetApiKey, setWidgetApiKey] = useState('');
+  const [widgetEmbedCopied, setWidgetEmbedCopied] = useState(false);
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [inboundCopied, setInboundCopied] = useState(false);
+  const [voiceWebhookCopied, setVoiceWebhookCopied] = useState(false);
 
   const { data: callScripts } = useQuery({
     queryKey: ['call-scripts'],
@@ -85,6 +94,10 @@ export function Settings() {
       setDigestEmail(settings.digest_email || '');
       setAlertPhone(settings.alert_phone || '');
       setDailySendLimit(settings.daily_send_limit || '20');
+      setMonthlyReportEnabled(settings.monthly_report_enabled !== '0');
+      setMonthlyPlanCost(settings.monthly_plan_cost || '');
+      setHotAlertEnabled(settings.hot_alert_enabled !== '0');
+      setHotAlertThreshold(settings.hot_alert_threshold || '70');
       setWarmupStartDate(settings.warmup_start_date || '');
       setRequeueEnabled(settings.requeue_enabled === '1');
       setRequeueDelayDays(settings.requeue_delay_days || '30');
@@ -107,6 +120,9 @@ export function Settings() {
       setMissedCallTextbackEnabled(settings.missed_call_textback_enabled === '1');
       setMissedCallTextbackMessage(settings.missed_call_textback_message || '');
       setCallbackAutoSmsEnabled(settings.callback_auto_sms_enabled !== '0');
+      setSamAutoReplyEnabled(settings.sam_auto_reply_enabled === '1');
+      setWidgetEnabled(settings.widget_enabled !== '0');
+      setWidgetApiKey(settings.widget_api_key || '');
     }
   }, [settings]);
 
@@ -141,6 +157,10 @@ export function Settings() {
       { key: 'digest_email', value: digestEmail },
       { key: 'alert_phone', value: alertPhone },
       { key: 'daily_send_limit', value: dailySendLimit },
+      { key: 'monthly_report_enabled', value: monthlyReportEnabled ? '1' : '0' },
+      { key: 'monthly_plan_cost', value: monthlyPlanCost },
+      { key: 'hot_alert_enabled', value: hotAlertEnabled ? '1' : '0' },
+      { key: 'hot_alert_threshold', value: hotAlertThreshold },
       { key: 'warmup_start_date', value: warmupStartDate },
       { key: 'requeue_enabled', value: requeueEnabled ? '1' : '0' },
       { key: 'requeue_delay_days', value: requeueDelayDays },
@@ -163,6 +183,8 @@ export function Settings() {
       { key: 'missed_call_textback_enabled', value: missedCallTextbackEnabled ? '1' : '0' },
       { key: 'missed_call_textback_message', value: missedCallTextbackMessage },
       { key: 'callback_auto_sms_enabled', value: callbackAutoSmsEnabled ? '1' : '0' },
+      { key: 'widget_enabled', value: widgetEnabled ? '1' : '0' },
+      { key: 'sam_auto_reply_enabled', value: samAutoReplyEnabled ? '1' : '0' },
     ]);
   }
 
@@ -329,6 +351,26 @@ export function Settings() {
           />
         </div>
 
+        {/* Sam AI Auto-Reply */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Sam AI Auto-Reply</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSamAutoReplyEnabled(v => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${samAutoReplyEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${samAutoReplyEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500">
+            When a contractor texts back, Sam AI automatically responds to qualify them and push toward booking. If the reply shows clear interest, your booking link is appended automatically.
+          </p>
+        </div>
+
         {/* Resend API Key */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -473,6 +515,64 @@ export function Settings() {
                 7 AM daily: how many Loom videos are due + overnight send stats.
               </p>
             </div>
+
+            {/* Monthly ROI Report */}
+            <div className="border border-white/[0.05] rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-zinc-300 font-medium">Monthly ROI Report</p>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Emailed on the 1st of each month with last month's revenue, deals, and ROI.</p>
+                </div>
+                <button
+                  onClick={() => setMonthlyReportEnabled(!monthlyReportEnabled)}
+                  className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${monthlyReportEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${monthlyReportEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">Plan Cost (for ROI calculation)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={monthlyPlanCost}
+                  onChange={e => setMonthlyPlanCost(e.target.value)}
+                  placeholder="3500"
+                  className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                />
+                <p className="text-[10px] text-zinc-600 mt-1">Monthly cost of this plan in $. Leave blank to hide the ROI line.</p>
+              </div>
+            </div>
+
+            {/* Hot Lead Decay Alert */}
+            <div className="border border-white/[0.05] rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-zinc-300 font-medium">Hot Lead Decay Alert</p>
+                  <p className="text-[10px] text-zinc-600 mt-0.5">Morning email listing hot leads not contacted in 24+ hours.</p>
+                </div>
+                <button
+                  onClick={() => setHotAlertEnabled(!hotAlertEnabled)}
+                  className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${hotAlertEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${hotAlertEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">Heat Score Threshold</label>
+                <input
+                  type="number"
+                  min={50}
+                  max={100}
+                  value={hotAlertThreshold}
+                  onChange={e => setHotAlertThreshold(e.target.value)}
+                  placeholder="70"
+                  className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                />
+                <p className="text-[10px] text-zinc-600 mt-1">Leads at or above this score trigger the alert (default 70).</p>
+              </div>
+            </div>
+
             <div>
               <label className="text-xs text-zinc-400 mb-1 block">Hot Lead Alert Phone</label>
               <input
@@ -950,23 +1050,45 @@ export function Settings() {
             <p className="text-[10px] text-zinc-600 mt-1">Leave blank to use the default. Supports {'{sender_name}'} and {'{service_type}'}.</p>
           </div>
           {appUrl && (
-            <div>
-              <label className="text-xs text-zinc-500 mb-1 block">Twilio StatusCallback URL</label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
-                  {appUrl}/api/webhooks/twilio-call-status
-                </code>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(`${appUrl}/api/webhooks/twilio-call-status`);
-                    setWebhookCopied(true);
-                    setTimeout(() => setWebhookCopied(false), 2000);
-                  }}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
-                >
-                  {webhookCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  {webhookCopied ? 'Copied' : 'Copy'}
-                </button>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">StatusCallback URL <span className="text-zinc-600">(Twilio → Phone Number → Voice → Call Status Changes)</span></label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
+                    {appUrl}/api/webhooks/twilio-call-status
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${appUrl}/api/webhooks/twilio-call-status`);
+                      setWebhookCopied(true);
+                      setTimeout(() => setWebhookCopied(false), 2000);
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                  >
+                    {webhookCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {webhookCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-zinc-500 mb-1 block">Voice Webhook URL <span className="text-zinc-600">(Twilio → Phone Number → Voice → "A call comes in")</span></label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
+                    {appUrl}/api/sms/voice-webhook
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${appUrl}/api/sms/voice-webhook`);
+                      setVoiceWebhookCopied(true);
+                      setTimeout(() => setVoiceWebhookCopied(false), 2000);
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                  >
+                    {voiceWebhookCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {voiceWebhookCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-600 mt-1">Set this as Webhook → HTTP POST in Twilio. Fires on no-answer, busy, or failed calls and auto-texts the caller.</p>
               </div>
             </div>
           )}
@@ -991,8 +1113,49 @@ export function Settings() {
           </p>
         </div>
 
+        {/* Lead Capture Widget */}
+        {appUrl && widgetApiKey && (
+          <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-zinc-400" />
+                <h2 className="text-sm font-medium text-zinc-200">Lead Capture Widget</h2>
+              </div>
+              <button
+                onClick={() => setWidgetEnabled(!widgetEnabled)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${widgetEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${widgetEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-3">
+              Paste this one-line snippet on your "Get a Quote" page. Adds a floating button → contact form. Submissions create a lead instantly and trigger speed-to-lead calling.
+            </p>
+            <div className="flex items-start gap-2">
+              <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 break-all border border-white/[0.04] leading-relaxed">
+                {`<script src="${appUrl}/api/widget/embed.js" data-key="${widgetApiKey}" data-service="hvac"></script>`}
+              </code>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`<script src="${appUrl}/api/widget/embed.js" data-key="${widgetApiKey}" data-service="hvac"></script>`);
+                  setWidgetEmbedCopied(true);
+                  setTimeout(() => setWidgetEmbedCopied(false), 2000);
+                }}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+              >
+                {widgetEmbedCopied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {widgetEmbedCopied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-zinc-600 mt-2">Change <span className="text-zinc-500">data-service</span> to: hvac · roofing · plumbing · electrical · landscaping · general</p>
+          </div>
+        )}
+
         {/* Scoring Rules */}
         <ScoringRulesCard />
+
+        {/* Demo Data */}
+        <DemoDataCard />
 
         {/* Save */}
         <button
@@ -1003,6 +1166,86 @@ export function Settings() {
           {saveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save Settings
         </button>
+      </div>
+    </div>
+  );
+}
+
+function DemoDataCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const seedMutation = useMutation({
+    mutationFn: () => fetch('/api/demo/seed', { method: 'POST' }).then(r => r.json()),
+    onSuccess: (data) => {
+      if (data.skipped) {
+        toast('Demo leads already exist — reset first to re-seed', 'error');
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['leads'] });
+        queryClient.invalidateQueries({ queryKey: ['stats'] });
+        toast(`${data.inserted ?? 15} demo leads added`);
+      }
+    },
+    onError: () => toast('Failed to seed demo data', 'error'),
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: () => fetch('/api/demo/reset', { method: 'DELETE' }).then(r => r.json()),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['stats'] });
+      setConfirmReset(false);
+      toast(`Removed ${data.deleted ?? 0} demo lead(s)`);
+    },
+    onError: () => toast('Failed to reset demo data', 'error'),
+  });
+
+  return (
+    <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <FlaskConical className="w-4 h-4 text-zinc-400" />
+        <h2 className="text-sm font-medium text-zinc-200">Demo Data</h2>
+      </div>
+      <p className="text-xs text-zinc-500 mb-4">
+        Populate the pipeline with 15 realistic HVAC leads for demos and testing. Demo leads are tagged with source&nbsp;=&nbsp;"demo" and can be wiped at any time.
+      </p>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => seedMutation.mutate()}
+          disabled={seedMutation.isPending || resetMutation.isPending}
+          className="flex items-center gap-1.5 px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+        >
+          {seedMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+          Seed Demo Data
+        </button>
+        {!confirmReset ? (
+          <button
+            onClick={() => setConfirmReset(true)}
+            disabled={seedMutation.isPending || resetMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Reset Demo Data
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-zinc-400">Remove all demo leads?</span>
+            <button
+              onClick={() => resetMutation.mutate()}
+              disabled={resetMutation.isPending}
+              className="px-3 py-1.5 bg-red-500 hover:bg-red-400 text-white rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+            >
+              {resetMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Confirm'}
+            </button>
+            <button
+              onClick={() => setConfirmReset(false)}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-lg text-xs font-medium transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

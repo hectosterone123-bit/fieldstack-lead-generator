@@ -614,11 +614,23 @@ export function Finder() {
                 }
               </p>
             )}
-            {(search.isError || batchSearch.isError) && (
-              <p className="text-red-400 text-xs text-center">
-                {((search.error || batchSearch.error) as Error)?.message}
-              </p>
-            )}
+            {(search.isError || batchSearch.isError) && (() => {
+              const errMsg = ((search.error || batchSearch.error) as Error)?.message || '';
+              const isApiKeyError = errMsg.toLowerCase().includes('api key') || errMsg.toLowerCase().includes('apikey') || errMsg.includes('403');
+              const isGoogleSource = form.source === 'google' || form.source === 'both';
+              if (isApiKeyError && isGoogleSource) {
+                return (
+                  <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-400">
+                    <Zap className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Google Places API key not configured</p>
+                      <p className="text-amber-500/70 mt-0.5">Switch to OSM (free) or add <code className="bg-amber-500/10 px-1 rounded">GOOGLE_PLACES_API_KEY</code> to your backend .env and restart.</p>
+                    </div>
+                  </div>
+                );
+              }
+              return <p className="text-red-400 text-xs text-center">{errMsg}</p>;
+            })()}
 
             {/* City log for batch */}
             {cityLog.length > 0 && (
@@ -741,7 +753,14 @@ export function Finder() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-3 mb-1.5">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-zinc-200 leading-snug truncate">{result.business_name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-medium text-zinc-200 leading-snug truncate">{result.business_name}</p>
+                            {result.source === 'google_places' ? (
+                              <span className="flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/20">G</span>
+                            ) : result.source === 'osm_finder' ? (
+                              <span className="flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-500 border border-white/[0.04]">OSM</span>
+                            ) : null}
+                          </div>
                           {(result.city || result.address) && (
                             <div className="flex items-center gap-1 text-zinc-600 text-xs mt-0.5">
                               <MapPin className="w-2.5 h-2.5 flex-shrink-0" />

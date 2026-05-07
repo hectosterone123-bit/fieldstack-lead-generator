@@ -5,7 +5,7 @@ import {
   fetchOutreachQueue, fetchQueueStats, markQueueItemSent, markQueueItemReplied, dismissQueueItem,
   sendQueueEmail, fetchEmailStatus, sendQueueSms, fetchSmsChannelStatus,
   setEnrollmentAutoSend, flushOverdue, fetchAutopilotStatus, setAutopilot,
-  fetchSequenceTemplates, cloneSequenceTemplate,
+  fetchSequenceTemplates, cloneSequenceTemplate, repairSequenceTemplates,
 } from '../lib/api';
 import { useToast } from '../lib/toast';
 
@@ -302,6 +302,17 @@ export function useFlushOverdue() {
       toast(`Flushed ${data.sent} overdue item(s)`);
     },
     onError: (err: Error) => toast(err.message, 'error'),
+  });
+}
+
+export function useRepairTemplates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: repairSequenceTemplates,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['outreach-queue'] });
+      qc.invalidateQueries({ queryKey: ['sequences'] });
+    },
   });
 }
 

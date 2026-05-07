@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchCockpitToday, fetchCockpitTargets, updateCockpitTargets,
-  fetchCockpitHotLeads, fetchCockpitAlerts,
+  fetchCockpitHotLeads, fetchCockpitAlerts, fetchMorningBrief, fetchDailyQueue,
+  fetchStats,
 } from '../lib/api';
 
 export function useCockpitMetrics() {
@@ -40,5 +41,26 @@ export function useCockpitAlerts() {
     queryKey: ['cockpit', 'alerts'],
     queryFn: fetchCockpitAlerts,
     refetchInterval: 60_000,
+  });
+}
+
+export function useDailyQueue() {
+  return useQuery({
+    queryKey: ['daily-queue'],
+    queryFn: fetchDailyQueue,
+    staleTime: 60_000,
+  });
+}
+
+export function useCockpitStats() {
+  return useQuery({ queryKey: ['stats'], queryFn: fetchStats, staleTime: 60_000 });
+}
+
+export function useMorningBrief(enabled = false) {
+  return useQuery({
+    queryKey: ['cockpit', 'morning-brief'],
+    queryFn: fetchMorningBrief,
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }

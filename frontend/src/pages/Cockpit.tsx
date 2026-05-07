@@ -1,16 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Crosshair, PhoneCall, Mail, ClipboardList, Pencil, Check, X,
-  Phone, Target, Users, Flame, Copy, Timer, Play, Pause,
+  Phone, Target, Users, Flame, Timer, Play, Pause,
   BarChart2, Zap, Trophy, MessageSquare, CalendarCheck, ArrowRight,
+  ChevronDown, Loader2, AlertCircle, Sparkles, Shield,
 } from 'lucide-react';
 import {
   useCockpitMetrics, useCockpitTargets, useUpdateCockpitTargets,
-  useCockpitHotLeads, useCockpitAlerts,
+  useCockpitHotLeads, useCockpitAlerts, useDailyQueue, useMorningBrief,
+  useCockpitStats,
 } from '../hooks/useCockpit';
+import { useAutoLoadQueue } from '../hooks/useCalls';
 import { cn } from '../lib/utils';
-import type { HotLead, CockpitAlerts } from '../lib/api';
+import { fetchCallPrep, fetchTemplates } from '../lib/api';
+import type { CockpitAlerts, QueueLead, CallPrep } from '../lib/api';
 
 // ─── Checklist Data ───────────────────────────────────────────────────────────
 
@@ -402,44 +406,339 @@ function TargetCard({ icon: Icon, label, current, target, onUpdateTarget }: {
   );
 }
 
-// ─── Hot Call Queue ───────────────────────────────────────────────────────────
+// ─── Gatekeeper Batch Card ────────────────────────────────────────────────────
 
-function HotQueue({ leads }: { leads: HotLead[] }) {
-  const [copied, setCopied] = useState<number | null>(null);
+function GatekeeperBatchCard({ count }: { count: number }) {
+  const navigate = useNavigate();
+  const autoLoadQueue = useAutoLoadQueue();
+  const hour = new Date().getHours();
+  const inGoodWindow = hour < 9 || hour >= 17;
 
-  function copyPhone(id: number, phone: string) {
-    navigator.clipboard.writeText(phone);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 1500);
+  const scriptId = (() => {
+    const s = localStorage.getItem('cockpit-last-script');
+    return s ? parseInt(s) : null;
+  })();
+
+  function handleLoad() {
+    if (!scriptId) return;
+    autoLoadQueue.mutate(
+      { count: 40, filter: 'gatekeeper', templateId: scriptId },
+      { onSuccess: () => navigate('/caller') }
+    );
   }
 
   return (
-    <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Flame className="w-4 h-4 text-orange-500" />
-        <span className="text-sm font-medium text-zinc-300">Hot Leads to Call</span>
-        <span className="ml-auto text-xs text-zinc-600">{leads.length} ready</span>
+    <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-violet-400" />
+          <span className="text-sm font-medium text-zinc-300">Gatekeeper Batch</span>
+          <span className="text-xs font-data text-violet-400">{count} leads</span>
+        </div>
+        <span className={cn(
+          'text-[10px] px-2 py-0.5 rounded-full font-medium',
+          inGoodWindow ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+        )}>
+          {inGoodWindow ? 'Good window' : 'Bad window'}
+        </span>
       </div>
-      {leads.length === 0 ? (
-        <p className="text-xs text-zinc-600 text-center py-6">No leads with phones yet. Find some in Finder.</p>
-      ) : (
-        <div className="space-y-1">
-          {leads.map(lead => (
-            <div key={lead.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03]">
+      <p className="text-xs text-zinc-500">Best called before 9am or after 5pm — when the gatekeeper isn't at the desk.</p>
+      <button
+        onClick={handleLoad}
+        disabled={!scriptId || autoLoadQueue.isPending}
+        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-violet-600/20 border border-violet-500/30 text-violet-300 hover:bg-violet-600/30 transition-colors disabled:opacity-40"
+      >
+        {autoLoadQueue.isPending
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <Play className="w-3.5 h-3.5" />}
+        Load Gatekeepers
+      </button>
+      {!scriptId && (
+        <p className="text-[10px] text-zinc-600 text-center">Select a script in the Morning Queue first</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Morning Brief Card ───────────────────────────────────────────────────────
+
+function MorningBriefCard() {
+  const [briefEnabled, setBriefEnabled] = useState(
+    () => localStorage.getItem('cockpit-brief-enabled') === 'true'
+  );
+  const { data: brief, isLoading: briefLoading, refetch } = useMorningBrief(briefEnabled);
+
+  function handleEnable() {
+    localStorage.setItem('cockpit-brief-enabled', 'true');
+    setBriefEnabled(true);
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-white/[0.06] rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-orange-500" />
+          <span className="text-sm font-medium text-zinc-300">Today's Brief</span>
+        </div>
+        <button
+          onClick={() => refetch()}
+          disabled={briefLoading || !briefEnabled}
+          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-40 px-2 py-1 rounded hover:bg-white/[0.05]"
+        >
+          {briefLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Refresh'}
+        </button>
+      </div>
+
+      {!briefEnabled ? (
+        <button
+          onClick={handleEnable}
+          className="w-full py-4 flex items-center justify-center gap-2 text-sm text-zinc-400 hover:text-zinc-300 rounded-lg border border-white/[0.06] hover:border-orange-500/30 transition-colors"
+        >
+          <Sparkles className="w-4 h-4" />
+          Get AI morning brief
+        </button>
+      ) : briefLoading ? (
+        <div className="flex items-center justify-center py-6">
+          <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+        </div>
+      ) : brief ? (
+        <div className="space-y-3">
+          <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{brief.brief}</p>
+          {brief.add_leads && (
+            <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-500/20 rounded-lg p-3">
+              <AlertCircle className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm text-zinc-200 truncate leading-tight">{lead.business_name}</p>
-                <p className="text-xs text-zinc-600 truncate">{[lead.city, lead.state].filter(Boolean).join(', ')}</p>
+                <p className="text-xs font-medium text-amber-400 mb-1">Need more leads</p>
+                <p className="text-xs text-amber-300/80 mb-2">{brief.add_leads_reason}</p>
+                <Link
+                  to="/finder"
+                  className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
+                >
+                  Go to Finder <ArrowRight className="w-3 h-3" />
+                </Link>
               </div>
-              <span className={cn('text-xs font-data font-medium flex-shrink-0',
-                lead.heat_score >= 70 ? 'text-orange-400' : 'text-zinc-500'
-              )}>
-                {lead.heat_score}
-              </span>
-              <button onClick={() => copyPhone(lead.id, lead.phone)}
-                className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-400 hover:text-zinc-200 transition-colors flex-shrink-0">
-                {copied === lead.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span className="font-data">{lead.phone}</span>
-              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Morning Queue ───────────────────────────────────────────────────────────
+
+interface MorningQueueProps {
+  dailyQueue: QueueLead[];
+  isLoading: boolean;
+}
+
+function MorningQueue({ dailyQueue, isLoading }: MorningQueueProps) {
+  const navigate = useNavigate();
+  const [expandedPrep, setExpandedPrep] = useState<number | null>(null);
+  const [prepData, setPrepData] = useState<Record<number, CallPrep>>({});
+  const [prepLoading, setPrepLoading] = useState<number | null>(null);
+  const [scriptId, setScriptId] = useState<number | null>(() => {
+    const stored = localStorage.getItem('cockpit-last-script');
+    return stored ? parseInt(stored) : null;
+  });
+  const [scripts, setScripts] = useState<Array<{ id: number; name: string }>>([]);
+
+  const autoLoadQueue = useAutoLoadQueue();
+
+  // Load call script templates on mount
+  useEffect(() => {
+    fetchTemplates({ channel: 'call_script' }).then(templates => {
+      setScripts(templates.map(t => ({ id: t.id, name: t.name })));
+    });
+  }, []);
+
+  async function loadPrepForLead(leadId: number) {
+    if (prepData[leadId]) return;
+    setPrepLoading(leadId);
+    try {
+      const prep = await fetchCallPrep(leadId);
+      setPrepData(prev => ({ ...prev, [leadId]: prep }));
+    } catch (err) {
+      console.error('Failed to load call prep:', err);
+    } finally {
+      setPrepLoading(null);
+    }
+  }
+
+  function handleLoadAndGo() {
+    if (!scriptId) return;
+    localStorage.setItem('cockpit-last-script', String(scriptId));
+    autoLoadQueue.mutate(
+      { serviceType: undefined, count: 40, templateId: scriptId, filter: 'morning' },
+      {
+        onSuccess: () => {
+          navigate('/caller');
+        },
+      }
+    );
+  }
+
+  const reasonColors: Record<string, string> = {
+    'New': 'bg-orange-500/20 text-orange-400',
+    'Overdue': 'bg-amber-500/20 text-amber-400',
+    'Qualified': 'bg-blue-500/20 text-blue-400',
+    'Proposal': 'bg-violet-500/20 text-violet-400',
+    'Follow': 'bg-zinc-700 text-zinc-300',
+  };
+
+  function getReasonColor(reason: string) {
+    for (const [key, color] of Object.entries(reasonColors)) {
+      if (reason.includes(key)) return color;
+    }
+    return reasonColors['Follow'];
+  }
+
+  const callableCount = dailyQueue.length;
+  const pipelineHealth = callableCount >= 25 ? 'healthy' : callableCount >= 15 ? 'warning' : 'critical';
+
+  return (
+    <div className="bg-zinc-900 border border-white/[0.06] rounded-xl p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Flame className="w-4 h-4 text-orange-500" />
+          <span className="text-sm font-medium text-zinc-300">Morning Queue</span>
+          <span className="text-xs text-zinc-600">{callableCount} ready</span>
+        </div>
+        {pipelineHealth === 'critical' && (
+          <div className="flex items-center gap-1 text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded-full">
+            <AlertCircle className="w-3 h-3" />
+            Low pipeline
+          </div>
+        )}
+      </div>
+
+      {/* Script selector + Load & Go button */}
+      <div className="flex items-center gap-2">
+        <select
+          value={scriptId ?? ''}
+          onChange={e => {
+            const id = parseInt(e.target.value);
+            if (!isNaN(id)) {
+              setScriptId(id);
+              localStorage.setItem('cockpit-last-script', String(id));
+            }
+          }}
+          className="flex-1 px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-300 [color-scheme:dark] focus:border-orange-500/40"
+        >
+          <option value="">Pick a script...</option>
+          {scripts.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={handleLoadAndGo}
+          disabled={!scriptId || autoLoadQueue.isPending || isLoading}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-orange-600 hover:bg-orange-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {autoLoadQueue.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Play className="w-4 h-4" />
+          )}
+          Load & Go
+        </button>
+      </div>
+
+      {/* Leads list */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+        </div>
+      ) : callableCount === 0 ? (
+        <p className="text-xs text-zinc-600 text-center py-6">No calleable leads. Go find some in Finder.</p>
+      ) : (
+        <div className="space-y-1 max-h-96 overflow-y-auto">
+          {dailyQueue.slice(0, 40).map(lead => (
+            <div key={lead.id}>
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-zinc-200 truncate leading-tight">{lead.business_name}</p>
+                  <div className="flex items-center gap-1.5 text-xs text-zinc-600">
+                    <span>{[lead.city].filter(Boolean).join('')}</span>
+                    <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-medium', getReasonColor(lead._reason))}>
+                      {lead._reason}
+                    </span>
+                  </div>
+                </div>
+                <span className={cn('text-xs font-data font-medium flex-shrink-0', lead.heat_score >= 70 ? 'text-orange-400' : 'text-zinc-500')}>
+                  {lead.heat_score}
+                </span>
+                <button
+                  onClick={() => setExpandedPrep(expandedPrep === lead.id ? null : lead.id)}
+                  className="p-1 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.05] transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                  title="Show AI call prep"
+                >
+                  <ChevronDown className={cn('w-4 h-4 transition-transform', expandedPrep === lead.id && 'rotate-180')} />
+                </button>
+              </div>
+
+              {/* Call prep expansion */}
+              {expandedPrep === lead.id && (
+                <div className="bg-zinc-800/50 border-l-2 border-orange-500/40 ml-2 pl-2 py-2 pr-2 mb-1 rounded text-xs text-zinc-400 space-y-1.5">
+                  {prepLoading === lead.id ? (
+                    <div className="flex items-center gap-2 py-2">
+                      <Loader2 className="w-3 h-3 animate-spin text-orange-500" />
+                      <span>Generating...</span>
+                    </div>
+                  ) : prepData[lead.id] ? (
+                    <>
+                      {/* Pitch angle from gap detection */}
+                      {(() => {
+                        try {
+                          const p = lead.pitch_data ? JSON.parse(lead.pitch_data) : null;
+                          if (!p?.pitch_angle) return null;
+                          return (
+                            <div className="flex items-start gap-1.5 bg-amber-500/8 border border-amber-500/20 rounded px-2 py-1.5">
+                              <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wide flex-shrink-0 mt-0.5">Gap</span>
+                              <p className="text-amber-300/90 text-xs leading-snug">{p.pitch_angle}</p>
+                            </div>
+                          );
+                        } catch { return null; }
+                      })()}
+                      <div>
+                        <p className="text-zinc-500 text-[10px] uppercase tracking-wide mb-0.5">Opener</p>
+                        <p className="text-zinc-300">{prepData[lead.id].opener}</p>
+                      </div>
+                      {prepData[lead.id].context && (
+                        <div>
+                          <p className="text-zinc-500 text-[10px] uppercase tracking-wide mb-0.5">Context</p>
+                          <p className="text-zinc-300">{prepData[lead.id].context}</p>
+                        </div>
+                      )}
+                      {prepData[lead.id].objections?.length > 0 && (
+                        <div>
+                          <p className="text-zinc-500 text-[10px] uppercase tracking-wide mb-0.5">Likely Objections</p>
+                          <ul className="list-disc list-inside space-y-0.5 text-zinc-300">
+                            {prepData[lead.id].objections.map((obj, i) => (
+                              <li key={i}>{obj}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {prepData[lead.id].goal && (
+                        <div>
+                          <p className="text-zinc-500 text-[10px] uppercase tracking-wide mb-0.5">Goal</p>
+                          <p className="text-zinc-300">{prepData[lead.id].goal}</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => loadPrepForLead(lead.id)}
+                      className="text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      Get AI prep
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -464,11 +763,24 @@ function AlertsSection({ alerts }: { alerts: CockpitAlerts }) {
               {alerts.hot_replies.length}
             </span>
           </div>
-          <div className="space-y-1.5 mb-2">
+          <div className="space-y-2 mb-2">
             {alerts.hot_replies.map(r => (
-              <div key={r.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm text-zinc-200 truncate">{r.business_name}</span>
-                <span className="text-xs text-zinc-500 flex-shrink-0">{relTime(r.created_at)}</span>
+              <div key={r.id} className="space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={cn(
+                      'text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0',
+                      r.channel === 'sms'
+                        ? 'bg-blue-500/15 text-blue-400'
+                        : 'bg-orange-500/15 text-orange-400'
+                    )}>{r.channel.toUpperCase()}</span>
+                    <span className="text-sm text-zinc-200 truncate">{r.business_name}</span>
+                  </div>
+                  <span className="text-xs text-zinc-500 flex-shrink-0">{relTime(r.created_at)}</span>
+                </div>
+                {r.message && (
+                  <p className="text-xs text-zinc-500 truncate pl-8">{r.message}</p>
+                )}
               </div>
             ))}
           </div>
@@ -534,9 +846,11 @@ function WinField() {
 export function Cockpit() {
   const { data: metrics } = useCockpitMetrics();
   const { data: targets } = useCockpitTargets();
-  const { data: hotLeads = [] } = useCockpitHotLeads();
+  useCockpitHotLeads();
   const { data: alerts } = useCockpitAlerts();
   const updateTargets = useUpdateCockpitTargets();
+  const { data: dailyQueueData, isLoading: dailyQueueLoading } = useDailyQueue();
+  const { data: stats } = useCockpitStats();
 
   const [checklist, setChecklist] = useState<Record<string, boolean>>(loadChecklist);
 
@@ -648,7 +962,7 @@ export function Cockpit() {
         <p className="text-xs text-zinc-500 px-1">{paceText}</p>
       )}
 
-      {/* Checklist + Hot Call Queue */}
+      {/* Checklist + Morning Queue */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="grid grid-cols-2 gap-3">
           {CHECKLIST_GROUPS.map(group => {
@@ -682,7 +996,16 @@ export function Cockpit() {
             );
           })}
         </div>
-        <HotQueue leads={hotLeads} />
+        <div className="space-y-3">
+          <MorningBriefCard />
+          <MorningQueue
+            dailyQueue={dailyQueueData?.queue ?? []}
+            isLoading={dailyQueueLoading}
+          />
+          {(stats?.gatekeeper_leads_count ?? 0) > 0 && (
+            <GatekeeperBatchCard count={stats!.gatekeeper_leads_count} />
+          )}
+        </div>
       </div>
 
       {/* Alerts: Pending Replies + Upcoming Demos */}

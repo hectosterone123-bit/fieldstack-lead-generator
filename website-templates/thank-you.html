@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title id="page-title">Request Sent</title>
+  <meta name="robots" content="noindex" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,700;0,14..32,900&display=swap" rel="stylesheet" />
+  <script>tailwind.config={theme:{extend:{fontFamily:{sans:["Inter","system-ui","sans-serif"]},colors:{navy:{950:"#05101E",900:"#080F1C",800:"#0D1829"}}}}}</script>
+  <style>body{font-family:"Inter",system-ui,sans-serif;}</style>
+  <script src="config.js"></script>
+</head>
+<body class="bg-navy-900 min-h-screen flex flex-col">
+
+  <!-- Minimal nav -->
+  <div class="bg-navy-950 border-b border-white/[0.07] py-4 px-6 flex items-center justify-between">
+    <a id="nav-logo" href="index.html" class="flex items-center gap-2.5">
+      <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      </div>
+      <span id="nav-name" class="text-white font-bold text-lg"></span>
+    </a>
+    <a id="nav-phone-link" href="#" class="flex items-center gap-2 bg-orange-500 text-white font-semibold px-4 py-2 rounded-xl text-sm">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+      <span id="nav-phone-num"></span>
+    </a>
+  </div>
+
+  <!-- Main content -->
+  <main class="flex-1 flex items-center justify-center px-4 py-16">
+    <div class="max-w-lg w-full text-center">
+
+      <!-- Checkmark animation -->
+      <div class="w-24 h-24 bg-green-500/20 border-2 border-green-500/40 rounded-full flex items-center justify-center mx-auto mb-8">
+        <svg class="w-12 h-12 text-green-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+      </div>
+
+      <h1 class="text-4xl md:text-5xl font-black text-white mb-3">Request Sent!</h1>
+      <p id="ty-sub" class="text-xl text-gray-300 mb-10"></p>
+
+      <!-- What happens next -->
+      <div class="bg-white/[0.06] border border-white/10 rounded-3xl p-7 mb-8 text-left">
+        <h3 class="font-black text-white text-lg mb-5 text-center">What Happens Next</h3>
+        <div class="space-y-4">
+          <div class="flex gap-4 items-start">
+            <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0">1</div>
+            <div>
+              <p class="text-white font-semibold">We call you within 5 minutes</p>
+              <p class="text-gray-400 text-sm">During business hours. After hours, first thing in the morning.</p>
+            </div>
+          </div>
+          <div class="flex gap-4 items-start">
+            <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0">2</div>
+            <div>
+              <p class="text-white font-semibold">Tech dispatched same day</p>
+              <p class="text-gray-400 text-sm">We schedule your visit and send a confirmation text.</p>
+            </div>
+          </div>
+          <div class="flex gap-4 items-start">
+            <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-black text-white flex-shrink-0">3</div>
+            <div>
+              <p class="text-white font-semibold">Problem solved. Guaranteed.</p>
+              <p id="ty-guarantee" class="text-gray-400 text-sm"></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Emergency CTA -->
+      <p class="text-gray-400 mb-3">Need it faster? Call directly:</p>
+      <a id="ty-phone" href="#" class="flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-black px-8 py-4 rounded-2xl text-xl transition-all shadow-2xl shadow-orange-500/40 mb-6">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+        <span id="ty-phone-num"></span>
+      </a>
+
+      <a href="index.html" class="text-gray-400 hover:text-white transition-colors text-sm">← Back to homepage</a>
+    </div>
+  </main>
+
+  <div class="text-center py-4 border-t border-white/[0.07]">
+    <p id="ty-footer" class="text-gray-600 text-xs"></p>
+  </div>
+
+<script>
+  document.getElementById('page-title').textContent = `Request Sent — ${CONFIG.businessName}`;
+  document.getElementById('nav-name').textContent = CONFIG.businessName;
+  document.getElementById('nav-phone-link').href = `tel:${CONFIG.phoneRaw}`;
+  document.getElementById('nav-phone-num').textContent = CONFIG.phone;
+  document.getElementById('ty-sub').textContent = `We received your request. Someone from ${CONFIG.businessName} will call you within 5 minutes.`;
+  document.getElementById('ty-guarantee').textContent = CONFIG.guarantee + '.';
+  document.getElementById('ty-phone').href = `tel:${CONFIG.phoneRaw}`;
+  document.getElementById('ty-phone-num').textContent = CONFIG.phone;
+  document.getElementById('ty-footer').textContent = `© ${new Date().getFullYear()} ${CONFIG.businessName}. All rights reserved.`;
+</script>
+</body>
+</html>

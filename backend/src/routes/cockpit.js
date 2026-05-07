@@ -149,12 +149,25 @@ router.get('/hot-leads', (req, res, next) => {
 router.get('/alerts', (req, res, next) => {
   try {
     const hot_replies = db.all(`
-      SELECT a.id, a.created_at, l.id as lead_id, l.business_name, l.phone, l.status
-      FROM activities a
-      JOIN leads l ON l.id = a.lead_id
-      WHERE a.type = 'email_replied'
-        AND a.created_at >= datetime('now', '-48 hours')
-      ORDER BY a.created_at DESC
+      SELECT * FROM (
+        SELECT 'sms' as channel, m.id, m.created_at, l.id as lead_id, l.business_name, l.phone, l.status,
+               substr(m.body, 1, 80) as message
+        FROM sms_messages m
+        JOIN leads l ON l.id = m.lead_id
+        WHERE m.direction = 'inbound'
+          AND m.created_at >= datetime('now', '-24 hours')
+          AND NOT EXISTS (
+            SELECT 1 FROM sms_messages m2
+            WHERE m2.lead_id = m.lead_id AND m2.direction = 'outbound' AND m2.created_at > m.created_at
+          )
+        UNION ALL
+        SELECT 'email' as channel, a.id, a.created_at, l.id as lead_id, l.business_name, l.phone, l.status,
+               a.title as message
+        FROM activities a
+        JOIN leads l ON l.id = a.lead_id
+        WHERE a.type = 'email_replied'
+          AND a.created_at >= datetime('now', '-24 hours')
+      ) ORDER BY created_at DESC
       LIMIT 10
     `);
 
@@ -169,6 +182,99 @@ router.get('/alerts', (req, res, next) => {
     `);
 
     res.json({ success: true, data: { hot_replies, upcoming_demos } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/cockpit/morning-brief — AI morning brief for calling session
+router.post('/morning-brief', async (req, res, next) => {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'GEMINI_API_KEY not configured' });
+    }
+
+    // Gather pipeline stats for context
+    const totalCallable = db.get(`
+      SELECT COUNT(*) as count FROM leads
+      WHERE phone IS NOT NULL AND phone != ''
+        AND status NOT IN ('booked', 'lost', 'closed_won')
+        AND dnc_at IS NULL
+    `)?.count || 0;
+
+    const newToday = db.get(`
+      SELECT COUNT(*) as count FROM leads
+      WHERE date(created_at) = date('now')
+        AND status = 'new'
+    `)?.count || 0;
+
+    const overdue = db.get(`
+      SELECT COUNT(*) as count FROM leads
+      WHERE next_followup_at IS NOT NULL
+        AND datetime(next_followup_at) <= datetime('now')
+        AND status NOT IN ('booked', 'lost', 'closed_won')
+    `)?.count || 0;
+
+    const hot = db.get(`
+      SELECT AVG(heat_score) as avg_heat FROM leads
+      WHERE status NOT IN ('booked', 'lost', 'closed_won')
+        AND phone IS NOT NULL
+        AND dnc_at IS NULL
+    `)?.avg_heat || 0;
+
+    const prompt = `You are a sales coach for a solo HVAC contractor running a cold calling operation.
+
+Pipeline summary:
+- Total callable leads: ${totalCallable}
+- New leads today: ${newToday}
+- Overdue follow-ups: ${overdue}
+- Average lead heat score: ${Math.round(hot)}/100
+
+Write a 2–3 sentence morning brief:
+1. Who to focus on today (new, hot, overdue, etc.)
+2. What's the highest-leverage action right now
+3. Whether they need to find more leads (if < 25 total callable)
+
+Be direct, specific, and motivating. No fluff.`;
+
+    const body = {
+      model: 'gemini-2.5-flash',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: prompt }],
+    };
+
+    const geminiRes = await fetch(`${process.env.GEMINI_API_KEY ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions' : ''}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!geminiRes.ok) {
+      const err = await geminiRes.text();
+      console.error('[Cockpit] Gemini error:', err);
+      return res.status(500).json({ success: false, error: 'Gemini API error' });
+    }
+
+    const data = await geminiRes.json();
+    const brief = data.choices?.[0]?.message?.content || 'Unable to generate brief.';
+
+    // Determine if user needs more leads
+    const add_leads = totalCallable < 25 || (newToday === 0 && totalCallable < 50);
+    const add_leads_reason = totalCallable < 25
+      ? `Only ${totalCallable} callable leads left`
+      : 'No new leads today — go run a Finder search';
+
+    res.json({
+      success: true,
+      data: {
+        brief,
+        add_leads,
+        add_leads_reason,
+        pipeline_stats: { totalCallable, newToday, overdue, avg_heat: Math.round(hot) },
+      },
+    });
   } catch (err) { next(err); }
 });
 

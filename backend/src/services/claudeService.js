@@ -1233,4 +1233,190 @@ async function generateTitle(userMessage, assistantResponse) {
   return data.choices?.[0]?.message?.content?.trim() || userMessage.slice(0, 50);
 }
 
-module.exports = { streamChat, generateTitle };
+async function draftSmsReply(lead, messages) {
+  const convo = messages.map(m =>
+    `${m.direction === 'inbound' ? 'Them' : 'Us'}: ${m.body}`
+  ).join('\n');
+
+  const prompt = [
+    { role: 'system', content: 'You are Sam — a professional, human-sounding AI sales assistant for a home services contractor. Write exactly one SMS reply: 1-2 sentences max, no emojis, high urgency, sound like a real person. Return only the SMS text, nothing else.' },
+    { role: 'user', content: `Lead: ${lead.business_name}, ${lead.service_type || 'contractor'} in ${lead.city || 'Texas'}, TX.\n\nConversation (oldest first):\n${convo || '(no messages yet)'}\n\nWrite a follow-up SMS to book a 5-minute call or demo.` },
+  ];
+
+  const result = await callGemini(prompt, false);
+  const text = result?.choices?.[0]?.message?.content || '';
+  return text.trim().replace(/^["']|["']$/g, '');
+}
+
+async function classifySmsIntent(body) {
+  const prompt = [
+    { role: 'system', content: 'You classify SMS replies from contractors who received a sales outreach. Reply with ONLY valid JSON: {"booking_intent": true} or {"booking_intent": false}. booking_intent is true when the reply clearly shows interest, asks about pricing/details/timing, or wants to talk. It is false for unsubscribes, "who is this", negative responses, or vague one-word replies.' },
+    { role: 'user', content: `Classify this SMS reply: "${body}"` },
+  ];
+  try {
+    const result = await callGemini(prompt, false);
+    const text = result?.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    return { booking_intent: !!parsed.booking_intent };
+  } catch {
+    return { booking_intent: false };
+  }
+}
+
+const OFFER_COPY = {
+  sam_ai: {
+    label: 'Sam AI',
+    description: 'automated SMS lead response — texts back within 60 seconds, 24/7, so they never lose a lead to voicemail again',
+    callInstruction: 'Reference the specific gap (Google Ads spend wasted, no contact form, slow response, etc). End with: "Is missing after-hours leads actually a problem for you right now?"',
+    smsInstruction: 'Reference one specific gap you noticed. Keep it under 2 sentences. End with a soft yes/no question.',
+    emailInstruction: 'First line references the gap. Second line: what that costs them in revenue. Third line: how Sam fixes it. Close: ask for a 10-min call.',
+  },
+  website: {
+    label: 'Contractor Website',
+    description: 'a professional HVAC contractor website — modern, mobile-first, built in 1 week, $299/mo. Converts visitors into calls instead of bouncing them',
+    callInstruction: 'Reference what you saw on their current site (Wix, GoDaddy, no site, etc). Frame the problem as: leads check them out online before calling. End with: "Is your website actually sending people to competitors right now?"',
+    smsInstruction: 'Reference their specific platform or missing site. 2 sentences max. End with a soft question.',
+    emailInstruction: 'First line references their current site (be specific). Second line: how it costs them credibility. Third line: what we build instead. Close: ask for a 10-min call.',
+  },
+  reviews: {
+    label: 'Review Generation',
+    description: 'automated review generation — texts every customer after a job asking for a Google review, $199/mo. Doubles review count in 60 days and moves them up in local search rankings',
+    callInstruction: `Reference their specific review count (${'{reviews}'} reviews). Frame it as: they're losing the listing to competitors with more reviews. End with: "Is ranking above competitors on Google actually something you're trying to fix?"`,
+    smsInstruction: 'Reference their review count specifically. 2 sentences max. Soft question at the end.',
+    emailInstruction: 'First line references their exact review count. Second line: how many reviews top competitors in their city have. Third line: how we fix it automatically. Close: ask for a 10-min call.',
+  },
+  google_ads: {
+    label: 'Google Ads',
+    description: 'Google Ads management — we set up and run PPC campaigns for AC repair, heating, and installs. Typically returns $8–12 in revenue per $1 in ad spend for HVAC in their market',
+    callInstruction: 'Reference that their setup looks solid (they have good reviews, a decent site, and follow-up). Frame the problem as: they just need more at the top of the funnel. End with: "Are you currently running any paid ads or relying only on organic?"',
+    smsInstruction: 'Compliment their setup briefly, then pitch ads. 2 sentences. Soft question.',
+    emailInstruction: 'First line compliments their online presence. Second line: the missing piece is paid traffic. Third line: what we manage and typical ROI. Close: ask for a 10-min call.',
+  },
+};
+
+async function generatePitch(lead, gapAnalysis) {
+  const { recommended_offer, pitch_angle, detected_tools } = gapAnalysis;
+  const businessName = lead.business_name || 'this contractor';
+  const city         = lead.city || 'their area';
+  const reviews      = lead.review_count ?? 0;
+
+  const offer = OFFER_COPY[recommended_offer] || OFFER_COPY.sam_ai;
+
+  const prompt = `You are a sharp B2B sales rep for a contractor tech company. Write cold outreach for this specific prospect.
+
+Business: ${businessName}, HVAC contractor in ${city}
+Google reviews: ${reviews}
+Detected tools on their website: ${JSON.stringify(detected_tools)}
+Key insight: ${pitch_angle}
+
+OFFER TO PITCH: ${offer.label}
+What it is: ${offer.description}
+
+Output format — Return ONLY valid JSON, no markdown:
+{
+  "call_opener": "2-3 sentences OUT LOUD. ${offer.callInstruction}",
+  "sms": "1-2 sentences max. Casual tone. ${offer.smsInstruction}",
+  "email": {
+    "subject": "Under 50 chars. Personal. No spam words.",
+    "body": "4-6 sentences. ${offer.emailInstruction} Sign off with just: - [Name]"
+  }
+}
+
+Rules: Be specific. Use their real business name and review count. Sound human, not corporate. No filler openers like 'I hope this finds you well'.`;
+
+  try {
+    const result = await callGemini([{ role: 'user', content: prompt }], false);
+    const content = result?.choices?.[0]?.message?.content || '';
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON in response');
+    const parsed = JSON.parse(match[0]);
+    return { ...parsed, recommended_offer, pitch_angle };
+  } catch {
+    const angle = pitch_angle.replace(/\.$/, '').toLowerCase();
+    return {
+      call_opener: `Hi, this is [Name] calling for ${businessName}. I was looking at your online presence and noticed ${angle} — I work with HVAC contractors in ${city} on exactly that. Is now a bad time for a quick question?`,
+      sms: `Hey — saw ${businessName} online. Noticed ${angle}. Worth a 5-min call this week?`,
+      email: {
+        subject: `Quick question for ${businessName}`,
+        body: `Hi,\n\nI was checking out ${businessName} online and noticed ${angle}.\n\nI help HVAC contractors in ${city} fix that with ${offer.label}. ${offer.description.charAt(0).toUpperCase() + offer.description.slice(1)}.\n\nWorth a 10-minute call to see if it makes sense?\n\n- [Name]`,
+      },
+      recommended_offer,
+      pitch_angle,
+    };
+  }
+}
+
+async function generateColdWrite(lead, enrichment, recentHighlights) {
+  const contextParts = [
+    `Business: ${lead.business_name}`,
+    `Location: ${[lead.city, lead.state].filter(Boolean).join(', ')}`,
+    `Service type: ${lead.service_type || 'home services'}`,
+    lead.rating ? `Google rating: ${lead.rating} stars (${lead.review_count || 0} reviews)` : '',
+    lead.owner_name ? `Owner name: ${lead.owner_name}` : '',
+    lead.website ? `Website: ${lead.website}` : '',
+  ];
+
+  if (enrichment) {
+    if (enrichment.description) contextParts.push(`About: ${enrichment.description.slice(0, 200)}`);
+    if (enrichment.services_offered?.length) contextParts.push(`Services: ${enrichment.services_offered.slice(0, 6).join(', ')}`);
+    if (enrichment.team_names?.length) contextParts.push(`Team/owner names found on site: ${enrichment.team_names.slice(0, 3).join(', ')}`);
+    if (enrichment.detected_tools) {
+      const tools = Object.entries(enrichment.detected_tools).filter(([, v]) => v).map(([k]) => k);
+      if (tools.length) contextParts.push(`Tech on their site: ${tools.join(', ')}`);
+    }
+  }
+
+  if (recentHighlights && recentHighlights.length > 0) {
+    contextParts.push(`\nRECENT/NOTABLE THINGS FOUND ABOUT THIS BUSINESS:\n${recentHighlights.map(h => `- ${h}`).join('\n')}`);
+  }
+
+  const context = contextParts.filter(Boolean).join('\n');
+  const firstName = (lead.owner_name || '').split(' ')[0] || lead.first_name || null;
+  const greeting = firstName || lead.business_name;
+
+  const prompt = `You are an expert cold outreach writer for a contractor tech company (FieldStack). Your job is to write hyper-personalized cold outreach for this specific business.
+
+BUSINESS CONTEXT:
+${context}
+
+YOUR TASK:
+1. Find the single most interesting, specific, or recent thing about this business from the context above — the "hook". Prefer: recent news > awards > years in business > specific service niche > review count.
+2. Write cold outreach in 3 formats using that hook.
+
+RULES:
+- Sound like a real human who actually looked this business up — not a template
+- Greeting uses "${greeting}"
+- Hook must reference something real and specific from the context
+- Email: under 150 words total, ends with "Worth a 10-min call?" — no spam words in subject
+- SMS: 1 hook sentence + 1 CTA sentence, under 140 chars total
+- Call opener: 2-3 sentences spoken out loud, ends with a soft yes/no question
+- No emojis. Professional but direct. Texas/Austin sensibility.
+- The product pitch: Sam AI — texts back website leads in under 60 seconds, 24/7. Guarantee: 5 booked quotes or free.
+
+Return ONLY valid JSON, no markdown:
+{"hook":"one sentence — the personalization angle you chose","email":{"subject":"...","body":"..."},"sms":"...","call_opener":"..."}`;
+
+  let parsed;
+  try {
+    const data = await callGemini([{ role: 'user', content: prompt }], false);
+    const raw = data.choices?.[0]?.message?.content?.trim() || '';
+    const match = raw.match(/\{[\s\S]*\}/);
+    parsed = JSON.parse(match ? match[0] : raw);
+  } catch {
+    parsed = {};
+  }
+
+  // Fallback values if AI parse fails
+  const name = firstName || lead.business_name;
+  return {
+    hook: parsed.hook || `${lead.business_name} in ${lead.city || 'your area'} — ${lead.review_count ? `${lead.review_count} Google reviews` : lead.service_type || 'home services'}`,
+    email: parsed.email || {
+      subject: `Quick question for ${lead.business_name}`,
+      body: `Hi ${name},\n\nI came across ${lead.business_name} online — ${lead.review_count ? `${lead.review_count} Google reviews is impressive for ${lead.city || 'your market'}` : `you're clearly doing solid work in ${lead.city || 'your area'}`}.\n\nI help ${lead.service_type || 'contractors'} stop losing web leads to slow follow-up. Sam AI responds to website inquiries in under 60 seconds, 24/7 — even when you're on a job site.\n\nIf Sam doesn't book you 5 qualified quotes this month, you don't pay.\n\nWorth a 10-min call?\n\n- Hector`,
+    },
+    sms: parsed.sms || `Hey ${name}, saw ${lead.business_name} online and had a quick question about your lead follow-up process. Worth 2 min?`,
+    call_opener: parsed.call_opener || `Hi, is this ${name}? This is Hector with FieldStack — I was looking at ${lead.business_name} online and had one quick question. Is now a bad time?`,
+  };
+}
+
+module.exports = { streamChat, generateTitle, generatePersonalizedEmail, draftSmsReply, classifySmsIntent, generatePitch, generateColdWrite };

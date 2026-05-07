@@ -6,6 +6,8 @@ const { recomputeHeatScore } = require('../services/heatScoreService');
 const emailService = require('../services/emailService');
 const smsService = require('../services/smsService');
 const { flushOverdueNow, getRemainingBudget } = require('../services/sequenceScheduler');
+const { generatePersonalizedEmail } = require('../services/claudeService');
+const { emit } = require('../services/eventBus');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -125,6 +127,7 @@ router.get('/queue', (req, res) => {
         email_invalid: !!enrollment.email_invalid_at,
         has_replied: !!enrollment.has_replied,
         from_email: step.from_email || null,
+        ai_personalize: !!step.ai_personalize,
         last_error: enrollment.last_error || null,
         last_error_at: enrollment.last_error_at || null,
       });
@@ -148,6 +151,82 @@ router.post('/flush-overdue', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+router.post('/repair-templates', (req, res, next) => {
+  try {
+    const sequences = db.all('SELECT id, name, steps FROM sequences');
+    let repairedSequences = 0;
+    let clearedErrors = 0;
+
+    for (const seq of sequences) {
+      let steps;
+      try { steps = JSON.parse(seq.steps || '[]'); } catch { continue; }
+      let changed = false;
+
+      for (const step of steps) {
+        const exists = step.template_id
+          ? db.get('SELECT id FROM templates WHERE id = ?', [step.template_id])
+          : null;
+        if (!exists) {
+          // Try exact match first (same step_order + channel)
+          let replacement = db.get(
+            'SELECT id FROM templates WHERE step_order = ? AND channel = ? ORDER BY is_default DESC, id ASC LIMIT 1',
+            [step.order, step.channel]
+          );
+          // Fallback: any template with the same channel
+          if (!replacement) {
+            replacement = db.get(
+              'SELECT id FROM templates WHERE channel = ? ORDER BY is_default DESC, step_order ASC, id ASC LIMIT 1',
+              [step.channel]
+            );
+          }
+          // Last resort: create a placeholder so the sequence isn't permanently broken
+          if (!replacement) {
+            const placeholderSubject = step.channel === 'email' ? '[Update subject — placeholder]' : null;
+            const placeholderBody = `[This is a placeholder template created by auto-repair. Please update its content in Settings → Templates.]\n\nSequence: ${seq.name}, Step ${step.order}`;
+            const inserted = db.run(
+              "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, 'new', ?, ?, ?, 0)",
+              [`${seq.name} — Step ${step.order} (placeholder)`, step.channel, step.order, placeholderSubject, placeholderBody]
+            );
+            replacement = { id: Number(inserted.lastInsertRowid) };
+          }
+          step.template_id = replacement.id;
+          changed = true;
+        }
+
+        // Also null out broken alt_template_id to prevent 50% A/B failures
+        if (step.alt_template_id) {
+          const altExists = db.get('SELECT id FROM templates WHERE id = ?', [step.alt_template_id]);
+          if (!altExists) {
+            step.alt_template_id = null;
+            changed = true;
+          }
+        }
+      }
+
+      if (changed) {
+        db.run('UPDATE sequences SET steps = ? WHERE id = ?', [JSON.stringify(steps), seq.id]);
+        repairedSequences++;
+      }
+
+      // Always clear stale "Template not found" errors — whether we just fixed references
+      // or they were already valid (e.g. templates were re-seeded after errors were logged)
+      const errorCount = db.get(
+        "SELECT COUNT(*) as cnt FROM lead_sequences WHERE sequence_id = ? AND last_error LIKE 'Template not found%'",
+        [seq.id]
+      );
+      if ((errorCount?.cnt || 0) > 0) {
+        db.run(
+          "UPDATE lead_sequences SET last_error = NULL, last_error_at = NULL WHERE sequence_id = ? AND last_error LIKE 'Template not found%'",
+          [seq.id]
+        );
+        clearedErrors += errorCount.cnt;
+      }
+    }
+
+    res.json({ success: true, data: { repaired_sequences: repairedSequences, cleared_errors: clearedErrors } });
+  } catch (err) { next(err); }
 });
 
 router.get('/queue/stats', (req, res) => {
@@ -191,7 +270,7 @@ router.get('/queue/stats', (req, res) => {
   }
 
   const budget = getRemainingBudget();
-  res.json({ success: true, data: { overdue, due_today, upcoming, sends_remaining: budget.remaining, daily_limit: budget.dailyLimit, sent_today: budget.sentToday } });
+  res.json({ success: true, data: { overdue, due_today, upcoming, sends_remaining: budget.remaining, daily_limit: budget.dailyLimit, sent_today: budget.sentToday, is_warmup: budget.isWarmup, warmup_day: budget.warmupDay, warmup_next_limit: budget.warmupNextLimit } });
 });
 
 // GET /api/sequences/autopilot/status
@@ -358,14 +437,31 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
   if (!lead.email) return res.status(400).json({ success: false, error: 'Lead has no email address' });
 
-  const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+  const useAltEmail = step.alt_template_id && Math.random() < 0.5;
+  const selectedTemplateIdEmail = useAltEmail ? step.alt_template_id : step.template_id;
+  const templateVariantEmail = step.alt_template_id ? (useAltEmail ? 'B' : 'A') : undefined;
+  const template = db.get('SELECT * FROM templates WHERE id = ?', [selectedTemplateIdEmail]);
   if (!template) return res.status(404).json({ success: false, error: 'Template not found' });
 
-  const subject = renderTemplate(template.subject, lead);
-  const body = renderTemplate(template.body, lead);
+  let subject, body, aiPersonalized = false;
+  if (step.ai_personalize && process.env.GEMINI_API_KEY) {
+    try {
+      const personalized = await generatePersonalizedEmail(lead, template);
+      subject = personalized.subject;
+      body = personalized.body;
+      aiPersonalized = true;
+    } catch {
+      subject = renderTemplate(template.subject, lead);
+      body = renderTemplate(template.body, lead);
+    }
+  } else {
+    subject = renderTemplate(template.subject, lead);
+    body = renderTemplate(template.body, lead);
+  }
 
   const result = await emailService.sendEmail(lead.email, subject, body, { leadId: enrollment.lead_id, fromEmail: step.from_email || null, plainText: !!step.plain_text });
   if (!result.success) {
+    emit({ type: 'send_failed', channel: 'email', lead_name: lead.business_name || 'Lead' });
     return res.status(500).json({ success: false, error: result.error });
   }
 
@@ -373,7 +469,7 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   db.run(
     'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
     [enrollment.lead_id, 'email_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`,
-     JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order })]
+     JSON.stringify({ resend_message_id: result.messageId, sequence_id: enrollment.sequence_id, step_order: step.order, ai_personalized: aiPersonalized, ...(templateVariantEmail && { template_variant: templateVariantEmail, template_id: selectedTemplateIdEmail }) })]
   );
 
   // Update lead contact tracking
@@ -429,13 +525,17 @@ router.post('/queue/:enrollmentId/send-sms', async (req, res) => {
   if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
   if (!lead.phone) return res.status(400).json({ success: false, error: 'Lead has no phone number' });
 
-  const template = db.get('SELECT * FROM templates WHERE id = ?', [step.template_id]);
+  const useAltSms = step.alt_template_id && Math.random() < 0.5;
+  const selectedTemplateIdSms = useAltSms ? step.alt_template_id : step.template_id;
+  const templateVariantSms = step.alt_template_id ? (useAltSms ? 'B' : 'A') : undefined;
+  const template = db.get('SELECT * FROM templates WHERE id = ?', [selectedTemplateIdSms]);
   if (!template) return res.status(404).json({ success: false, error: 'Template not found' });
 
   const body = renderTemplate(template.body, lead);
 
   const result = await smsService.sendSms(lead.phone, body);
   if (!result.success) {
+    emit({ type: 'send_failed', channel: 'sms', lead_name: lead.business_name || 'Lead' });
     return res.status(500).json({ success: false, error: result.error });
   }
 
@@ -449,7 +549,7 @@ router.post('/queue/:enrollmentId/send-sms', async (req, res) => {
   // Log activity
   db.run(
     'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-    [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`, JSON.stringify({ twilio_sid: result.sid })]
+    [enrollment.lead_id, 'sms_sent', `${step.label} (Step ${step.order})`, `Sent via sequence: ${sequence.name}`, JSON.stringify({ twilio_sid: result.sid, sequence_id: enrollment.sequence_id, step_order: step.order, ...(templateVariantSms && { template_variant: templateVariantSms, template_id: selectedTemplateIdSms }) })]
   );
 
   // Update lead contact tracking
@@ -724,18 +824,28 @@ router.get('/:id/analytics', (req, res) => {
   );
 
   const stepMap = {};
+  // ab: { A: { sent, opened, replied }, B: { sent, opened, replied } }
+  const abMap = {};
   for (const step of steps) {
     stepMap[step.order] = { step: step.order, label: step.label, sent: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+    if (step.alt_template_id) {
+      abMap[step.order] = {
+        A: { sent: 0, opened: 0, replied: 0, reply_rate: 0, open_rate: 0 },
+        B: { sent: 0, opened: 0, replied: 0, reply_rate: 0, open_rate: 0 },
+      };
+    }
   }
 
   for (const act of allActivities) {
     let stepOrder = null;
+    let variant = null;
     // Prefer structured metadata
     if (act.metadata) {
       try {
         const meta = JSON.parse(act.metadata);
         if (meta.sequence_id == req.params.id && meta.step_order) {
           stepOrder = meta.step_order;
+          variant = meta.template_variant || null;
         }
       } catch {}
     }
@@ -752,12 +862,34 @@ router.get('/:id/analytics', (req, res) => {
     else if (act.type === 'email_clicked') stepMap[stepOrder].clicked++;
     else if (act.type === 'email_replied') stepMap[stepOrder].replied++;
     else if (act.type === 'email_bounced') stepMap[stepOrder].bounced++;
+
+    // A/B tracking
+    if (variant && abMap[stepOrder] && (variant === 'A' || variant === 'B')) {
+      const ab = abMap[stepOrder][variant];
+      if (act.type === 'email_sent' || act.type === 'sms_sent') ab.sent++;
+      else if (act.type === 'email_opened') ab.opened++;
+      else if (act.type === 'email_replied' || act.type === 'sms_received') ab.replied++;
+    }
   }
+
+  // Compute A/B rates
+  for (const order of Object.keys(abMap)) {
+    for (const v of ['A', 'B']) {
+      const ab = abMap[order][v];
+      ab.open_rate = ab.sent > 0 ? Math.round((ab.opened / ab.sent) * 100) : 0;
+      ab.reply_rate = ab.sent > 0 ? Math.round((ab.replied / ab.sent) * 100) : 0;
+    }
+  }
+
+  const stepsResult = Object.values(stepMap).map(s => ({
+    ...s,
+    ...(abMap[s.step] ? { ab_data: abMap[s.step] } : {}),
+  }));
 
   res.json({
     success: true,
     data: {
-      steps: Object.values(stepMap),
+      steps: stepsResult,
       totals: { enrolled: totalEnrolled, active, completed, cancelled },
     },
   });

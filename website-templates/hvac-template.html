@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title id="page-title">HVAC Service | Austin, TX</title>
+  <meta name="description" id="meta-desc" content="" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet" />
+
+  <!-- All client data lives in config.js — edit that file to update every page -->
+  <script src="config.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ["Inter","system-ui","sans-serif"] },
+          colors: {
+            navy: { 950:"#05101E", 900:"#080F1C", 800:"#0D1829", 700:"#152238", 600:"#1E3352" },
+          },
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body { font-family:"Inter",system-ui,sans-serif; }
+    .hero-bg {
+      background-image:
+        linear-gradient(105deg, rgba(5,16,30,0.96) 0%, rgba(5,16,30,0.80) 55%, rgba(5,16,30,0.35) 100%),
+        var(--hero-img);
+      background-size: cover;
+      background-position: center top;
+    }
+    .faq-answer { max-height:0; overflow:hidden; transition:max-height .35s ease; }
+    .faq-answer.open { max-height:300px; }
+    .faq-icon { transition:transform .3s ease; }
+    .faq-icon.open { transform:rotate(180deg); }
+    /* card hover lift */
+    .service-card { transition:transform .2s ease, box-shadow .2s ease; }
+    .service-card:hover { transform:translateY(-3px); box-shadow:0 12px 32px rgba(249,115,22,.12); }
+    /* star color */
+    .star { color:#FBBF24; }
+  </style>
+
+  <script type="application/ld+json" id="schema-ld"></script>
+</head>
+
+<body class="bg-white text-gray-900 antialiased">
+
+<!-- =========================================================
+     TOP EMERGENCY BAR
+     ========================================================= -->
+<div class="bg-navy-950 border-b border-white/[0.07]">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center justify-between text-sm">
+    <div class="flex items-center gap-5 text-gray-400">
+      <span class="flex items-center gap-1.5">
+        <!-- clock -->
+        <svg class="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Mon–Sat 7am–8pm · Emergency 24/7
+      </span>
+      <span class="hidden sm:flex items-center gap-1.5">
+        <!-- pin -->
+        <svg class="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span id="top-city">Serving Austin, TX</span>
+      </span>
+    </div>
+    <a id="top-phone-link" href="tel:5125550100" class="flex items-center gap-2 font-semibold text-orange-500 hover:text-orange-400 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+      <span id="top-phone-text">(512) 555-0100</span>
+    </a>
+  </div>
+</div>
+
+<!-- =========================================================
+     STICKY NAV
+     ========================================================= -->
+<nav id="main-nav" class="sticky top-0 z-50 bg-navy-900/95 backdrop-blur-md border-b border-white/[0.07]">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+
+      <!-- Logo -->
+      <a href="#" class="flex items-center gap-2.5 flex-shrink-0">
+        <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        </div>
+        <span id="nav-biz-name" class="text-white font-bold text-lg leading-none">Peak Air HVAC</span>
+      </a>
+
+      <!-- Desktop links -->
+      <div class="hidden md:flex items-center gap-7 text-sm font-medium text-gray-400">
+        <a href="#services" class="hover:text-white transition-colors">Services</a>
+        <a href="#about"    class="hover:text-white transition-colors">About</a>
+        <a href="#reviews"  class="hover:text-white transition-colors">Reviews</a>
+        <a href="#areas"    class="hover:text-white transition-colors">Areas</a>
+        <a href="#faq"      class="hover:text-white transition-colors">FAQ</a>
+      </div>
+
+      <!-- Desktop CTA + mobile hamburger -->
+      <div class="flex items-center gap-3">
+        <a id="nav-phone-link" href="tel:5125550100" class="hidden md:flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-4 py-2 rounded-xl text-sm transition-all shadow-lg shadow-orange-500/20">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+          <span id="nav-phone-text">(512) 555-0100</span>
+        </a>
+        <button id="hamburger" class="md:hidden p-2 text-gray-400 hover:text-white transition-colors rounded-lg" aria-label="Menu">
+          <svg id="ham-open"  class="w-6 h-6"        fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          <svg id="ham-close" class="w-6 h-6 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile dropdown -->
+  <div id="mobile-menu" class="hidden md:hidden bg-navy-900 border-t border-white/[0.07] px-4 pt-2 pb-4">
+    <div class="flex flex-col gap-0.5 text-sm font-medium">
+      <a href="#services" class="mobile-nav-link text-gray-400 hover:text-white py-2.5 transition-colors">Services</a>
+      <a href="#about"    class="mobile-nav-link text-gray-400 hover:text-white py-2.5 transition-colors">About</a>
+      <a href="#reviews"  class="mobile-nav-link text-gray-400 hover:text-white py-2.5 transition-colors">Reviews</a>
+      <a href="#areas"    class="mobile-nav-link text-gray-400 hover:text-white py-2.5 transition-colors">Service Areas</a>
+      <a href="#faq"      class="mobile-nav-link text-gray-400 hover:text-white py-2.5 transition-colors">FAQ</a>
+      <a id="mobile-call-btn" href="tel:5125550100" class="mt-3 flex items-center justify-center gap-2 bg-orange-500 text-white font-bold py-3.5 rounded-xl transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+        Call Now — <span id="mobile-phone-text">(512) 555-0100</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- =========================================================
+     HERO
+     ========================================================= -->
+<section class="hero-bg relative min-h-screen flex items-center">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-24 w-full">
+    <div class="grid lg:grid-cols-[1fr_440px] xl:grid-cols-[1fr_480px] gap-10 xl:gap-16 items-center">
+
+      <!-- LEFT: Headline + trust signals -->
+      <div>
+        <!-- Overline pill -->
+        <div class="mb-5">
+          <span class="inline-flex items-center gap-2 bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-semibold px-3.5 py-1.5 rounded-full uppercase tracking-widest">
+            <span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+            <span id="hero-overline">Serving Austin & Surrounding Areas</span>
+          </span>
+        </div>
+
+        <!-- Headline -->
+        <h1 id="hero-h1" class="text-5xl sm:text-6xl lg:text-6xl xl:text-7xl font-black text-white leading-[1.05] tracking-tight mb-5">
+          Austin's Most<br/>Trusted <span class="text-orange-500">HVAC</span>
+        </h1>
+
+        <!-- Sub -->
+        <p id="hero-sub" class="text-lg sm:text-xl text-gray-300 leading-relaxed mb-7 max-w-lg">
+          Same-Day AC Repair &amp; Heating Service — Licensed, NATE Certified, 24/7 Emergency Response.
+        </p>
+
+        <!-- Stars -->
+        <div class="flex items-center gap-3 mb-8">
+          <div class="flex gap-0.5" id="hero-stars"></div>
+          <span id="hero-rating" class="text-white font-bold text-lg">4.9</span>
+          <span id="hero-review-count" class="text-gray-400 text-sm">· 847 Google Reviews</span>
+        </div>
+
+        <!-- Call CTA -->
+        <div class="mb-7">
+          <a id="hero-call-btn" href="tel:5125550100"
+             class="inline-flex items-center justify-center gap-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold px-7 py-4 rounded-2xl text-lg transition-all shadow-2xl shadow-orange-500/40 hover:shadow-orange-500/60">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+            <span id="hero-call-text">Call (512) 555-0100</span>
+          </a>
+        </div>
+
+        <!-- Guarantee pill -->
+        <div class="inline-flex items-center gap-2.5 bg-navy-900/70 border border-white/10 rounded-2xl px-5 py-3 backdrop-blur-sm">
+          <svg class="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span id="hero-guarantee" class="text-white font-semibold text-sm">Same Day Or You Don't Pay — Guaranteed</span>
+        </div>
+      </div>
+
+      <!-- RIGHT: Multi-step estimate form -->
+      <div class="bg-white rounded-3xl p-7 shadow-2xl w-full" style="min-height:380px">
+
+        <!-- Progress bar -->
+        <div class="flex items-center gap-3 mb-6">
+          <div class="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+            <div id="form-progress-bar" class="h-full bg-orange-500 rounded-full transition-all duration-400" style="width:33%"></div>
+          </div>
+          <span id="form-step-label" class="text-xs font-semibold text-gray-400 flex-shrink-0 tabular-nums">Step 1 of 3</span>
+        </div>
+
+        <!-- Step 1 — Service -->
+        <div id="fstep-1">
+          <h3 class="text-2xl font-black text-gray-900 mb-1">What do you need?</h3>
+          <p class="text-gray-500 text-sm mb-4">Tap a service and we'll get you a free estimate.</p>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button onclick="msSelectService('AC Repair', this)" class="ms-svc-btn group border-2 border-gray-200 hover:border-orange-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-orange-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1M4.22 4.22l.707.707m12.728 12.728l.707.707M1 12h2m18 0h2M4.22 19.78l.707-.707m12.728-12.728l.707-.707M9 12a3 3 0 116 0 3 3 0 01-6 0z"/></svg>
+              <p class="font-bold text-gray-900 text-sm">AC Repair</p>
+            </button>
+            <button onclick="msSelectService('Heating Repair', this)" class="ms-svc-btn group border-2 border-gray-200 hover:border-orange-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-orange-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"/></svg>
+              <p class="font-bold text-gray-900 text-sm">Heating Repair</p>
+            </button>
+            <button onclick="msSelectService('New System Install', this)" class="ms-svc-btn group border-2 border-gray-200 hover:border-orange-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-orange-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              <p class="font-bold text-gray-900 text-sm">New System</p>
+            </button>
+            <button onclick="msSelectService('Emergency Service', this)" class="ms-svc-btn group border-2 border-red-100 hover:border-red-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-red-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+              <p class="font-bold text-gray-900 text-sm">Emergency</p>
+            </button>
+            <button onclick="msSelectService('Maintenance / Tune-Up', this)" class="ms-svc-btn group border-2 border-gray-200 hover:border-orange-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-orange-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+              <p class="font-bold text-gray-900 text-sm">Tune-Up</p>
+            </button>
+            <button onclick="msSelectService('Other / Not Sure', this)" class="ms-svc-btn group border-2 border-gray-200 hover:border-orange-400 rounded-2xl p-3.5 text-left transition-all">
+              <svg class="w-5 h-5 text-orange-500 mb-2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <p class="font-bold text-gray-900 text-sm">Other</p>
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 2 — Urgency -->
+        <div id="fstep-2" class="hidden">
+          <h3 class="text-2xl font-black text-gray-900 mb-1">How soon do you need it?</h3>
+          <p class="text-gray-500 text-sm mb-4">This helps us prioritize your call.</p>
+          <div class="flex flex-col gap-2.5">
+            <button onclick="msSelectUrgency('ASAP — Today')" class="ms-urg-btn border-2 border-gray-200 hover:border-orange-400 rounded-2xl px-5 py-4 flex items-center gap-4 text-left transition-all group">
+              <div class="w-10 h-10 bg-red-50 group-hover:bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors">
+                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              </div>
+              <div>
+                <p class="font-black text-gray-900">ASAP — Today</p>
+                <p class="text-gray-400 text-xs">I need someone out right away</p>
+              </div>
+            </button>
+            <button onclick="msSelectUrgency('This Week')" class="ms-urg-btn border-2 border-gray-200 hover:border-orange-400 rounded-2xl px-5 py-4 flex items-center gap-4 text-left transition-all group">
+              <div class="w-10 h-10 bg-orange-50 group-hover:bg-orange-100 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors">
+                <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </div>
+              <div>
+                <p class="font-black text-gray-900">This Week</p>
+                <p class="text-gray-400 text-xs">Scheduling for the next few days</p>
+              </div>
+            </button>
+            <button onclick="msSelectUrgency('Just Getting Quotes')" class="ms-urg-btn border-2 border-gray-200 hover:border-orange-400 rounded-2xl px-5 py-4 flex items-center gap-4 text-left transition-all group">
+              <div class="w-10 h-10 bg-gray-100 group-hover:bg-gray-200 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors">
+                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+              </div>
+              <div>
+                <p class="font-black text-gray-900">Just Getting Quotes</p>
+                <p class="text-gray-400 text-xs">Planning ahead, no rush</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 3 — Contact -->
+        <div id="fstep-3" class="hidden">
+          <h3 class="text-2xl font-black text-gray-900 mb-1">Almost done!</h3>
+          <p class="text-gray-500 text-sm mb-5">We'll call you back in under 5 minutes.</p>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">First Name</label>
+              <input type="text" id="ms-name" placeholder="John" autocomplete="given-name"
+                class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:border-orange-500 transition text-base" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">Phone Number</label>
+              <input type="tel" id="ms-phone" placeholder="(512) 555-0000" autocomplete="tel"
+                class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:border-orange-500 transition text-base" />
+            </div>
+            <button id="ms-submit-btn" onclick="msSubmit()"
+              class="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl text-lg transition-all shadow-xl shadow-orange-500/30 mt-1">
+              Get My Free Estimate →
+            </button>
+            <p class="text-xs text-gray-400 text-center">No spam. We respond within 5 minutes.</p>
+          </div>
+        </div>
+
+        <!-- Success -->
+        <div id="hero-form-success" class="hidden text-center py-8">
+          <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-7 h-7 text-green-600" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <h4 class="text-xl font-black text-gray-900 mb-1">Request Sent!</h4>
+          <p class="text-gray-500 text-sm">We'll call you back within 5 minutes.<br/>Check your texts — we'll send a confirmation too.</p>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Wave divider -->
+  <div class="absolute bottom-0 left-0 right-0 pointer-events-none">
+    <svg viewBox="0 0 1440 64" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" class="w-full h-16">
+      <path d="M0 64L1440 64L1440 0C1200 52 960 64 720 44C480 24 240 64 0 24L0 64Z" fill="white"/>
+    </svg>
+  </div>
+</section>
+
+<!-- =========================================================
+     CERTIFICATIONS STRIP
+     ========================================================= -->
+<section class="bg-white pt-4 pb-12">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6">
+    <div id="cert-strip" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SERVICES
+     ========================================================= -->
+<section id="services" class="bg-gray-50 py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">What We Do</p>
+      <h2 class="text-4xl md:text-5xl font-black text-gray-900 mb-3">HVAC Services in <span id="services-city">Austin</span></h2>
+      <p class="text-gray-500 text-lg max-w-xl mx-auto">From emergency repairs to full system replacements — handled with same-day urgency.</p>
+    </div>
+    <div id="services-grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     STATS STRIP
+     ========================================================= -->
+<section class="bg-navy-800 py-16">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6">
+    <div id="stats-strip" class="grid grid-cols-2 md:grid-cols-4 gap-10 text-center"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     WHY US
+     ========================================================= -->
+<section class="bg-white py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid md:grid-cols-2 gap-14 items-center">
+
+      <div>
+        <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Why Choose Us</p>
+        <h2 id="why-h2" class="text-4xl md:text-5xl font-black text-gray-900 leading-tight mb-5">
+          Peak Air — <span class="text-orange-500">The Difference</span>
+        </h2>
+        <p class="text-gray-500 text-lg mb-10 leading-relaxed">We built this company on one rule: treat every homeowner the way we'd want our own family treated.</p>
+        <div id="why-list" class="flex flex-col gap-7"></div>
+      </div>
+
+      <div class="relative">
+        <div class="aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl">
+          <img id="tech-photo" src="" alt="HVAC technician at work" class="w-full h-full object-cover" />
+        </div>
+        <!-- Floating badge -->
+        <div class="absolute -bottom-5 -left-5 bg-orange-500 rounded-2xl px-5 py-4 shadow-2xl shadow-orange-500/40">
+          <p id="years-num" class="text-4xl font-black text-white leading-none">25+</p>
+          <p class="text-orange-200 text-sm font-semibold mt-0.5">Years Serving Austin</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     ABOUT
+     ========================================================= -->
+<section id="about" class="bg-gray-50 py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid md:grid-cols-2 gap-14 items-center">
+
+      <div class="relative order-2 md:order-1">
+        <div class="aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl max-w-sm mx-auto md:mx-0">
+          <img id="owner-photo" src="" alt="Company owner" class="w-full h-full object-cover object-top" />
+        </div>
+      </div>
+
+      <div class="order-1 md:order-2">
+        <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Our Story</p>
+        <h2 class="text-4xl md:text-5xl font-black text-gray-900 leading-tight mb-5">
+          Local Family. <span class="text-orange-500">Austin Roots.</span>
+        </h2>
+        <div class="space-y-4 text-gray-600 text-lg leading-relaxed">
+          <p>Founded in <strong id="about-year">1998</strong>, <strong id="about-biz">Peak Air HVAC</strong> started with one truck and one promise — show up fast, fix it right, charge a fair price.</p>
+          <p>Today we're a team of <strong>NATE-certified technicians</strong> serving Austin and surrounding communities. When you call, you reach us directly. When we say same day, we mean it.</p>
+        </div>
+        <div class="mt-8 grid grid-cols-2 gap-4">
+          <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+            <p id="about-jobs" class="text-3xl font-black text-orange-500">12,400+</p>
+            <p class="text-sm text-gray-500 font-medium mt-1">Jobs Completed</p>
+          </div>
+          <div class="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+            <p id="about-rating" class="text-3xl font-black text-orange-500">4.9★</p>
+            <p class="text-sm text-gray-500 font-medium mt-1">Average Google Rating</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     TESTIMONIALS
+     ========================================================= -->
+<section id="reviews" class="bg-white py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-12">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Customer Reviews</p>
+      <h2 class="text-4xl md:text-5xl font-black text-gray-900 mb-4">What Austin Homeowners Say</h2>
+      <div class="flex items-center justify-center gap-2">
+        <div id="summary-stars" class="flex gap-0.5"></div>
+        <span id="reviews-summary" class="text-gray-600 font-semibold text-lg">4.9 from 847 verified Google reviews</span>
+      </div>
+    </div>
+    <div id="testimonials-grid" class="grid md:grid-cols-3 gap-6"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     FINANCING BANNER
+     ========================================================= -->
+<section class="bg-navy-800 py-16">
+  <div class="max-w-4xl mx-auto px-4 text-center">
+    <div class="inline-flex items-center gap-2 bg-orange-500/15 border border-orange-500/30 rounded-full px-4 py-1.5 mb-5">
+      <svg class="w-4 h-4 text-orange-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="text-orange-400 text-sm font-bold uppercase tracking-wide">Financing Available</span>
+    </div>
+    <h2 id="financing-h2" class="text-4xl md:text-5xl font-black text-white mb-3">0% Financing for 18 Months</h2>
+    <p id="financing-sub" class="text-gray-300 text-xl mb-8">On qualifying HVAC systems. No money down. Apply in 60 seconds.</p>
+    <a href="#contact" class="inline-flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold px-8 py-4 rounded-2xl text-lg transition-all shadow-2xl shadow-orange-500/40">
+      Apply for Financing
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+    </a>
+  </div>
+</section>
+
+<!-- =========================================================
+     SERVICE AREAS
+     ========================================================= -->
+<section id="areas" class="bg-gray-50 py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Where We Serve</p>
+      <h2 class="text-4xl md:text-5xl font-black text-gray-900 mb-3">Service Areas</h2>
+      <p class="text-gray-500 text-lg">Fast response times across <span id="areas-label">Austin and surrounding communities</span>.</p>
+    </div>
+    <div id="areas-grid" class="flex flex-wrap justify-center gap-3"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     FAQ
+     ========================================================= -->
+<section id="faq" class="bg-white py-20">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6">
+    <div class="text-center mb-10">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Quick Answers</p>
+      <h2 class="text-4xl md:text-5xl font-black text-gray-900">Frequently Asked</h2>
+    </div>
+    <div id="faq-list" class="divide-y divide-gray-100"></div>
+  </div>
+</section>
+
+<!-- =========================================================
+     CONTACT / FOOTER CTA
+     ========================================================= -->
+<section id="contact" class="bg-navy-800 py-20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid md:grid-cols-2 gap-14 items-start">
+
+      <!-- Left: info -->
+      <div>
+        <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Get In Touch</p>
+        <h2 class="text-4xl md:text-5xl font-black text-white mb-5 leading-tight">Ready for<br/><span class="text-orange-500">Same-Day Service?</span></h2>
+        <p class="text-gray-300 text-lg mb-10 leading-relaxed">Call or fill out the form — we respond within 5 minutes during business hours. For emergencies call directly.</p>
+
+        <div class="space-y-5">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+            </div>
+            <a id="contact-phone-link" href="tel:5125550100" class="text-xl font-bold text-white hover:text-orange-400 transition-colors">(512) 555-0100</a>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            </div>
+            <a id="contact-email-link" href="mailto:service@peakairhvac.com" class="text-gray-300 hover:text-white transition-colors">service@peakairhvac.com</a>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <span class="text-gray-300">Mon–Sat 7am–8pm · Emergency 24/7</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: form -->
+      <div class="bg-white rounded-3xl p-7 md:p-9 shadow-2xl">
+        <h3 class="text-2xl font-black text-gray-900 mb-6">Get a Free Estimate</h3>
+        <form id="contact-form" method="POST" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">First Name</label>
+              <input type="text" name="firstName" required placeholder="John"
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition" />
+            </div>
+            <div>
+              <label class="block text-sm font-semibold text-gray-700 mb-1.5">Last Name</label>
+              <input type="text" name="lastName" required placeholder="Smith"
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">Phone Number</label>
+            <input type="tel" name="phone" required placeholder="(512) 555-0000"
+              class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">Service Needed</label>
+            <select name="service" class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition">
+              <option value="">Select a service...</option>
+              <option>AC Repair</option>
+              <option>Heating Repair</option>
+              <option>System Installation</option>
+              <option>Maintenance / Tune-Up</option>
+              <option>24/7 Emergency Service</option>
+              <option>Indoor Air Quality</option>
+              <option>Financing / New System</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1.5">Message <span class="text-gray-400 font-normal">(optional)</span></label>
+            <textarea name="message" rows="3" placeholder="Describe your issue or question..."
+              class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition resize-none"></textarea>
+          </div>
+          <button type="submit"
+            class="w-full bg-orange-500 hover:bg-orange-600 text-white font-black py-4 rounded-2xl text-lg transition-all shadow-xl shadow-orange-500/30 hover:shadow-orange-500/50">
+            Request Free Estimate
+          </button>
+          <p class="text-xs text-gray-400 text-center">We respond within 5 minutes. No spam, ever.</p>
+        </form>
+        <div id="form-success" class="hidden text-center py-10">
+          <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <h4 class="text-xl font-black text-gray-900 mb-2">Request Sent!</h4>
+          <p class="text-gray-500">We'll call you within 5 minutes during business hours. Check your texts — we'll send a confirmation too.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     FOOTER
+     ========================================================= -->
+<footer class="bg-navy-950 border-t border-white/[0.07] py-14">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+
+      <!-- Brand -->
+      <div class="col-span-2 md:col-span-1">
+        <div class="flex items-center gap-2.5 mb-3">
+          <div class="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          </div>
+          <span id="footer-biz" class="text-white font-bold text-lg">Peak Air HVAC</span>
+        </div>
+        <p id="footer-tagline" class="text-gray-500 text-sm leading-relaxed">Austin's trusted HVAC service since 1998. Licensed, insured, NATE certified.</p>
+      </div>
+
+      <!-- Services -->
+      <div>
+        <h4 class="text-gray-300 font-semibold text-sm uppercase tracking-wider mb-4">Services</h4>
+        <ul class="space-y-2.5 text-gray-500 text-sm">
+          <li><a href="#services" class="hover:text-gray-300 transition-colors">AC Repair</a></li>
+          <li><a href="#services" class="hover:text-gray-300 transition-colors">Heating Repair</a></li>
+          <li><a href="#services" class="hover:text-gray-300 transition-colors">System Installation</a></li>
+          <li><a href="#services" class="hover:text-gray-300 transition-colors">Maintenance Plans</a></li>
+          <li><a href="#services" class="hover:text-gray-300 transition-colors">Emergency Service</a></li>
+        </ul>
+      </div>
+
+      <!-- Company -->
+      <div>
+        <h4 class="text-gray-300 font-semibold text-sm uppercase tracking-wider mb-4">Company</h4>
+        <ul class="space-y-2.5 text-gray-500 text-sm">
+          <li><a href="#about"   class="hover:text-gray-300 transition-colors">About Us</a></li>
+          <li><a href="#reviews" class="hover:text-gray-300 transition-colors">Reviews</a></li>
+          <li><a href="#areas"   class="hover:text-gray-300 transition-colors">Service Areas</a></li>
+          <li><a href="#faq"     class="hover:text-gray-300 transition-colors">FAQ</a></li>
+          <li><a href="#contact" class="hover:text-gray-300 transition-colors">Contact</a></li>
+        </ul>
+      </div>
+
+      <!-- Contact -->
+      <div>
+        <h4 class="text-gray-300 font-semibold text-sm uppercase tracking-wider mb-4">Contact</h4>
+        <ul class="space-y-2.5 text-sm">
+          <li><a id="footer-phone" href="tel:5125550100" class="text-orange-500 font-bold hover:text-orange-400 transition-colors">(512) 555-0100</a></li>
+          <li><a id="footer-email" href="mailto:service@peakairhvac.com" class="text-gray-500 hover:text-gray-300 transition-colors text-xs break-all">service@peakairhvac.com</a></li>
+          <li><span id="footer-addr" class="text-gray-500 text-xs">4821 W Oltorf St, Austin TX 78745</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="border-t border-white/[0.07] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+      <p id="footer-copy">© 2025 Peak Air HVAC. All rights reserved.</p>
+      <p>Powered by <a href="https://fieldstack.io" class="text-orange-500 hover:text-orange-400 transition-colors">FieldStack</a></p>
+    </div>
+  </div>
+</footer>
+
+<!-- =========================================================
+     MOBILE STICKY CALL BAR
+     ========================================================= -->
+<div class="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-navy-950/95 backdrop-blur-md border-t border-white/10 px-4 py-3 flex gap-3">
+  <a id="sticky-call" href="tel:5125550100"
+     class="flex-1 flex items-center justify-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 rounded-2xl transition-all shadow-lg shadow-orange-500/40">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+    Call Now
+  </a>
+  <a href="#contact" class="flex-1 flex items-center justify-center gap-2 bg-white/[0.08] border border-white/20 text-white font-semibold py-3.5 rounded-2xl transition-all">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    Get Estimate
+  </a>
+</div>
+
+<!-- extra bottom padding on mobile so content isn't behind sticky bar -->
+<div class="md:hidden h-20"></div>
+
+<!-- =========================================================
+     JAVASCRIPT — render from CONFIG + interactivity
+     ========================================================= -->
+<script>
+(function() {
+
+  // ── Helpers ──────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  const phoneHref = `tel:${CONFIG.phoneRaw}`;
+
+  function starHTML(n, cls = "w-5 h-5") {
+    return Array(n).fill(0).map(() =>
+      `<svg class="${cls} star" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+      </svg>`
+    ).join('');
+  }
+
+  const SERVICE_ICONS = {
+    ac:        '<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1M4.22 4.22l.707.707m12.728 12.728l.707.707M1 12h2m18 0h2M4.22 19.78l.707-.707m12.728-12.728l.707-.707M9 12a3 3 0 116 0 3 3 0 01-6 0z"/>',
+    heat:      '<path stroke-linecap="round" stroke-linejoin="round" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z"/>',
+    install:   '<path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>',
+    tune:      '<path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>',
+    emergency: '<path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>',
+    air:       '<path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/>',
+  };
+
+  const WHY_ICONS = {
+    clock:  '<path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+    shield: '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>',
+    star:   '<path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>',
+  };
+
+  // ── Page meta ────────────────────────────────────────────
+  document.querySelector('.hero-bg').style.setProperty('--hero-img', `url(${CONFIG.heroImage})`);
+  $('page-title').textContent   = `${CONFIG.businessName} | ${CONFIG.city}, ${CONFIG.state} HVAC`;
+  $('meta-desc').content        = `${CONFIG.city}'s most trusted HVAC company. ${CONFIG.tagline}. Call ${CONFIG.phone} for same-day service.`;
+
+  // ── Top bar ──────────────────────────────────────────────
+  $('top-city').textContent      = `Serving ${CONFIG.city}, ${CONFIG.state}`;
+  $('top-phone-link').href       = phoneHref;
+  $('top-phone-text').textContent = CONFIG.phone;
+
+  // ── Nav ──────────────────────────────────────────────────
+  $('nav-biz-name').textContent  = CONFIG.businessName;
+  $('nav-phone-link').href       = phoneHref;
+  $('nav-phone-text').textContent = CONFIG.phone;
+  $('mobile-call-btn').href      = phoneHref;
+  $('mobile-phone-text').textContent = CONFIG.phone;
+
+  // ── Hero ─────────────────────────────────────────────────
+  $('hero-overline').textContent = `Serving ${CONFIG.city} & Surrounding Areas`;
+  $('hero-h1').innerHTML =
+    `${CONFIG.city}'s Most<br/>Trusted <span class="text-orange-500">HVAC</span>`;
+  $('hero-sub').textContent      = CONFIG.subTagline;
+  $('hero-stars').innerHTML      = starHTML(5);
+  $('hero-rating').textContent   = CONFIG.rating;
+  $('hero-review-count').textContent = `· ${CONFIG.reviewCount.toLocaleString()} Google Reviews`;
+  $('hero-call-btn').href        = phoneHref;
+  $('hero-call-text').textContent = `Call ${CONFIG.phone}`;
+  $('hero-guarantee').textContent = `${CONFIG.guarantee} — Guaranteed`;
+
+  // ── Certifications ───────────────────────────────────────
+  $('cert-strip').innerHTML = CONFIG.certifications.map(c => `
+    <div class="flex items-center gap-2.5 bg-gray-50 border border-gray-100 rounded-2xl px-4 py-3">
+      <svg class="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+      <span class="text-gray-800 font-semibold text-sm">${c}</span>
+    </div>`).join('');
+
+  // ── Services ─────────────────────────────────────────────
+  $('services-city').textContent = CONFIG.city;
+  $('services-grid').innerHTML = CONFIG.services.map(s => `
+    <div class="service-card bg-white rounded-2xl p-6 border border-gray-100 shadow-sm group cursor-default">
+      <div class="w-13 h-13 w-12 h-12 bg-orange-50 group-hover:bg-orange-500 rounded-2xl flex items-center justify-center mb-5 transition-colors duration-200">
+        <svg class="w-6 h-6 text-orange-500 group-hover:text-white transition-colors duration-200" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
+          ${SERVICE_ICONS[s.icon] || SERVICE_ICONS.install}
+        </svg>
+      </div>
+      <h3 class="font-black text-gray-900 text-lg mb-2">${s.name}</h3>
+      <p class="text-gray-500 text-sm leading-relaxed">${s.desc}</p>
+    </div>`).join('');
+
+  // ── Stats ────────────────────────────────────────────────
+  const yrs = new Date().getFullYear() - CONFIG.yearFounded;
+  const stats = [
+    { v:`${yrs}+`,                                  l:"Years in Business" },
+    { v:`${CONFIG.jobsCompleted.toLocaleString()}+`, l:"Jobs Completed" },
+    { v:`${CONFIG.rating}★`,                        l:`From ${CONFIG.reviewCount}+ Reviews` },
+    { v:CONFIG.responseTime,                         l:"Avg Response Time" },
+  ];
+  $('stats-strip').innerHTML = stats.map(s => `
+    <div>
+      <p class="text-4xl md:text-5xl font-black text-orange-500 mb-1">${s.v}</p>
+      <p class="text-gray-400 text-sm font-medium">${s.l}</p>
+    </div>`).join('');
+
+  // ── Why Us ───────────────────────────────────────────────
+  $('why-h2').innerHTML = `${CONFIG.businessName} — <span class="text-orange-500">The Difference</span>`;
+  $('years-num').textContent = `${yrs}+`;
+  $('tech-photo').src = CONFIG.techPhoto;
+  $('why-list').innerHTML = CONFIG.whyUs.map(w => `
+    <div class="flex gap-4 items-start">
+      <div class="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-orange-500/30">
+        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          ${WHY_ICONS[w.icon] || WHY_ICONS.star}
+        </svg>
+      </div>
+      <div>
+        <h3 class="font-black text-gray-900 text-xl">${w.title}</h3>
+        <p class="text-gray-500 leading-relaxed">${w.desc}</p>
+      </div>
+    </div>`).join('');
+
+  // ── About ────────────────────────────────────────────────
+  $('owner-photo').src            = CONFIG.ownerPhoto;
+  $('about-year').textContent     = CONFIG.yearFounded;
+  $('about-biz').textContent      = CONFIG.businessName;
+  $('about-jobs').textContent     = CONFIG.jobsCompleted.toLocaleString() + '+';
+  $('about-rating').textContent   = CONFIG.rating + '★';
+
+  // ── Testimonials ─────────────────────────────────────────
+  $('summary-stars').innerHTML   = starHTML(5, "w-6 h-6");
+  $('reviews-summary').textContent = `${CONFIG.rating} from ${CONFIG.reviewCount.toLocaleString()} verified Google reviews`;
+  $('testimonials-grid').innerHTML = CONFIG.testimonials.map(t => `
+    <div class="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+      <div class="flex mb-4">${starHTML(t.rating, "w-4 h-4")}</div>
+      <p class="text-gray-700 leading-relaxed mb-5 text-sm">"${t.text}"</p>
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-black text-sm flex-shrink-0">
+          ${t.name.charAt(0)}
+        </div>
+        <div>
+          <p class="font-bold text-gray-900 text-sm">${t.name}</p>
+          <p class="text-gray-400 text-xs">${t.city} · Google Review ✓</p>
+        </div>
+      </div>
+    </div>`).join('');
+
+  // ── Financing ────────────────────────────────────────────
+  $('financing-h2').textContent  = CONFIG.financing.offer;
+  $('financing-sub').textContent = CONFIG.financing.detail;
+
+  // ── Service areas ────────────────────────────────────────
+  $('areas-label').textContent = `${CONFIG.city} and surrounding communities`;
+  $('areas-grid').innerHTML = CONFIG.serviceAreas.map(a => `
+    <div class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm hover:border-orange-300 transition-colors">
+      <svg class="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      <span class="text-gray-700 font-semibold text-sm">${a}</span>
+    </div>`).join('');
+
+  // ── FAQ ──────────────────────────────────────────────────
+  $('faq-list').innerHTML = CONFIG.faq.map((item, i) => `
+    <div class="py-5">
+      <button class="faq-btn w-full flex items-start justify-between text-left gap-4 group" data-i="${i}">
+        <span class="font-bold text-gray-900 text-lg group-hover:text-orange-500 transition-colors">${item.q}</span>
+        <svg class="faq-icon w-5 h-5 text-gray-400 flex-shrink-0 mt-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div class="faq-answer" id="fa-${i}">
+        <p class="text-gray-500 pt-3 leading-relaxed">${item.a}</p>
+      </div>
+    </div>`).join('');
+
+  // ── Hero form (multi-step — action set in msSubmit()) ────
+
+  // ── Contact ──────────────────────────────────────────────
+  $('contact-phone-link').href        = phoneHref;
+  $('contact-phone-link').textContent = CONFIG.phone;
+  $('contact-email-link').href        = `mailto:${CONFIG.email}`;
+  $('contact-email-link').textContent = CONFIG.email;
+  $('contact-form').action            = `https://formspree.io/f/${CONFIG.formspreeId}`;
+
+  // ── Footer ───────────────────────────────────────────────
+  $('footer-biz').textContent     = CONFIG.businessName;
+  $('footer-tagline').textContent = `${CONFIG.city}'s trusted HVAC service since ${CONFIG.yearFounded}. Licensed, insured, NATE certified.`;
+  $('footer-phone').href          = phoneHref;
+  $('footer-phone').textContent   = CONFIG.phone;
+  $('footer-email').href          = `mailto:${CONFIG.email}`;
+  $('footer-email').textContent   = CONFIG.email;
+  $('footer-addr').textContent    = `${CONFIG.address}, ${CONFIG.city} ${CONFIG.state} ${CONFIG.zip}`;
+  $('footer-copy').textContent    = `© ${new Date().getFullYear()} ${CONFIG.businessName}. All rights reserved.`;
+
+  // ── Sticky call ──────────────────────────────────────────
+  $('sticky-call').href = phoneHref;
+
+  // ── Schema.org ───────────────────────────────────────────
+  $('schema-ld').textContent = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "HVACBusiness",
+    "name": CONFIG.businessName,
+    "telephone": CONFIG.phone,
+    "email": CONFIG.email,
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": CONFIG.address,
+      "addressLocality": CONFIG.city,
+      "addressRegion": CONFIG.state,
+      "postalCode": CONFIG.zip,
+      "addressCountry": "US"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": CONFIG.rating,
+      "reviewCount": CONFIG.reviewCount
+    },
+    "openingHours": ["Mo-Sa 07:00-20:00"],
+    "priceRange": "$$"
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // INTERACTIVITY
+  // ─────────────────────────────────────────────────────────
+
+  // Mobile menu toggle
+  $('hamburger').addEventListener('click', () => {
+    const open = $('mobile-menu').classList.toggle('hidden');
+    $('ham-open').classList.toggle('hidden',  !open);
+    $('ham-close').classList.toggle('hidden', open);
+  });
+  document.querySelectorAll('.mobile-nav-link').forEach(l => {
+    l.addEventListener('click', () => {
+      $('mobile-menu').classList.add('hidden');
+      $('ham-open').classList.remove('hidden');
+      $('ham-close').classList.add('hidden');
+    });
+  });
+
+  // FAQ accordion
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.faq-btn');
+    if (!btn) return;
+    const idx    = btn.dataset.i;
+    const answer = $(`fa-${idx}`);
+    const icon   = btn.querySelector('.faq-icon');
+    const isOpen = answer.classList.contains('open');
+
+    document.querySelectorAll('.faq-answer').forEach(a => a.classList.remove('open'));
+    document.querySelectorAll('.faq-icon').forEach(i => i.classList.remove('open'));
+
+    if (!isOpen) {
+      answer.classList.add('open');
+      icon.classList.add('open');
+    }
+  });
+
+  // Form submit helper (Formspree)
+  function bindForm(formId, successId) {
+    const form = $(formId);
+    if (!form) return;
+    form.addEventListener('submit', async e => {
+      if (CONFIG.formspreeId === 'YOUR_FORM_ID') return;
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type=submit]');
+      btn.textContent = 'Sending…';
+      btn.disabled = true;
+      try {
+        const res = await fetch(e.target.action, {
+          method: 'POST',
+          body: new FormData(e.target),
+          headers: { Accept: 'application/json' }
+        });
+        if (res.ok) {
+          form.classList.add('hidden');
+          $(successId).classList.remove('hidden');
+        } else {
+          btn.textContent = 'Error — Try Again';
+          btn.disabled = false;
+        }
+      } catch {
+        btn.textContent = 'Error — Try Again';
+        btn.disabled = false;
+      }
+    });
+  }
+  bindForm('contact-form', 'form-success');
+
+  // ─────────────────────────────────────────────────────────
+  // MULTI-STEP HERO FORM
+  // ─────────────────────────────────────────────────────────
+
+  const msData = { service: '', urgency: '', name: '', phone: '' };
+
+  function msShowStep(n) {
+    [1, 2, 3].forEach(i => $(`fstep-${i}`).classList.toggle('hidden', i !== n));
+    const pct = n === 1 ? 33 : n === 2 ? 66 : 100;
+    $('form-progress-bar').style.width = pct + '%';
+    $('form-step-label').textContent = `Step ${n} of 3`;
+    if (n === 3) setTimeout(() => $('ms-name').focus(), 50);
+  }
+
+  window.msSelectService = function(val, el) {
+    msData.service = val;
+    document.querySelectorAll('.ms-svc-btn').forEach(b => {
+      b.classList.remove('border-orange-400', 'bg-orange-50');
+      b.classList.add('border-gray-200');
+    });
+    el.classList.add('border-orange-400', 'bg-orange-50');
+    el.classList.remove('border-gray-200');
+    setTimeout(() => msShowStep(2), 280);
+  };
+
+  window.msSelectUrgency = function(val) {
+    msData.urgency = val;
+    document.querySelectorAll('.ms-urg-btn').forEach(b => {
+      b.classList.remove('border-orange-400', 'bg-orange-50');
+    });
+    setTimeout(() => msShowStep(3), 280);
+  };
+
+  window.msSubmit = async function() {
+    const name  = $('ms-name').value.trim();
+    const phone = $('ms-phone').value.trim();
+    if (!name)  { $('ms-name').focus();  return; }
+    if (!phone) { $('ms-phone').focus(); return; }
+    msData.name  = name;
+    msData.phone = phone;
+
+    const btn = $('ms-submit-btn');
+    btn.textContent = 'Sending…';
+    btn.disabled = true;
+
+    const fd = new FormData();
+    fd.append('name',    msData.name);
+    fd.append('phone',   msData.phone);
+    fd.append('service', msData.service);
+    fd.append('urgency', msData.urgency);
+
+    if (CONFIG.formspreeId && CONFIG.formspreeId !== 'YOUR_FORM_ID') {
+      try {
+        const res = await fetch(`https://formspree.io/f/${CONFIG.formspreeId}`, {
+          method: 'POST', body: fd, headers: { Accept: 'application/json' }
+        });
+        if (res.ok) {
+          $('fstep-3').classList.add('hidden');
+          $('hero-form-success').classList.remove('hidden');
+          $('form-progress-bar').style.width = '100%';
+          $('form-step-label').textContent = 'Done!';
+        } else {
+          btn.textContent = 'Error — Try Again';
+          btn.disabled = false;
+        }
+      } catch {
+        btn.textContent = 'Error — Try Again';
+        btn.disabled = false;
+      }
+    } else {
+      // Dev mode — show success without submitting
+      $('fstep-3').classList.add('hidden');
+      $('hero-form-success').classList.remove('hidden');
+      $('form-progress-bar').style.width = '100%';
+      $('form-step-label').textContent = 'Done!';
+    }
+  };
+
+})();
+</script>
+
+</body>
+</html>

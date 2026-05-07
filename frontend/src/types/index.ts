@@ -96,9 +96,19 @@ export interface Lead {
   test_responded_at: string | null;
   email_opened_at: string | null;
   unsubscribed_at: string | null;
+  dnc_at: string | null;
   first_contacted_at: string | null;
+  pitch_data: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DetectedTools {
+  ai_receptionist: string | null;
+  review_platform: string | null;
+  booking_widget: string | null;
+  crm_fsm: string | null;
+  chat_widget: string | null;
 }
 
 export interface EnrichmentData {
@@ -106,8 +116,20 @@ export interface EnrichmentData {
   team_names: string[];
   services: string[];
   tech_stack: string;
+  has_contact_form: boolean;
+  google_ads: boolean;
+  detected_tools: DetectedTools;
   scraped_at: string;
   error?: string;
+}
+
+export interface PitchData {
+  call_opener: string;
+  sms: string;
+  email: { subject: string; body: string };
+  recommended_offer: 'sam_ai' | 'website' | 'reviews' | 'google_ads';
+  pitch_angle: string;
+  detected_tools?: DetectedTools;
 }
 
 export interface Activity {
@@ -202,7 +224,9 @@ export interface Stats {
   total_leads: number;
   by_status: { status: LeadStatus; count: number }[];
   by_service_type: { service_type: ServiceType; count: number }[];
-  by_source: { source: 'manual' | 'osm_finder' | 'csv_import' | 'google_places'; count: number }[];
+  by_source: { source: string; count: number }[];
+  source_performance: { source: string; total_leads: number; booked: number; pipeline: number; avg_heat: number; revenue: number }[];
+  monthly_velocity?: { month: string; deals_closed: number; avg_days: number; revenue: number }[];
   pipeline_value: number;
   hot_leads_count: number;
   booked_count: number;
@@ -250,6 +274,7 @@ export interface Stats {
     }>;
   }>;
   requeue_eligible: number;
+  gatekeeper_leads_count: number;
 }
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
@@ -336,9 +361,11 @@ export interface SequenceStep {
   delay_days: number;
   channel: TemplateChannel;
   template_id: number;
+  alt_template_id?: number;
   label: string;
   from_email?: string;
   plain_text?: boolean;
+  ai_personalize?: boolean;
 }
 
 export interface Sequence {
@@ -398,6 +425,7 @@ export interface OutreachQueueItem {
   email_invalid: boolean;
   has_replied: boolean;
   from_email: string | null;
+  ai_personalize: boolean;
   last_error?: string | null;
   last_error_at?: string | null;
 }
@@ -409,6 +437,9 @@ export interface QueueStats {
   sends_remaining: number;
   daily_limit: number;
   sent_today: number;
+  is_warmup?: boolean;
+  warmup_day?: number | null;
+  warmup_next_limit?: number | null;
 }
 
 // ─── SMS ─────────────────────────────────────────────────────────────────────

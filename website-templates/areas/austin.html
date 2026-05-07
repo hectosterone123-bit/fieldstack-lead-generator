@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<!--
+  FIELDSTACK — CITY/AREA PAGE TEMPLATE
+  Rename to areas/[city-slug].html. Slug auto-detected from filename.
+-->
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title id="page-title">HVAC in City, TX</title>
+  <meta name="description" id="meta-desc" content="" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ["Inter","system-ui","sans-serif"] },
+        colors: { navy: { 950:"#05101E",900:"#080F1C",800:"#0D1829",700:"#152238",600:"#1E3352" } },
+      }}
+    }
+  </script>
+  <style>
+    body { font-family:"Inter",system-ui,sans-serif; }
+    .hero-bg { background-image: linear-gradient(105deg,rgba(5,16,30,.95) 0%,rgba(5,16,30,.75) 55%,rgba(5,16,30,.3) 100%), var(--hero-img); background-size:cover; background-position:center; }
+    .card-hover { transition:transform .2s,box-shadow .2s; }
+    .card-hover:hover { transform:translateY(-3px); box-shadow:0 12px 32px rgba(249,115,22,.12); }
+  </style>
+  <script type="application/ld+json" id="schema-ld"></script>
+  <script src="../config.js"></script>
+  <script src="../_shared.js"></script>
+  <script>PAGE_DEPTH = 1;</script>
+</head>
+
+<body class="bg-white text-gray-900 antialiased">
+
+<div id="top-bar" class="bg-navy-950 border-b border-white/[0.07]"></div>
+<nav class="sticky top-0 z-50 bg-navy-900/95 backdrop-blur-md border-b border-white/[0.07]">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8" id="nav-inner"></div>
+</nav>
+<div id="breadcrumb" class="bg-navy-800 border-b border-white/[0.07]"></div>
+
+<!-- HERO -->
+<section class="hero-bg relative min-h-[60vh] flex items-center">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 w-full">
+    <div class="max-w-2xl">
+      <div class="mb-4">
+        <span class="inline-flex items-center gap-2 bg-orange-500/15 border border-orange-500/30 text-orange-400 text-xs font-bold px-3.5 py-1.5 rounded-full uppercase tracking-widest">
+          <span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse"></span>
+          <span id="a-overline"></span>
+        </span>
+      </div>
+      <h1 id="a-h1" class="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-tight mb-4"></h1>
+      <p  id="a-para" class="text-lg text-gray-300 leading-relaxed mb-6 max-w-xl"></p>
+      <div id="a-stars" class="flex items-center gap-3 mb-8"></div>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <a id="a-call-btn" href="#" class="flex items-center justify-center gap-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold px-7 py-4 rounded-2xl text-lg transition-all shadow-2xl shadow-orange-500/40">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+          <span id="a-call-text"></span>
+        </a>
+        <a href="#a-contact" class="flex items-center justify-center gap-2.5 bg-white/[0.08] hover:bg-white/[0.15] border border-white/20 text-white font-semibold px-7 py-4 rounded-2xl text-lg transition-all">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Schedule Online
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="absolute bottom-0 left-0 right-0 pointer-events-none">
+    <svg viewBox="0 0 1440 48" fill="none" preserveAspectRatio="none" class="w-full h-12"><path d="M0 48L1440 48L1440 0C1200 40 960 48 720 32C480 16 240 48 0 16L0 48Z" fill="white"/></svg>
+  </div>
+</section>
+
+<!-- LOCAL CONTEXT -->
+<section class="bg-white py-14">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid md:grid-cols-2 gap-12 items-center">
+      <div>
+        <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Why Local Matters</p>
+        <h2 id="a-local-h2" class="text-3xl md:text-4xl font-black text-gray-900 mb-4"></h2>
+        <p id="a-local-ctx" class="text-gray-600 text-lg leading-relaxed mb-6"></p>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-orange-50 rounded-2xl p-4 border border-orange-100">
+            <p id="a-yrs" class="text-3xl font-black text-orange-500">25+</p>
+            <p class="text-sm text-gray-600 font-medium">Years Serving Area</p>
+          </div>
+          <div class="bg-orange-50 rounded-2xl p-4 border border-orange-100">
+            <p class="text-3xl font-black text-orange-500" id="a-resp">&lt;60 Min</p>
+            <p class="text-sm text-gray-600 font-medium">Response Time</p>
+          </div>
+        </div>
+      </div>
+      <div class="aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl bg-gray-200">
+        <img src="https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&q=80" alt="HVAC tech" class="w-full h-full object-cover" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SERVICES -->
+<section class="bg-gray-50 py-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">What We Do</p>
+      <h2 id="a-svc-h2" class="text-3xl md:text-4xl font-black text-gray-900">HVAC Services in <span id="a-svc-city"></span></h2>
+    </div>
+    <div id="a-services" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+  </div>
+</section>
+
+<!-- GUARANTEE STRIP -->
+<section class="bg-navy-800 py-10">
+  <div class="max-w-5xl mx-auto px-4">
+    <div class="grid sm:grid-cols-3 gap-6 text-center">
+      <div class="flex flex-col items-center gap-2">
+        <div class="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <p class="text-white font-black text-lg">Same-Day Service</p>
+        <p class="text-gray-400 text-sm">Dispatch within 60 minutes</p>
+      </div>
+      <div class="flex flex-col items-center gap-2">
+        <div class="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        </div>
+        <p id="a-guarantee-strip" class="text-white font-black text-lg"></p>
+        <p class="text-gray-400 text-sm">No overtime charges, ever</p>
+      </div>
+      <div class="flex flex-col items-center gap-2">
+        <div class="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+        </div>
+        <p id="a-rating-strip" class="text-white font-black text-lg"></p>
+        <p class="text-gray-400 text-sm">Verified Google reviews</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="bg-white py-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Reviews</p>
+      <h2 id="a-rev-h2" class="text-3xl md:text-4xl font-black text-gray-900"></h2>
+    </div>
+    <div id="a-reviews" class="grid md:grid-cols-3 gap-6"></div>
+  </div>
+</section>
+
+<!-- NEARBY AREAS -->
+<section class="bg-gray-50 py-14">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-8">
+      <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Also Serving</p>
+      <h2 class="text-3xl font-black text-gray-900">Nearby Cities</h2>
+    </div>
+    <div id="a-nearby" class="flex flex-wrap justify-center gap-3"></div>
+  </div>
+</section>
+
+<!-- CONTACT CTA -->
+<section id="a-contact" class="bg-navy-800 py-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="grid md:grid-cols-2 gap-12 items-start">
+      <div>
+        <p class="text-orange-500 text-xs font-bold uppercase tracking-[.18em] mb-2">Get In Touch</p>
+        <h2 id="a-contact-h2" class="text-4xl font-black text-white mb-4 leading-tight"></h2>
+        <p class="text-gray-300 text-lg mb-8">Call or fill out the form — we respond within 5 minutes during business hours.</p>
+        <div class="space-y-4">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z"/></svg>
+            </div>
+            <a id="a-contact-phone" href="#" class="text-xl font-bold text-white hover:text-orange-400 transition-colors"></a>
+          </div>
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-orange-500/15 flex items-center justify-center flex-shrink-0">
+              <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <span class="text-gray-300">Mon–Sat 7am–8pm · Emergency 24/7</span>
+          </div>
+        </div>
+      </div>
+      <div class="bg-white rounded-3xl p-7 shadow-2xl">
+        <h3 id="a-form-h3" class="text-2xl font-black text-gray-900 mb-6"></h3>
+        <div id="a-form"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="bg-navy-950 border-t border-white/[0.07] py-14">
+  <div id="footer-inner"></div>
+</footer>
+<div id="sticky-bar"></div>
+
+<script>
+(function() {
+  const slug = typeof PAGE_SLUG !== 'undefined'
+    ? PAGE_SLUG
+    : location.pathname.split('/').pop().replace('.html','');
+
+  const area = CONFIG.areaPages.find(a => a.slug === slug);
+  if (!area) { document.body.innerHTML = '<p style="padding:2rem">Area not found: ' + slug + '</p>'; return; }
+
+  const phoneHref = `tel:${CONFIG.phoneRaw}`;
+  const yrs = new Date().getFullYear() - CONFIG.yearFounded;
+
+  renderNav({ breadcrumb:[{ label:'Service Areas', href:'../index.html#areas' }, { label:area.city }] });
+  renderFooter();
+  renderStickyBar('contact.html');
+
+  document.getElementById('page-title').textContent = `HVAC in ${area.city}, ${CONFIG.state} | ${CONFIG.businessName}`;
+  document.getElementById('meta-desc').content = `${CONFIG.businessName} — trusted HVAC repair, installation & maintenance in ${area.city}, ${CONFIG.state}. Same-day service, no overtime. Call ${CONFIG.phone}.`;
+
+  document.querySelector('.hero-bg').style.setProperty('--hero-img', `url(${CONFIG.heroImage})`);
+  document.getElementById('a-overline').textContent  = `HVAC Service · ${area.city}, ${CONFIG.state}`;
+  document.getElementById('a-h1').innerHTML = `${area.city}'s Trusted<br/><span class="text-orange-500">HVAC Company</span>`;
+  document.getElementById('a-para').textContent = `Same-day AC repair, heating, and installation. ${CONFIG.rating}★ rated, NATE certified, serving ${area.city} since ${CONFIG.yearFounded}.`;
+  document.getElementById('a-stars').innerHTML =
+    `<div class="flex gap-0.5">${stars(5)}</div>
+     <span class="text-white font-bold text-lg">${CONFIG.rating}</span>
+     <span class="text-gray-400 text-sm">· ${CONFIG.reviewCount.toLocaleString()} Google Reviews</span>`;
+  document.getElementById('a-call-btn').href = phoneHref;
+  document.getElementById('a-call-text').textContent = `Call ${CONFIG.phone}`;
+
+  document.getElementById('a-local-h2').textContent = `We Know ${area.city}`;
+  document.getElementById('a-local-ctx').textContent = area.localContext;
+  document.getElementById('a-yrs').textContent = yrs + '+';
+  document.getElementById('a-resp').textContent = CONFIG.responseTime;
+
+  document.getElementById('a-svc-h2').innerHTML = `HVAC Services in <span id="a-svc-city">${area.city}</span>`;
+  document.getElementById('a-services').innerHTML = CONFIG.services.map(s => `
+    <a href="../services/${s.slug}.html" class="card-hover flex items-start gap-4 bg-white rounded-2xl p-5 border border-gray-100 shadow-sm group">
+      <div class="w-11 h-11 bg-orange-50 group-hover:bg-orange-500 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 mt-0.5">
+        <svg class="w-5 h-5 text-orange-500 group-hover:text-white transition-colors" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">${ICONS[s.icon] || ICONS.install}</svg>
+      </div>
+      <div>
+        <p class="font-black text-gray-900 group-hover:text-orange-500 transition-colors">${s.name}</p>
+        <p class="text-gray-500 text-sm mt-0.5">${s.desc}</p>
+      </div>
+    </a>`).join('');
+
+  document.getElementById('a-guarantee-strip').textContent = CONFIG.guarantee;
+  document.getElementById('a-rating-strip').textContent    = `${CONFIG.rating}★ (${CONFIG.reviewCount}+ reviews)`;
+
+  document.getElementById('a-rev-h2').textContent = `What ${area.city} Homeowners Say`;
+  document.getElementById('a-reviews').innerHTML = CONFIG.testimonials.slice(0,3).map(t => `
+    <div class="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+      <div class="flex mb-3">${stars(t.rating,'w-4 h-4')}</div>
+      <p class="text-gray-700 leading-relaxed mb-4 text-sm">"${t.text}"</p>
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-black text-sm">${t.name.charAt(0)}</div>
+        <div>
+          <p class="font-bold text-gray-900 text-sm">${t.name}</p>
+          <p class="text-gray-400 text-xs">${t.city} · Google Review ✓</p>
+        </div>
+      </div>
+    </div>`).join('');
+
+  const nearby = CONFIG.areaPages.filter(a => a.slug !== slug);
+  document.getElementById('a-nearby').innerHTML = nearby.map(a => `
+    <a href="${a.slug}.html" class="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm hover:border-orange-300 hover:text-orange-500 transition-colors font-semibold text-sm text-gray-700">
+      <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      ${a.city}
+    </a>`).join('');
+
+  document.getElementById('a-contact-h2').innerHTML = `Same-Day HVAC in <span class="text-orange-500">${area.city}</span>`;
+  document.getElementById('a-contact-phone').href = phoneHref;
+  document.getElementById('a-contact-phone').textContent = CONFIG.phone;
+  document.getElementById('a-form-h3').textContent = `Get a Free Estimate in ${area.city}`;
+  renderContactForm('a-form');
+
+  document.getElementById('schema-ld').textContent = JSON.stringify({
+    "@context":"https://schema.org",
+    "@type":"HVACBusiness",
+    "name": CONFIG.businessName,
+    "telephone": CONFIG.phone,
+    "email": CONFIG.email,
+    "areaServed": { "@type":"City","name":area.city,"addressRegion":CONFIG.state },
+    "address": { "@type":"PostalAddress","addressLocality":CONFIG.city,"addressRegion":CONFIG.state,"postalCode":CONFIG.zip,"addressCountry":"US" },
+    "aggregateRating": { "@type":"AggregateRating","ratingValue":CONFIG.rating,"reviewCount":CONFIG.reviewCount },
+  });
+})();
+</script>
+</body>
+</html>

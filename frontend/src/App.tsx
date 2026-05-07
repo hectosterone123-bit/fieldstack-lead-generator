@@ -13,6 +13,8 @@ import { Cockpit } from './pages/Cockpit';
 import { Caller } from './pages/Caller';
 import { ProspectingScript } from './pages/ProspectingScript';
 import { Callbacks } from './pages/Callbacks';
+import { SmsBlast } from './pages/SmsBlast';
+import { Insights } from './pages/Insights';
 
 function App() {
   return (
@@ -27,10 +29,12 @@ function App() {
           <Route path="/templates" element={<Templates />} />
           <Route path="/sequences" element={<Sequences />} />
           <Route path="/sms" element={<SmsInbox />} />
+          <Route path="/sms-blast" element={<SmsBlast />} />
           <Route path="/scraper" element={<Scraper />} />
           <Route path="/caller" element={<Caller />} />
           <Route path="/callbacks" element={<Callbacks />} />
           <Route path="/prospecting" element={<ProspectingScript />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

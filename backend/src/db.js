@@ -212,75 +212,88 @@ async function initDb() {
 
   db.run(SCHEMA);
 
+  // Helper: run migration, only log unexpected errors
+  const runMigration = (sql, description = '') => {
+    try {
+      db.run(sql);
+    } catch (e) {
+      // Expected error: column already exists. Unexpected errors get logged.
+      if (!e.message.includes('duplicate column') && !e.message.includes('already exists')) {
+        console.warn(`[DB Migration] ${description || sql.substring(0, 50)}: ${e.message}`);
+      }
+    }
+  };
+
   // Migrations: add Google Places columns
-  try { db.run('ALTER TABLE leads ADD COLUMN google_place_id TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN rating REAL'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN review_count INTEGER'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN google_place_id TEXT', 'google_place_id');
+  runMigration('ALTER TABLE leads ADD COLUMN rating REAL', 'rating');
+  runMigration('ALTER TABLE leads ADD COLUMN review_count INTEGER', 'review_count');
   db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_google_place_id ON leads(google_place_id)');
 
   // Migrations: add enrichment columns
-  try { db.run('ALTER TABLE leads ADD COLUMN enrichment_data TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN enriched_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN enrichment_data TEXT', 'enrichment_data');
+  runMigration('ALTER TABLE leads ADD COLUMN enriched_at DATETIME', 'enriched_at');
+  runMigration('ALTER TABLE leads ADD COLUMN pitch_data TEXT', 'pitch_data');
 
   // Migrations: add tags column
-  try { db.run('ALTER TABLE leads ADD COLUMN tags TEXT'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN tags TEXT', 'tags');
 
   // Migrations: add first_contacted_at for speed-to-lead tracking
-  try { db.run('ALTER TABLE leads ADD COLUMN first_contacted_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN first_contacted_at DATETIME', 'first_contacted_at');
 
   // Migrations: deal tracking columns
-  try { db.run('ALTER TABLE leads ADD COLUMN proposal_amount REAL'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN proposal_date TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN close_date TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN won_amount REAL'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN lost_reason TEXT'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN proposal_amount REAL', 'proposal_amount');
+  runMigration('ALTER TABLE leads ADD COLUMN proposal_date TEXT', 'proposal_date');
+  runMigration('ALTER TABLE leads ADD COLUMN close_date TEXT', 'close_date');
+  runMigration('ALTER TABLE leads ADD COLUMN won_amount REAL', 'won_amount');
+  runMigration('ALTER TABLE leads ADD COLUMN lost_reason TEXT', 'lost_reason');
 
   // Migration: auto_send toggle for sequences
-  try { db.run('ALTER TABLE sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
+  runMigration('ALTER TABLE sequences ADD COLUMN auto_send INTEGER DEFAULT 0', 'sequences.auto_send');
   // Migration: auto_send_after_step — manual steps 1-N, auto steps (N+1)+
-  try { db.run('ALTER TABLE sequences ADD COLUMN auto_send_after_step INTEGER DEFAULT 0'); } catch(e) {}
+  runMigration('ALTER TABLE sequences ADD COLUMN auto_send_after_step INTEGER DEFAULT 0', 'sequences.auto_send_after_step');
 
   // Migration: outreach tracking fields
-  try { db.run('ALTER TABLE leads ADD COLUMN loom_url TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN ghost_time TEXT'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN loom_url TEXT', 'loom_url');
+  runMigration('ALTER TABLE leads ADD COLUMN ghost_time TEXT', 'ghost_time');
 
   // Migration: response time tracker
-  try { db.run('ALTER TABLE leads ADD COLUMN test_submitted_at DATETIME'); } catch(e) {}
-  try { db.run('ALTER TABLE leads ADD COLUMN test_responded_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN test_submitted_at DATETIME', 'test_submitted_at');
+  runMigration('ALTER TABLE leads ADD COLUMN test_responded_at DATETIME', 'test_responded_at');
 
   // Migration: email open tracking
-  try { db.run('ALTER TABLE leads ADD COLUMN email_opened_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN email_opened_at DATETIME', 'email_opened_at');
 
   // Migration: per-enrollment auto_send flag
-  try { db.run('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0'); } catch(e) {}
-  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_sent_at DATETIME'); } catch(e) {}
-  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_error TEXT'); } catch(e) {}
-  try { db.run('ALTER TABLE lead_sequences ADD COLUMN last_error_at DATETIME'); } catch(e) {}
-  try { db.run('ALTER TABLE sequences ADD COLUMN is_template INTEGER DEFAULT 0'); } catch(e) {}
+  runMigration('ALTER TABLE lead_sequences ADD COLUMN auto_send INTEGER DEFAULT 0', 'lead_sequences.auto_send');
+  runMigration('ALTER TABLE lead_sequences ADD COLUMN last_sent_at DATETIME', 'lead_sequences.last_sent_at');
+  runMigration('ALTER TABLE lead_sequences ADD COLUMN last_error TEXT', 'lead_sequences.last_error');
+  runMigration('ALTER TABLE lead_sequences ADD COLUMN last_error_at DATETIME', 'lead_sequences.last_error_at');
+  runMigration('ALTER TABLE sequences ADD COLUMN is_template INTEGER DEFAULT 0', 'sequences.is_template');
 
   // Migration: auto_flush_overdue — auto-send overdue email/sms steps for opted-in sequences
-  try { db.run('ALTER TABLE sequences ADD COLUMN auto_flush_overdue INTEGER DEFAULT 0'); } catch(e) {}
+  runMigration('ALTER TABLE sequences ADD COLUMN auto_flush_overdue INTEGER DEFAULT 0', 'sequences.auto_flush_overdue');
 
   // Migration: unsubscribe support
-  try { db.run('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME'); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')"); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')"); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_phone', '')"); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_website', 'fieldstack.co')"); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN unsubscribed_at DATETIME', 'unsubscribed_at');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('app_url', '')", 'settings.app_url');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_name', 'Hector')", 'settings.sender_name');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_phone', '')", 'settings.sender_phone');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('sender_website', 'fieldstack.co')", 'settings.sender_website');
 
   // Migration: email bounce tracking + hot lead alert phone
-  try { db.run('ALTER TABLE leads ADD COLUMN email_invalid_at DATETIME'); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('alert_phone', '')"); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN email_invalid_at DATETIME', 'email_invalid_at');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('alert_phone', '')", 'settings.alert_phone');
 
   // Migration: DNC (Do Not Call) flag
-  try { db.run('ALTER TABLE leads ADD COLUMN dnc_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN dnc_at DATETIME', 'dnc_at');
 
   // Migration: callback alarm dedup
-  try { db.run('ALTER TABLE leads ADD COLUMN callback_alerted_at DATETIME'); } catch(e) {}
+  runMigration('ALTER TABLE leads ADD COLUMN callback_alerted_at DATETIME', 'callback_alerted_at');
 
   // Migration: daily send limits + domain warmup
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_send_limit', '20')"); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_start_date', '')"); } catch(e) {}
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_send_limit', '20')", 'settings.daily_send_limit');
+  runMigration("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_start_date', '')", 'settings.warmup_start_date');
 
   // Migration: set auto_send_after_step=1 on default sequence + seed default_sequence_id
   try {
@@ -289,7 +302,9 @@ async function initDb() {
       db.run("UPDATE sequences SET auto_send_after_step = 1, auto_send = 1 WHERE id = ? AND auto_send_after_step = 0", [defSeq.id]);
       db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('default_sequence_id', ?)", [String(defSeq.id)]);
     }
-  } catch(e) {}
+  } catch(e) {
+    console.warn('[DB Migration] default_sequence_id:', e.message);
+  }
 
   // Migration: re-seed templates if they don't have niche variables
   migrateTemplatesToNiche();
@@ -388,12 +403,19 @@ async function initDb() {
   // Migration: manual call source tracking
   try { db.run("ALTER TABLE calls ADD COLUMN source TEXT DEFAULT 'ai'"); } catch(e) {}
 
+  // Migration: monthly ROI report + hot lead decay alert settings
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_report_enabled', '1')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_plan_cost', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hot_alert_enabled', '1')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hot_alert_threshold', '70')"); } catch(e) {}
+
   // Migration: gatekeeper tracking — owner contact info + gatekeeper hit count
   try { db.run('ALTER TABLE leads ADD COLUMN owner_name TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN direct_phone TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN gatekeeper_count INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE leads ADD COLUMN linkedin_url TEXT'); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_link', '')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sam_auto_reply_enabled', '0')"); } catch(e) {}
 
   // Migration: configurable lead scoring rules
   db.run(`CREATE TABLE IF NOT EXISTS scoring_rules (
@@ -445,11 +467,43 @@ async function initDb() {
   // Migration: patch Gatekeeper script with "don't know owner's name" section
   migrateColdCallScriptsV4b();
 
+  // Migration: add Live Call Framework script (prep + pattern interrupt + loss math + micro-commitment)
+  migrateColdCallScriptsV5();
+
+  // Migration: add 6 new scripts (SPIN, Challenger, Voss, Reverse Qualifier, Scenarios, Seasonality)
+  migrateColdCallScriptsV6();
+
+  // Migration: add standalone voicemail scripts (5 scripts + timing rules)
+  migrateColdCallScriptsV7();
+
+  // Migration: add Good News / Bad News opener + callback-specific branch
+  migrateColdCallScriptsV8();
+
   // Migration: seed pre-built sequence template library
   seedTemplateLibrary();
 
   // Migration: ensure Auto Outreach sequence templates exist and clear stale errors
   repairAutoOutreachSequence();
+
+  // Migration: seed roofing storm + re-engagement sequences
+  seedRoofingStormSequence();
+  seedReengagementSequence();
+
+  // Migration: widget settings
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('widget_enabled', '1')"); } catch(e) {}
+  try {
+    const existingKey = get("SELECT value FROM settings WHERE key = 'widget_api_key'");
+    if (!existingKey || !existingKey.value) {
+      const widgetKey = require('crypto').randomUUID().replace(/-/g, '');
+      db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('widget_api_key', ?)", [widgetKey]);
+    }
+  } catch(e) {}
+
+  // Migration: timezone-aware sending
+  try { db.run("ALTER TABLE leads ADD COLUMN timezone TEXT DEFAULT 'America/Chicago'"); } catch(e) {}
+
+  // Migration: hyper-personalized cold outreach generator
+  try { db.run("ALTER TABLE leads ADD COLUMN cold_write_data TEXT"); } catch(e) {}
 
   saveDb();
   return db;
@@ -475,10 +529,16 @@ function repairSequenceTemplateIds() {
       if (!step.template_id) continue;
       const exists = get('SELECT id FROM templates WHERE id = ?', [step.template_id]);
       if (!exists) {
-        const replacement = get(
+        let replacement = get(
           'SELECT id FROM templates WHERE step_order = ? AND channel = ? ORDER BY is_default DESC, id ASC LIMIT 1',
           [step.order, step.channel]
         );
+        if (!replacement) {
+          replacement = get(
+            'SELECT id FROM templates WHERE channel = ? ORDER BY is_default DESC, step_order ASC, id ASC LIMIT 1',
+            [step.channel]
+          );
+        }
         if (replacement) {
           step.template_id = replacement.id;
           changed = true;
@@ -2922,6 +2982,146 @@ FieldStack`,
   );
 }
 
+function seedRoofingStormSequence() {
+  const existing = get("SELECT id FROM sequences WHERE name = 'Roofing Storm Season (5-Step)'");
+  if (existing) return;
+
+  console.log('[DB] Seeding roofing storm season sequence...');
+
+  const t1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Roofing Storm — Hook', 'email', 'new', 1, 'storm damage in {city}',
+`Hey {first_name},
+
+Storm activity in {city} usually means a flood of homeowner calls — but most roofing companies miss them because nobody's answering fast enough.
+
+We built an AI that texts every website lead within 90 seconds, 24/7. While the other roofers are on a job site, your leads are getting a response.
+
+Worth a quick 15-minute call this week?
+
+— {sender_name}
+{business_name}`]
+  );
+
+  const t2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Roofing Storm — Proof', 'email', 'new', 2, 'Re: storm damage in {city}',
+`{first_name},
+
+One roofing client in Austin added $22k in booked jobs the first month after a hail storm — just from leads that used to fall through the cracks.
+
+They weren't spending more on ads. They just started answering faster.
+
+Can I show you how it works in 15 minutes?
+
+{booking_link}
+
+— {sender_name}`]
+  );
+
+  const t3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Roofing Storm — Urgency', 'email', 'new', 3, 'insurance claims close in 60 days',
+`{first_name},
+
+One thing most homeowners don't know: insurance claims for storm damage typically close 60 days after the event.
+
+That window is your best shot at booked jobs. After that, homeowners move on or go with whoever already called them.
+
+Still interested in seeing how this works?
+
+— {sender_name}`]
+  );
+
+  const t4 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Roofing Storm — Scarcity', 'email', 'new', 4, 'only 2 spots left in {city}',
+`{first_name},
+
+We only work with 2-3 roofing contractors per market. We have one spot left in {city}.
+
+If this isn't a fit, no hard feelings. But if you want to be the contractor who answers fastest in {city} this storm season, let's talk.
+
+{booking_link}
+
+— {sender_name}`]
+  );
+
+  const t5 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Roofing Storm — Breakup', 'email', 'new', 5, 'last one from me',
+`{first_name}, last email from me.
+
+If you ever want to see how other roofing companies in Texas are booking more jobs from the same website traffic, reply "interested" and I'll send the info.
+
+Good luck this season.
+
+— {sender_name}`]
+  );
+
+  const steps = [
+    { order: 1, delay_days: 0,  channel: 'email', template_id: Number(t1.lastInsertRowid), label: 'Storm Hook' },
+    { order: 2, delay_days: 2,  channel: 'email', template_id: Number(t2.lastInsertRowid), label: 'Proof' },
+    { order: 3, delay_days: 5,  channel: 'email', template_id: Number(t3.lastInsertRowid), label: 'Urgency' },
+    { order: 4, delay_days: 10, channel: 'email', template_id: Number(t4.lastInsertRowid), label: 'Scarcity' },
+    { order: 5, delay_days: 14, channel: 'email', template_id: Number(t5.lastInsertRowid), label: 'Breakup' },
+  ];
+
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue) VALUES (?, ?, ?, 1, 1, 0, 1)",
+    ['Roofing Storm Season (5-Step)', 'Urgency-focused sequence for storm damage leads. All 5 steps auto-send over 14 days. Storm hook → proof → insurance urgency → scarcity → breakup.', JSON.stringify(steps)]
+  );
+}
+
+function seedReengagementSequence() {
+  const existing = get("SELECT id FROM sequences WHERE name = 'Re-engagement (3-Step)'");
+  if (existing) return;
+
+  console.log('[DB] Seeding re-engagement sequence...');
+
+  const t1 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Re-engagement — Breakup', 'email', 'contacted', 1, 'closing your file',
+`{first_name},
+
+I'm going to close out your file this week unless you want to reconnect.
+
+No hard feelings if the timing is off — just didn't want to disappear without checking in one more time.
+
+If you're still curious about automating your lead follow-up, I can do a quick 10-minute call this week. Otherwise I'll leave you alone.
+
+— {sender_name}`]
+  );
+
+  const t2 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Re-engagement — SMS Nudge', 'sms', 'contacted', 2, '', `Hey {first_name}, just making sure my last email didn't get buried. Still interested in the lead follow-up system? — {sender_name}`]
+  );
+
+  const t3 = db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, ?, ?, ?, ?, ?, 0)",
+    ['Re-engagement — Final', 'email', 'contacted', 3, 'last one',
+`{first_name}, this is the last email.
+
+If anything changes and you want to see how {service_type} contractors are booking more jobs without spending more on ads, reply "interested" any time.
+
+Good luck.
+
+— {sender_name}`]
+  );
+
+  const steps = [
+    { order: 1, delay_days: 0, channel: 'email', template_id: Number(t1.lastInsertRowid), label: 'Breakup Email' },
+    { order: 2, delay_days: 4, channel: 'sms',   template_id: Number(t2.lastInsertRowid), label: 'SMS Nudge' },
+    { order: 3, delay_days: 10, channel: 'email', template_id: Number(t3.lastInsertRowid), label: 'Final Email' },
+  ];
+
+  db.run(
+    "INSERT INTO sequences (name, description, steps, is_active, auto_send, auto_send_after_step, auto_flush_overdue) VALUES (?, ?, ?, 1, 1, 0, 1)",
+    ['Re-engagement (3-Step)', 'For leads that went cold or ghosted. Breakup email → SMS nudge → final email over 10 days. Often revives 10-15% of dead leads.', JSON.stringify(steps)]
+  );
+}
+
 function migratePostCallEmailTemplates() {
   const existing = get("SELECT id FROM templates WHERE name = 'Post-Call — Voicemail Follow-Up' AND is_default = 1 LIMIT 1");
   if (existing) return;
@@ -3105,6 +3305,652 @@ Getting the name before you dial = 2x higher transfer rate.`;
 
   db.run("UPDATE templates SET body = body || ? WHERE id = ?", [patch, tpl.id]);
   console.log('[DB] Gatekeeper script patched with unknown-name section.');
+}
+
+function migrateColdCallScriptsV5() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — Live Call Framework' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding cold call scripts v5 (Live Call Framework)...');
+
+  const body = `LIVE CALL FRAMEWORK — TIMING + STRUCTURE
+
+Use this as your run-of-call map. Under 3 minutes total.
+
+---
+
+PREP (2–5 min before dialing)
+
+1. Scan their website — do they have a contact form? Any pricing shown?
+2. Google their reviews — if 50+ reviews and 4.8 stars, they're busy and likely missing leads
+3. Compute their missed-call loss: "How many calls/forms do you miss a day?" × 30 × conversion rate × avg job value
+   → Even 1 missed lead/day × $6K avg job × 20% close rate = $36K/year walking out the door
+4. Have your calendar open before you dial
+
+---
+
+OPEN (10–20 seconds)
+
+Pattern interrupt — don't pitch yet:
+"Quick question — good news or bad news for you?"
+
+[They'll almost always ask "what do you mean?"]
+
+Value line (one sentence, then stop):
+"We built a voice agent that recovers missed calls and books high-value jobs for {service_type} contractors — can I run a 30-day test for you, free?"
+
+WHY THIS WORKS:
+"Good news or bad news" breaks the expected cold call pattern. They're curious instead of defensive.
+The value line is ONE sentence. Don't pitch further — let them respond.
+
+---
+
+DIAGNOSE (30–60 seconds)
+
+Ask 2 high-signal questions. Let them talk.
+
+Q1: "How many calls do you miss in a day — honestly?"
+Q2: "And what's your average job worth?"
+
+Then do the math out loud:
+"So if you're missing [X] calls a day, and [Y]% of those would have converted at [$Z] — that's [math] every month. Just in missed calls."
+
+[Let the silence sit. Don't rush to fill it.]
+
+WHY THIS WORKS:
+They compute the loss themselves. Their number, their math. You're not claiming anything — you're asking them to face it.
+
+---
+
+OFFER (30 seconds)
+
+"Here's what I'd like to do. I'll run a 30-day free test — Sam answers your missed calls, texts leads back in under a minute, books the estimates. You only pay a small percentage of the incremental revenue you approve.
+
+You keep everything that comes in. If Sam doesn't book you 5 qualified quotes this month, you pay nothing."
+
+Reframe capacity objection (if they say "I'm already busy"):
+"More leads = more choice. You pick the higher-margin jobs and pass on the small ones. This doesn't create work — it creates options."
+
+---
+
+CLOSE (15 seconds)
+
+Micro-commitment — don't ask for the sale, ask for permission to build:
+"If I build a demo using your business name and your site — and it books even one job — would you try it for 30 days?"
+
+[Most people say yes to a demo. You're asking if they'd try it if it proves itself.]
+
+Then immediately:
+"I've got Thursday morning or Friday afternoon — which is less bad?"
+
+---
+
+PSYCHOLOGY NOTES
+
+• Permission language lowers resistance: "Would you try it IF..." not "Can I sell you..."
+• Small asks chain to bigger yeses — demo → trial → contract
+• The math is the pitch. Once they say their own number out loud, you don't need to sell
+• Never say "Did I catch you at a bad time?" — drops booking rate 40% (Gong data)
+• Silence after the math is golden. Don't fill it.
+
+---
+
+VOICEMAIL VERSION (under 12 seconds):
+"Hey {first_name}, quick question for you — I'll text you right now."
+[Then text:] "Hey, tried calling. Quick question: how many calls do you miss a day? I can show you what that's costing. 5 minutes. When works?"`;
+
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)",
+    ['Cold Call — Live Call Framework', 0, body]
+  );
+
+  console.log('[DB] Cold call scripts v5 applied.');
+}
+
+function migrateColdCallScriptsV6() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — SPIN Selling Discovery' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding cold call scripts v6 (SPIN, Challenger, Voss, Reverse Qualifier, Scenarios, Seasonality)...');
+
+  const stmt = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)";
+
+  // 1 — SPIN Selling
+  db.run(stmt, ['Cold Call — SPIN Selling Discovery', 1, `SPIN SELLING — GUIDED DISCOVERY (Neil Rackham / Huthwaite)
+GOAL: Get them to articulate the problem and its cost themselves. No pitching.
+Best used: after earning 60-90 seconds. Not an opener — a conversation structure.
+
+---
+
+THE RULE: Ask one question at a time. Wait for a full answer. Don't fill silence.
+
+---
+
+S — SITUATION (establish current state)
+"How are you currently handling website leads that come in after hours or on weekends?"
+"Do you have someone dedicated to following up, or does it fall on you?"
+"What does your response process look like on a normal day?"
+
+P — PROBLEM (surface pain they already feel)
+"If a lead comes in at 9 PM on a Friday — what actually happens to it?"
+"How often do you miss calls because you're on a job site?"
+"Have you ever lost a job to a competitor just because they called back first?"
+
+I — IMPLICATION (amplify the cost of the problem)
+"If that lead called four roofers that same night and one of them texted back in 5 minutes — what does that do to your odds of getting that job?"
+"What's your average job worth? So if you're losing even two or three of those a month to faster competitors — what does that add up to?"
+"Does that affect your ability to grow, or is it just an annoying leak?"
+
+N — NEED-PAYOFF (let them describe what solving it is worth)
+"What would it mean for your business if every lead got an instant response, even when you're on a roof at 7 AM?"
+"If you could recover even half of those after-hours leads — what's that worth to you annually?"
+"If you didn't have to think about lead follow-up at all, what would that free you up to do?"
+
+---
+
+CLOSE (after they've answered N):
+"That's exactly what Sam does. Want to see it in action? Takes 12 minutes."
+
+---
+
+WHY THIS WORKS:
+The prospect hears themselves describe the problem and compute its cost.
+By the time you mention the solution, they've half-closed themselves.
+Decision-makers don't like being sold — they like making decisions.
+Your job is to ask better questions, not give better pitches.`]);
+
+  // 2 — Challenger Sale
+  db.run(stmt, ['Cold Call — The Challenger Reframe', 1, `THE CHALLENGER SALE — TEACH → TAILOR → TAKE CONTROL
+GOAL: Position yourself as an expert, not a vendor. Open by teaching something counterintuitive, then guide to a decision.
+Source: Dixon & Adamson, "The Challenger Sale"
+
+---
+
+TEACH — Lead with an industry insight they probably don't know
+
+"Most roofing companies I talk to believe their biggest revenue leak is their marketing budget — not enough leads coming in. But what I actually see in the data is the opposite: the leak is the leads they already have. The average contractor response time to a website lead is over 4 hours. After 5 minutes, the odds of converting that lead drop by 80 percent. Most guys have no idea that stat applies to them."
+
+"Here's something that surprises most HVAC contractors: your biggest competitor isn't another HVAC company. It's whoever texts back first. Homeowners in 2025 are submitting to 3-4 companies at once. The first to respond books the job. Response time is now the primary sales advantage — not price, not reviews."
+
+---
+
+TAILOR — Connect it to their specific situation
+
+"You're running a {service_type} operation in {city}. During peak season you're probably fielding 40-80 inbound contacts a week. I'd bet a significant chunk of that volume is hitting voicemail after 5 PM and on weekends."
+
+"You've got {review_count} reviews on Google — which tells me you're doing real volume. That also means you've got real lead flow that's potentially leaking."
+
+---
+
+TAKE CONTROL — Direct, confident ask
+
+"Here's what I'd suggest: let me show you a 12-minute demo — not a sales pitch, just the product working in real time. If it's not a fit you'll know immediately and I won't follow up."
+
+"I've got Thursday at 10 AM or Friday at noon. Which is less bad for you?"
+
+---
+
+REFRAME OBJECTION — "I already have a process for that"
+"Good. Does your process respond in under 60 seconds, nights and weekends, while you're on a job site? That's the specific gap. 12 minutes and I'll show you."
+
+---
+
+WHY THIS WORKS:
+Challenger reps don't ask what keeps prospects up at night — they tell them what should.
+Contractors respect directness and expertise over enthusiasm.
+You're not asking for permission — you're providing analysis and leading to a logical next step.`]);
+
+  // 3 — Chris Voss / Tactical Empathy
+  db.run(stmt, ['Cold Call — Tactical Empathy (Voss)', 1, `TACTICAL EMPATHY — LABELING + ACCUSATION AUDIT + MIRRORING
+GOAL: Disarm a skeptical contractor by making them feel understood, not sold to.
+Source: Chris Voss, "Never Split the Difference" (FBI negotiation)
+
+---
+
+ACCUSATION AUDIT — Say every negative thing they're already thinking, first.
+This removes their ammunition entirely.
+
+"You're probably thinking this is just another software pitch and you've already been burned by something that promised leads and didn't deliver."
+[Pause. Let them react — they almost always say "yeah" or "kind of."]
+"That's fair. That's not what I'm calling about."
+
+[Then pivot to the real problem statement.]
+
+---
+
+LABELING — Name what you think they're feeling. Start with "It sounds like..." or "It seems like..."
+
+"It sounds like you've already got a process that works most of the time — you just lose some leads after hours and it's an acceptable leak."
+[Let them agree or correct you. Either way you're having a real conversation.]
+
+"It seems like the bigger issue isn't the missed calls themselves — it's not being able to do anything about them while you're on a job site."
+
+---
+
+MIRRORING — Repeat the last 2-3 words they said as a question. Gets them to elaborate.
+
+Prospect: "We've tried stuff like this before and it never works."
+You: "...Never works?"
+[Silence. Let them fill it. They'll explain the actual objection.]
+
+Prospect: "I'm just not sure it's worth the hassle."
+You: "...Worth the hassle?"
+[They'll tell you exactly what the real concern is.]
+
+---
+
+"NO"-ORIENTED QUESTIONS — Ask questions where "no" feels safe but means "yes."
+People resist saying yes. "No" feels like control.
+
+"Would it be crazy to spend 15 minutes seeing whether this actually applies to your situation?"
+[They say "no" = they'll meet with you.]
+
+"Is now a bad time to at least look at the numbers?"
+[They say "no" = the timing is fine.]
+
+"Have you given up on ever solving the after-hours response problem?"
+[They say "no" = they still want a solution.]
+
+---
+
+LATE CALL EMPATHY (when they're frustrated):
+"Look — I can tell I caught you at a rough time. I'm not going to waste another 30 seconds. Can I text you one thing right now and you tell me if it's worth a call this week?"
+
+---
+
+WHY THIS WORKS:
+Contractors are highly skeptical of salespeople.
+Mirroring and labeling make them feel heard rather than sold to.
+The accusation audit removes their resistance before they can deploy it.
+"No" feels like safety — use that.`]);
+
+  // 4 — Reverse Qualifier / Takeaway
+  db.run(stmt, ['Cold Call — The Reverse Qualifier', 1, `THE REVERSE QUALIFIER — DISQUALIFY FRAMEWORK + TAKEAWAY CLOSE
+GOAL: Reduce resistance by pulling back. Triggers curiosity and FOMO.
+Best used: when a prospect is interested but stalling, or when you want to lower pressure on a skeptical call.
+Source: Josh Braun (Poke the Bear) + Sandler Sales
+
+---
+
+DISQUALIFIER OPENER — Don't sell, surface a blind spot, give them permission to bail:
+
+"Hi {first_name} — quick question. Do you know what percentage of your inbound leads actually get a response within 5 minutes? Most contractors have no idea. It's usually under 20 percent. Feel free to say this isn't relevant to you — does that sound like something worth a 10-minute look?"
+
+[If they say no: "Totally fair — not a fit for everyone." Hang up fast. The speed signals confidence.]
+[If they say yes or "what is it?" — you've earned the next 90 seconds.]
+
+---
+
+POKE THE BEAR — One question that surfaces the problem without pitching:
+
+"When was the last time a lead came in after hours and you didn't get back to them until the next morning?"
+[Let them answer. Their answer IS the pitch.]
+
+"What happens to your website form submissions when you're on a job site? Do they just sit there?"
+[Again — their answer does the work.]
+
+---
+
+TAKEAWAY — When they're stalling or seems wishy-washy:
+
+"Honestly, this might not be for you. We work best with contractors doing over 25 to 30 inbound leads a month — otherwise the math doesn't really work. Are you at that volume, or is it more like 10 to 15?"
+[If they're below the threshold, frame it as: "Let's talk again in a few months when you scale up."
+ If they're above it, you've just established they're a perfect fit and they know it.]
+
+"Look, I don't want to oversell this. Some contractors don't need it — guys who have a dedicated receptionist answering everything in real time, or who don't get web leads at all. Is that you, or is the after-hours gap something that's actually costing you?"
+
+---
+
+THE PULL-BACK CLOSE (after showing interest but not committing):
+
+"I want to be straight with you — if the timing isn't right, the timing isn't right. The contractors who get the most out of this are the ones who are actively watching jobs go to competitors because they can't respond fast enough. If that's not your situation, we shouldn't waste each other's time."
+[Silence. Let them respond. They almost always lean in.]
+
+---
+
+AFTER A SOFT "LET ME THINK ABOUT IT":
+"For sure. Two quick questions before you go — what specifically would you need to see to feel like it's worth trying? And what's the one thing that would make you say no?"
+[Their answers are a roadmap. Address them directly and re-close.]
+
+---
+
+WHY THIS WORKS:
+Pressure creates resistance. Pulling back eliminates it.
+Disqualifying them makes them want to qualify.
+Giving them permission to say no paradoxically makes them more likely to say yes.`]);
+
+  // 5 — Scenario Playbook
+  db.run(stmt, ['Cold Call — Scenario Playbook', 0, `SCENARIO PLAYBOOK — SITUATIONAL SCRIPTS
+Reference card for specific call scenarios that come up repeatedly.
+
+---
+
+SCENARIO 1: NO-SHOW TO A DEMO
+
+Don't apologize. Be matter-of-fact. No-shows are almost always logistics, not disinterest.
+
+"Hey {first_name} — looks like we missed each other. Figured something came up on a job. Still worth showing you this — takes 12 minutes. I've got tomorrow at 7:30 AM or Thursday at noon — which is easier?"
+
+If they're evasive:
+"No problem if the timing's off. I can send you a 3-minute video that shows exactly how it works — you can watch it between jobs. Want me to shoot that over to your cell?"
+
+If they ghosted twice:
+"Hey, I'm going to be straight with you — I don't want to keep chasing if it's not a fit. Is this still something you want to explore, or should I stop following up?"
+[This usually gets a response either way. People respect directness.]
+
+---
+
+SCENARIO 2: RE-ENGAGING A DEAD LEAD (2-6 months cold)
+
+Don't apologize for the time gap. Lead with a fresh reason.
+
+"Hey {first_name}, Hector from FieldStack — we spoke a few months back about automating lead response. Quick reason I'm calling: we just added a feature that shows exactly how many leads went cold each week and the estimated revenue lost. I ran a rough estimate for {service_type} contractors in {city} — the number is usually surprising. Worth 5 minutes to see yours?"
+
+If they don't remember the conversation:
+"No worries — we talked briefly about missed after-hours leads. I won't re-pitch you. I've just got a number I think you'd want to see. Can I text it to you?"
+
+If they went cold after a demo:
+"Hey {first_name} — last time we talked you were interested but the timing wasn't right. Has anything changed, or is it still not the moment?" [Short. Direct. Easy to answer.]
+
+---
+
+SCENARIO 3: GETTING A REFERRAL AT END OF CALL
+
+Only do this after delivering value in the conversation — after a demo, or after a graceful "not right now."
+
+"Totally understand it's not the right time. Quick question before I let you go — do you know any other {service_type} or HVAC contractors who are growing fast and probably losing leads they can't respond to fast enough? I'm not asking for an intro — just a name. I'll reach out cold and keep you out of it completely."
+
+Softer version:
+"Is there anyone in your network this would obviously help? Doesn't have to be someone you know well — just someone you know is doing real volume."
+
+If they give you a name:
+"I appreciate that. I'll reach out to them and I won't mention your name. Is there anything I should know about them before I call?"
+
+---
+
+SCENARIO 4: THEY WANT TO ROPE IN A PARTNER OR SPOUSE
+
+Don't fight it. Accelerate it.
+
+"Totally makes sense — who else would be on that call? Can we get them on a 15-minute call together? I'd rather do it once and make sure everyone has the same information."
+
+Two-slot close immediately:
+"I've got Wednesday at 6 PM or Thursday at 7 PM — which works for both of you?"
+
+---
+
+SCENARIO 5: LEAVING A VOICEMAIL
+
+Under 12 seconds. Create a curiosity gap. No pitch.
+
+"Hey {first_name}, it's Hector — quick question about your website leads. I'll text you right now."
+
+[Text immediately:]
+"Hey, just tried calling. Found something specific to {service_type} contractors in {city} I think you'd want to see. When's a good 10 minutes this week?"`]);
+
+  // 6 — Seasonality
+  db.run(stmt, ['Cold Call — Seasonality & Timing Scripts', 1, `SEASONALITY + TIMING REFERENCE
+Use the right angle for the right time of year. Urgency is pre-loaded when the season matches.
+
+---
+
+STORM SEASON — ROOFING (Spring / Early Summer)
+
+"Storm season is here. You know what happens — one hail event in North Austin and your phone rings 80 times in 24 hours. How many of those do you actually answer? The ones that hit voicemail book with whoever texts them first."
+
+"After a hail event, homeowners file 3-4 contractor inquiries at once. First response books the job. We're heading into the busiest storm window of the year — do you want to be the contractor that responds in 60 seconds or the one that calls back the next morning?"
+
+---
+
+SUMMER AC RUSH — HVAC (May–August)
+
+"When it hits 105 in Austin in July, every homeowner with a broken AC calls 3 or 4 companies at the same time. The one that responds in under 60 seconds books the job. The rest get ghosted. That's the specific problem Sam solves — and peak season is 6 weeks out."
+
+"A broken AC in Texas summer is an emergency call — it doesn't wait until morning. If that lead hits your voicemail at 9 PM, they've booked someone else by 9:05. Are you catching those right now?"
+
+---
+
+PRE-SEASON SETUP (March–April / September–October)
+
+"Spring is 4 weeks out — that's when HVAC calls triple and roofing leads spike. Most contractors aren't set up to handle that volume, so they lose 30-40% of it to whoever responds faster. I'd rather get you set up before that hits than during it when everyone's too busy."
+
+"Fall tune-up season is coming. That's when homeowners finally get around to calling about the furnace or the roof they've been ignoring. Are you ready for that spike, or is it going to be the same situation as last year?"
+
+---
+
+WINTER HEATING — HVAC (November–February)
+
+"A broken furnace at 9 PM on a Tuesday doesn't wait until morning. If that lead hits your voicemail, they've booked someone else before you wake up. How are you catching those right now?"
+
+---
+
+INSURANCE / EMERGENCY DAMAGE ANGLE (Year-round)
+
+"Insurance-driven jobs move fast — the adjuster is already out there and the homeowner needs someone on site ASAP. The contractor who responds first gets first shot at the work. Are you catching those in real time or are they going to someone else?"
+
+"When a pipe bursts or a roof is actively leaking, homeowners call down a list until someone answers. They don't wait. Sam puts you at the top of that list by responding before anyone else picks up."
+
+---
+
+BEST TIMES TO CALL CONTRACTORS
+
+Best days: Wednesday and Thursday.
+Avoid: Friday after 2 PM, Monday before 9 AM.
+
+Best windows (owner's schedule):
+• 7:00 AM – 8:00 AM — In the truck before job site. Receptive.
+• 12:00 PM – 1:30 PM — Lunch break. Off the roof, phone in hand.
+• 5:00 PM – 6:30 PM — Driving back. Not in work-mode. Reflective.
+
+Avoid: 9 AM – 11 AM (peak job site hours), 3 PM – 5 PM (afternoon push).
+
+Weather events: Call within 48 hours of a regional hail or wind event. Urgency is already primed — don't wait.
+
+---
+
+ANTI-PATTERNS (kill your booking rate)
+
+"Is now a good time?" → Gives them an easy out before they hear you. Never say this.
+"How are you doing today?" → Signals telemarketer. Skip it.
+"I'll let you go." → Permanently ends the call with no commitment.
+Listing features → They care about lost money, not features.
+Apologizing for calling → Signals low confidence.
+Calling Friday after 3 PM → Worst conversion window of the week.
+Sending email to follow up without calling first → 2-5% open rate. Call first.`]);
+
+  console.log('[DB] Cold call scripts v6 applied (6 new scripts).');
+}
+
+function migrateColdCallScriptsV7() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — Voicemail Scripts' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding cold call scripts v7 (Voicemail Scripts)...');
+
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', ?, NULL, ?, 1)",
+    ['Cold Call — Voicemail Scripts', 0, `VOICEMAIL SCRIPTS — UNDER 15 SECONDS EACH
+
+Leave short. Sound human. Drive them to TEXT back, not call back.
+Rule: never pitch in a voicemail. Create a gap they want to close.
+
+---
+
+SCRIPT 1 — THE QUESTION DROP (most effective)
+Use when: first attempt, no prior contact.
+
+"Hey {first_name}, it's {sender_name}. Quick question for you — I'll text you right now."
+
+[Hang up. Immediately text:]
+"Hey, tried calling. Quick question: how many website leads do you miss after hours? I can show you what that's costing. 5 minutes — when works?"
+
+WHY: The voicemail creates a cliffhanger. They check your text to get the answer.
+
+---
+
+SCRIPT 2 — THE MATH TEASE
+Use when: you know something about their business (review count, no website chat, etc.)
+
+"Hey {first_name}, {sender_name} here. Did some quick math on {business_name} — texting it to you now."
+
+[Hang up. Immediately text:]
+"Hey — ran the numbers. If you miss even 1 call a day at a $5K average job, that's $36K/year walking out. Worth a 5-minute call? I'll show you how we fix it."
+
+WHY: Everyone wants to see math about their own business. Curiosity is involuntary.
+
+---
+
+SCRIPT 3 — THE REFERRAL NAME DROP
+Use when: you have a mutual contact or just worked with a competitor in their area.
+
+"Hey {first_name}, {sender_name}. [Name] mentioned I should reach out — I'll text you why. Talk soon."
+
+[Hang up. Text:]
+"Hey — [Name] from [company] said you'd be the right person to talk to about lead follow-up. We just set something up for them — thought it made sense to show you too. 5 minutes?"
+
+WHY: Social proof before you even talk. They're curious who referred them.
+
+---
+
+SCRIPT 4 — THE COMPETITOR ANGLE
+Use when: you know a competitor in their market is already using Sam.
+
+"Hey {first_name}, {sender_name} here. Quick heads up — texting you something about {city}. Worth 30 seconds."
+
+[Hang up. Text:]
+"Hey — heads up. We're already working with [competitor type] in {city} and they're catching leads same-day. Thought you'd want to know before they get too far ahead. 5 minutes?"
+
+WHY: Nothing moves a contractor faster than thinking a competitor has an edge.
+
+---
+
+SCRIPT 5 — THE CALLBACK CLOSE
+Use when: you've already left 1-2 voicemails and they haven't responded.
+
+"Hey {first_name}, {sender_name} — last message, I promise. Texting you one thing. If it's not relevant, just say so and I won't bother you again."
+
+[Hang up. Text:]
+"Last one — if you're already handling every lead same-day, what I have doesn't apply. But if you're missing even a few a week, it's worth 5 minutes. Want me to show you?"
+
+WHY: Permission to say no lowers resistance. Most people reply out of courtesy — and that opens the conversation.
+
+---
+
+TIMING RULES
+• Leave a voicemail only after 2+ unanswered calls (same day or different days)
+• Always text within 60 seconds of hanging up — they check their phone right after
+• Never leave more than 3 voicemails total — after that, go pure text/email
+• Best voicemail windows: 7–8 AM (in the truck) or 5–6:30 PM (driving home)
+• Don't leave a voicemail on Monday morning — they clear it without listening
+
+---
+
+FOLLOW-UP TEXT TIMING AFTER VOICEMAIL
+• Day 0: Voicemail + immediate text
+• Day 2: Follow-up text if no reply ("Did my text come through?")
+• Day 5: Last text before moving to email sequence`]
+  );
+
+  console.log('[DB] Cold call scripts v7 applied (Voicemail Scripts).');
+}
+
+function migrateColdCallScriptsV8() {
+  const exists = get("SELECT id FROM templates WHERE name = 'Cold Call — Good News / Bad News' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Adding cold call scripts v8 (Good News / Bad News opener)...');
+
+  db.run(
+    "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'call_script', 'new', 0, NULL, ?, 1)",
+    ['Cold Call — Good News / Bad News', `GOOD NEWS / BAD NEWS OPENER
+For: fresh cold calls AND callback after voicemail/no-answer.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION A — IF THIS IS A CALLBACK (logged as voicemail / no answer)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+USE THIS WHEN: They didn't pick up before. Now they answered.
+
+"Hey {first_name}, this is Hector — I tried you a couple times and kept getting voicemail. Which actually proves my point. If I — someone trying to reach you — can't get through... imagine how many homeowners with a $10K job gave up and called your competitor instead. Sound familiar?"
+
+[pause — let them respond]
+
+If they say "yeah" or laugh: → Jump to THE PITCH below.
+If they get defensive ("I return all my calls"): → "For sure. So walk me through — what happens when a lead comes in at 9 PM on a Friday? Does someone text them back within 5 minutes?" → Let them answer → Jump to THE PITCH.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION B — FRESH CALL OPENER (no prior contact)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"Hey {first_name}, this is Hector — quick question before I tell you why I'm calling. You want the good news first or the bad news?"
+
+[wait for answer]
+
+─── IF THEY PICK BAD NEWS FIRST ───
+
+"The bad news is every lead that comes in after hours, on weekends, or when you're on a job — it goes cold. Homeowners don't wait more than 5 minutes. If you don't respond first, your competitor does. A $10K job gone, and you never even knew it was there."
+
+[pause 1 beat]
+
+"The good news is that problem is completely solved. That's why I called."
+
+─── IF THEY PICK GOOD NEWS FIRST ───
+
+"The good news is there's now a way to respond to every single lead in under 60 seconds — even when you're on a roof at 2 PM or asleep at midnight. An AI texts them back, qualifies them, and books your estimate automatically."
+
+[pause 1 beat]
+
+"The bad news? Most contractors wait 6 months to set it up and bleed a full season of leads in the meantime."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THE PITCH (same for all paths)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"It's called Sam AI. It plugs into your website, responds to leads within 60 seconds — text message, sounds human, works 24/7. Books the estimate straight into your calendar.
+
+Here's the only thing that matters: if Sam doesn't book you 5 qualified quotes this month, you don't pay a dollar. Zero risk.
+
+Can I show you how it works for {business_name}? Takes 10 minutes."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OBJECTION HANDLING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"I already have a receptionist"
+→ "Does she text leads back at 11 PM on a Saturday? Sam does. She handles the job site stuff — Sam handles the leads you'd otherwise lose."
+
+"I don't miss leads"
+→ "How many calls went to voicemail last week? Because if even one $8K job slipped through, that's more than Sam costs for the year. Worth checking?"
+
+"I'm not into AI stuff"
+→ "Your customers don't know it's AI. They just know someone texted them back fast. That's literally all they care about. Can I show you a real conversation — takes 2 minutes?"
+
+"How much is it?"
+→ "I'd rather show you the guarantee first — 5 booked quotes or free. If we can't deliver that in a month, you owe nothing. When's 10 minutes good for you this week?"
+
+"I need to think about it"
+→ "Totally. Quick question before you go — how many leads came in this week that you didn't get back to same day? That number times your average job value is what's sitting on the table right now."
+
+"Call me back later"
+→ "For sure. Thursday or Friday work? I'll put it in my calendar right now so I don't miss you again." [book it immediately]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLOSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When they say yes to a demo:
+"Perfect. I'll send a calendar link right now — just grab 10 minutes, I'll show you exactly how Sam would work for {business_name}. You'll know in the first 5 minutes if it makes sense."
+
+When they say not now:
+"Got it. Can I send you a 2-minute video that shows a real conversation? You can watch it whenever. And if it makes sense, you've got my number."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Good/bad news works because it creates instant engagement — they have to choose.
+• Both branches lead to the same pitch. The path doesn't matter.
+• The callback opener (Section A) is highest converting — use missed calls as proof.
+• Never rush the pause after the bad news. Let it land.
+• Stand up when you call. It changes your voice.`]
+  );
+
+  console.log('[DB] Cold call scripts v8 applied (Good News / Bad News).');
 }
 
 function seedTemplateLibrary() {

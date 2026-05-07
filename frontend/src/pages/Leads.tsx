@@ -58,8 +58,12 @@ export function Leads() {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
       if (result.imported > 0) {
         setEnrollAfterImport({ leadIds: result.lead_ids, count: result.imported });
+        if (result.skipped > 0) {
+          setImportStatus(`${result.skipped} skipped (duplicates)`);
+          setTimeout(() => setImportStatus(null), 5000);
+        }
       } else {
-        setImportStatus(`No leads imported${result.skipped ? `, ${result.skipped} skipped` : ''}`);
+        setImportStatus(`No leads imported${result.skipped ? `, ${result.skipped} skipped (duplicates)` : ''}`);
         setTimeout(() => setImportStatus(null), 5000);
       }
     } catch (err: any) {

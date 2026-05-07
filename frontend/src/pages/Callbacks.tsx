@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { PhoneOutgoing, Clock, Check, Moon, AlertTriangle, PhoneIncoming } from 'lucide-react';
 import { useFollowups, useSnoozeLead, usePatchStatus } from '../hooks/useLeads';
 import { StatusBadge } from '../components/shared/StatusBadge';
-import { formatRelativeTime, cn } from '../lib/utils';
+import { formatDate, cn } from '../lib/utils';
 import { useToast } from '../lib/toast';
 import type { Lead } from '../types';
 
@@ -169,6 +169,9 @@ function LeadRow({ lead, overdueText, variant, onCall, onSnooze, onMarkContacted
             <span className="text-xs text-zinc-600">{lead.service_type}</span>
           )}
         </div>
+        {lead.notes && (
+          <p className="text-[11px] text-zinc-600 truncate mt-0.5 max-w-sm">{lead.notes}</p>
+        )}
         <div className="flex items-center gap-3 mt-0.5">
           {lead.phone && (
             <span className="text-xs text-zinc-500">{lead.phone}</span>
@@ -183,8 +186,8 @@ function LeadRow({ lead, overdueText, variant, onCall, onSnooze, onMarkContacted
             {overdueText}
           </span>
           {lead.next_followup_at && (
-            <span className="text-xs text-zinc-700">
-              {formatRelativeTime(lead.next_followup_at)}
+            <span className="text-xs text-zinc-600">
+              {formatDate(lead.next_followup_at)}
             </span>
           )}
         </div>

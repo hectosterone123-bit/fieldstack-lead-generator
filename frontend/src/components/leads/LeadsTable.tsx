@@ -359,6 +359,14 @@ export function LeadsTable({ onRowClick, preset }: Props) {
                         if (mins >= 240) return <span className="text-[10px] font-semibold bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded shrink-0">Ghost</span>;
                         return null;
                       })()}
+                      {(() => {
+                        const now = Date.now();
+                        if (!lead.contact_count && new Date(lead.created_at).getTime() < now - 7 * 24 * 60 * 60 * 1000)
+                          return <span title="Never contacted — imported 7+ days ago" className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded shrink-0">Untouched</span>;
+                        if (lead.last_contacted_at && new Date(lead.last_contacted_at).getTime() < now - 14 * 24 * 60 * 60 * 1000)
+                          return <span title="No contact in 14+ days" className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded shrink-0">Stale</span>;
+                        return null;
+                      })()}
                       {lead.email && lead.loom_url && lead.test_submitted_at && (
                         <span title="Pitch ready: has email, Loom, and response test" className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
                       )}

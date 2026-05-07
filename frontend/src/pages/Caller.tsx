@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   PhoneOutgoing, PhoneOff, Mic, MicOff, Play,
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
-  Bot, Zap, X, Square, Brain, Search,
+  Bot, Zap, X, Square, Brain, Search, Shield, Mail,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -12,11 +12,13 @@ import {
   useCallNextInQueue, useClearCallQueue, useSetCallQueue, useUpdateCallOutcome,
   useBulkUpdateCallOutcomes, useAutoLoadQueue, useTemplateStats,
 } from '../hooks/useCalls';
+import { useSequences, useEnrollLeads } from '../hooks/useSequences';
 import { useUpdateLead } from '../hooks/useLeads';
-import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote } from '../lib/api';
+import { useSendSms } from '../hooks/useSms';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads } from '../lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Template, Lead, Call } from '../types';
-import { cn, formatRelativeTime } from '../lib/utils';
+import { cn, formatRelativeTime, getCallWindow } from '../lib/utils';
 import { useToast } from '../lib/toast';
 
 const CALL_STATUS_LABELS: Record<string, string> = {
@@ -39,6 +41,20 @@ const OUTCOME_LABELS: Record<string, { label: string; color: string; bg: string 
   transferred: { label: 'Transferred', color: 'text-blue-400', bg: 'bg-blue-500/[0.06]' },
   gatekeeper: { label: 'Gatekeeper', color: 'text-violet-400', bg: 'bg-violet-500/[0.06]' },
 };
+
+function CallDot({ state }: { state?: string | null }) {
+  const w = getCallWindow(state);
+  return (
+    <span
+      title={w === 'prime' ? 'Prime calling time' : w === 'ok' ? 'OK to call' : 'Outside call hours'}
+      className={cn('inline-block w-2 h-2 rounded-full flex-shrink-0', {
+        'bg-emerald-400': w === 'prime',
+        'bg-amber-400': w === 'ok',
+        'bg-zinc-600': w === 'off',
+      })}
+    />
+  );
+}
 
 export function Caller() {
   const { data: activeCalls = [] } = useActiveCalls();
@@ -134,6 +150,32 @@ export function Caller() {
   const [manualCountdown, setManualCountdown] = useState<number | null>(null);
   const [autoAdvanceManual, setAutoAdvanceManual] = useState(true);
 
+  // Owner name lookup
+  const [lookingUpOwner, setLookingUpOwner] = useState(false);
+  const [repliedLeadIds, setRepliedLeadIds] = useState<Set<number>>(new Set());
+
+  // Post-call email composer
+  const [bookingLink, setBookingLink] = useState('');
+  const [postCallEmail, setPostCallEmail] = useState<{
+    type: 'voicemail' | 'demo';
+    subject: string;
+    body: string;
+    leadId: number;
+    leadEmail: string | null | undefined;
+  } | null>(null);
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  // Text Instead (gatekeeper bypass SMS)
+  const [textInsteadLeadId, setTextInsteadLeadId] = useState<number | null>(null);
+  const [textInsteadBody, setTextInsteadBody] = useState('');
+  const sendSmsMutation = useSendSms();
+
+  function openTextInstead(lead: { id: number; business_name: string; first_name?: string | null }) {
+    const name = (lead.first_name || '').trim() || lead.business_name;
+    setTextInsteadBody(`Hey ${name}, this is Hector — quick question about ${lead.business_name}'s lead follow-up. Worth 2 min?`);
+    setTextInsteadLeadId(lead.id);
+  }
+
   // Phase 7: Batch Mode
   const [showBatchStart, setShowBatchStart] = useState(false);
   const [batchTarget, setBatchTarget] = useState<number | null>(null);
@@ -161,7 +203,15 @@ export function Caller() {
   const [sessionStartTime] = useState<number>(Date.now());
   const [sessionCallCount, setSessionCallCount] = useState(0);
   const [sessionPickupCount, setSessionPickupCount] = useState(0);
+  const [sessionCallbackCount, setSessionCallbackCount] = useState(0);
+  const [sessionDone, setSessionDone] = useState(false);
   const [streak, setStreak] = useState(0);
+
+  // Enroll in sequence popup (after Interested outcome)
+  const [enrollModal, setEnrollModal] = useState<{ leadId: number; leadName: string } | null>(null);
+  const [enrollSeqId, setEnrollSeqId] = useState<number | ''>('');
+  const { data: sequences = [] } = useSequences();
+  const enrollMutation = useEnrollLeads();
 
   // Feature 6: Call notes
   const [callNote, setCallNote] = useState('');
@@ -181,6 +231,14 @@ export function Caller() {
   const vapiRef = useRef<Vapi | null>(null);
   const activeCall = activeCalls.length > 0 ? activeCalls[0] : null;
   const [searchParams] = useSearchParams();
+
+  // Prior voicemail/no-answer count for current lead (for banner)
+  const priorMissedCalls = useMemo(
+    () => !manualLead ? 0 : history.filter(
+      c => c.lead_id === manualLead.id && ['voicemail', 'no_answer'].includes(c.outcome ?? '')
+    ).length,
+    [history, manualLead?.id]
+  );
 
   function decodeMulaw(encoded: Uint8Array): Float32Array {
     const pcm = new Float32Array(encoded.length);
@@ -210,9 +268,13 @@ export function Caller() {
 
   // Initialize Vapi SDK + load settings
   useEffect(() => {
+    fetchRepliedLeads().then(leads => {
+      setRepliedLeadIds(new Set(leads.map(l => l.id)));
+    }).catch(() => {});
     fetchSettings().then(s => {
       setDailyGoal(parseInt(s.daily_call_goal || '0', 10) || 0);
       setCampaignActive(s.vapi_campaign_enabled === '1');
+      setBookingLink(s.booking_link || '');
       const pubKey = s.vapi_public_key;
       if (!pubKey) return;
       const v = new Vapi(pubKey);
@@ -497,6 +559,7 @@ export function Caller() {
 
   const selectManualLead = async (lead: Lead) => {
     setManualLead(lead);
+    setPostCallEmail(null);
     setManualLeadSearch('');
     setManualLeads([]);
     setSearchFocused(false);
@@ -510,6 +573,18 @@ export function Caller() {
         const preview = await previewTemplate(selectedScript, lead.id);
         setManualScriptBody(preview.rendered_body || '');
       } catch { setManualScriptBody(''); }
+    }
+    // Auto-lookup owner name in background if missing and website exists
+    if (!lead.owner_name && lead.website) {
+      setLookingUpOwner(true);
+      enrichLead(lead.id)
+        .then(updated => {
+          if (updated.owner_name) {
+            setManualLead(prev => prev?.id === lead.id ? { ...prev, owner_name: updated.owner_name } : prev);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLookingUpOwner(false));
     }
   };
 
@@ -562,6 +637,9 @@ export function Caller() {
     const outcome = outcomeOverride ?? manualOutcome;
     const loggedLeadId = manualLead.id;
     const loggedLeadName = manualLead.business_name;
+    const loggedLeadEmail = manualLead.email;
+    const loggedLeadFirstName = manualLead.first_name;
+    const loggedLeadServiceType = (manualLead as any).service_type as string | undefined;
     setLoggingCall(true);
     try {
       // Log to calls table (for cockpit stats + history) — fire and forget
@@ -588,12 +666,37 @@ export function Caller() {
       setManualLead(null);
       setManualCallStartTime(null);
 
+      // Post-call email composer
+      if (outcome === 'voicemail' || outcome === 'no_answer') {
+        const name = loggedLeadFirstName?.trim() || loggedLeadName;
+        setPostCallEmail({
+          type: 'voicemail',
+          leadId: loggedLeadId,
+          leadEmail: loggedLeadEmail,
+          subject: `Quick note for ${loggedLeadName}`,
+          body: `Hey ${name},\n\nJust tried calling and got voicemail. I'll be brief — I help ${loggedLeadServiceType || 'contractors'} in your area stop losing website leads when they can't answer fast enough.\n\nIf you've got 10 minutes this week, here's a link to grab a slot:\n${bookingLink || '[add your booking link in Settings]'}\n\nNo pressure either way.\n\nHector`,
+        });
+      } else if (outcome === 'interested') {
+        const name = loggedLeadFirstName?.trim() || loggedLeadName;
+        setPostCallEmail({
+          type: 'demo',
+          leadId: loggedLeadId,
+          leadEmail: loggedLeadEmail,
+          subject: `Here's that link — ${loggedLeadName}`,
+          body: `Hey ${name},\n\nGreat talking with you! As promised, here's the link to book our 10-minute demo:\n\n${bookingLink || '[add your booking link in Settings]'}\n\nLooking forward to showing you how Sam works for ${loggedLeadName}.\n\nHector`,
+        });
+      }
+
       // Session stats (Phase 5)
       setSessionCallCount(n => n + 1);
       const isPickup = ['interested', 'callback_requested', 'not_interested', 'transferred'].includes(outcome);
       if (isPickup) setSessionPickupCount(n => n + 1);
+      if (outcome === 'callback_requested') setSessionCallbackCount(n => n + 1);
       if (outcome === 'interested') setStreak(n => n + 1);
       else setStreak(0);
+
+      // Detect last lead in queue for session summary
+      if (!queueView[selectedQueueIndex + 1]) setSessionDone(true);
 
       // Phase 4: Auto-SMS on outcome
       if (autoSmsEnabled && outcome && ['interested', 'callback_requested', 'voicemail', 'not_interested'].includes(outcome)) {
@@ -603,6 +706,12 @@ export function Caller() {
       // Phase 9: Callback scheduling
       if (outcome === 'callback_requested') {
         setCallbackModal({ leadId: loggedLeadId, leadName: loggedLeadName });
+      }
+
+      // Show enroll popup for interested leads (defers auto-advance)
+      if (outcome === 'interested') {
+        setEnrollModal({ leadId: loggedLeadId, leadName: loggedLeadName });
+        return;
       }
 
       // Auto-advance to next queue lead
@@ -615,6 +724,19 @@ export function Caller() {
       setLoggingCall(false);
     }
   };
+
+  // Enroll & continue after Interested outcome
+  function handleEnrollAndContinue(skip = false) {
+    if (!enrollModal) return;
+    if (!skip && enrollSeqId !== '') {
+      enrollMutation.mutate({ lead_ids: [enrollModal.leadId], sequence_id: Number(enrollSeqId) });
+    }
+    setEnrollModal(null);
+    setEnrollSeqId('');
+    if (autoAdvanceManual && queueView.length > selectedQueueIndex + 1) {
+      setManualCountdown(6);
+    }
+  }
 
   // Call timer
   const [elapsed, setElapsed] = useState(0);
@@ -909,6 +1031,23 @@ export function Caller() {
           </div>
         </div>
 
+        {/* Gatekeeper time advisory */}
+        {queueView.some(item => (item.gatekeeper_count ?? 0) > 0) && (() => {
+          const hour = new Date().getHours();
+          const good = hour < 9 || hour >= 17;
+          return (
+            <div className={cn(
+              'flex items-center gap-2 px-6 py-2.5 border-t text-xs',
+              good
+                ? 'bg-emerald-500/[0.04] border-emerald-500/20 text-emerald-400'
+                : 'bg-violet-500/[0.04] border-violet-500/20 text-violet-400'
+            )}>
+              <Shield className="w-3 h-3 shrink-0" />
+              <span>Gatekeeper batch — {good ? 'good window to call now' : 'best before 9am or after 5pm'}</span>
+            </div>
+          );
+        })()}
+
         {/* Auto-advance banner */}
         {manualCountdown !== null && (
           <div className="flex items-center justify-between px-6 py-3 bg-amber-500/10 border-t border-amber-500/20">
@@ -917,29 +1056,63 @@ export function Caller() {
           </div>
         )}
 
-        {/* Big outcome buttons */}
-        <div className="px-6 py-5 border-t border-white/[0.06] bg-zinc-900/80">
-          <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto">
-            {([
-              { outcome: 'interested', label: 'Interested', key: '1', cls: 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30' },
-              { outcome: 'callback_requested', label: 'Callback', key: '2', cls: 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30' },
-              { outcome: 'no_answer', label: 'No Answer', key: '3', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
-              { outcome: 'voicemail', label: 'Voicemail', key: '4', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
-              { outcome: 'gatekeeper', label: 'Gatekeeper', key: '5', cls: 'bg-violet-500/20 border-violet-500/40 text-violet-300 hover:bg-violet-500/30' },
-              { outcome: 'not_interested', label: 'Not Interested', key: '6', cls: 'bg-red-600/20 border-red-500/40 text-red-400 hover:bg-red-600/30' },
-            ] as const).map(({ outcome, label, key, cls }) => (
+        {/* Enroll in sequence popup (after Interested) */}
+        {enrollModal ? (
+          <div className="px-6 py-5 border-t border-emerald-500/20 bg-emerald-500/[0.04]">
+            <p className="text-sm font-medium text-emerald-400 mb-3">
+              Enroll <span className="text-emerald-300">{enrollModal.leadName}</span> in a sequence?
+            </p>
+            <select
+              value={enrollSeqId}
+              onChange={e => setEnrollSeqId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-300 [color-scheme:dark] mb-3"
+            >
+              <option value="">Pick a sequence...</option>
+              {sequences.filter(s => !!s.is_active).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
               <button
-                key={outcome}
-                onClick={() => handleLogManualCall(outcome)}
-                disabled={loggingCall}
-                className={cn('relative py-5 rounded-xl text-base font-semibold border-2 transition-colors disabled:opacity-40', cls)}
+                onClick={() => handleEnrollAndContinue(false)}
+                disabled={enrollSeqId === '' || enrollMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 transition-colors"
               >
-                {loggingCall ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : label}
-                <span className="absolute top-1.5 right-2 text-[10px] font-mono opacity-40">[{key}]</span>
+                {enrollMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Enroll & Continue'}
               </button>
-            ))}
+              <button
+                onClick={() => handleEnrollAndContinue(true)}
+                className="px-5 py-2.5 rounded-xl text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800 border border-white/[0.06] transition-colors"
+              >
+                Skip
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          /* Big outcome buttons */
+          <div className="px-6 py-5 border-t border-white/[0.06] bg-zinc-900/80">
+            <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto">
+              {([
+                { outcome: 'interested', label: 'Interested', key: '1', cls: 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30' },
+                { outcome: 'callback_requested', label: 'Callback', key: '2', cls: 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30' },
+                { outcome: 'no_answer', label: 'No Answer', key: '3', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
+                { outcome: 'voicemail', label: 'Voicemail', key: '4', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
+                { outcome: 'gatekeeper', label: 'Gatekeeper', key: '5', cls: 'bg-violet-500/20 border-violet-500/40 text-violet-300 hover:bg-violet-500/30' },
+                { outcome: 'not_interested', label: 'Not Interested', key: '6', cls: 'bg-red-600/20 border-red-500/40 text-red-400 hover:bg-red-600/30' },
+              ] as const).map(({ outcome, label, key, cls }) => (
+                <button
+                  key={outcome}
+                  onClick={() => handleLogManualCall(outcome)}
+                  disabled={loggingCall}
+                  className={cn('relative py-5 rounded-xl text-base font-semibold border-2 transition-colors disabled:opacity-40', cls)}
+                >
+                  {loggingCall ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : label}
+                  <span className="absolute top-1.5 right-2 text-[10px] font-mono opacity-40">[{key}]</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     )}
 
@@ -977,6 +1150,18 @@ export function Caller() {
             </button>
           </div>
         </div>
+
+        {callerMode === 'manual' && dailyGoal > 0 && (
+          <div className="flex items-center gap-3">
+            <div className="w-48 h-2 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className={cn('h-full rounded-full transition-all', totalCalls >= dailyGoal ? 'bg-emerald-500' : 'bg-orange-500')}
+                style={{ width: `${Math.min(100, (totalCalls / dailyGoal) * 100)}%` }}
+              />
+            </div>
+            <span className="text-xs font-data text-zinc-400">{totalCalls}/{dailyGoal} calls</span>
+          </div>
+        )}
 
         {callerMode === 'ai' && (
           <div className="flex items-center gap-3 flex-wrap">
@@ -1194,7 +1379,39 @@ export function Caller() {
                 </div>
               </div>
 
-              {queueView.length === 0 ? (
+              {sessionDone ? (
+                <div className="p-3 rounded-lg bg-zinc-800/60 border border-white/[0.06] space-y-3">
+                  <p className="text-xs font-medium text-zinc-300 text-center">Session Complete</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="text-center">
+                      <p className="text-lg font-data font-semibold text-zinc-200">{sessionCallCount}</p>
+                      <p className="text-[10px] text-zinc-600">Called</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-data font-semibold text-emerald-400">{sessionPickupCount}</p>
+                      <p className="text-[10px] text-zinc-600">Reached</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-lg font-data font-semibold text-amber-400">{sessionCallbackCount}</p>
+                      <p className="text-[10px] text-zinc-600">Callbacks</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSessionDone(false);
+                      setSessionCallCount(0);
+                      setSessionPickupCount(0);
+                      setSessionCallbackCount(0);
+                      setStreak(0);
+                      autoLoadQueue.mutate({ count: 40, filter: 'morning', templateId: selectedScript || 0 });
+                    }}
+                    disabled={autoLoadQueue.isPending}
+                    className="w-full py-1.5 rounded-lg text-xs font-medium bg-orange-600 hover:bg-orange-500 text-white transition-colors disabled:opacity-40"
+                  >
+                    {autoLoadQueue.isPending ? <Loader2 className="w-3 h-3 animate-spin mx-auto" /> : 'Load New Batch'}
+                  </button>
+                </div>
+              ) : queueView.length === 0 ? (
                 <p className="text-[10px] text-zinc-600 text-center py-4">
                   {autoLoadQueue.isPending ? 'Loading leads...' : 'No queue — click Load'}
                 </p>
@@ -1213,10 +1430,19 @@ export function Caller() {
                     >
                       <div className="flex items-center justify-between gap-1">
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs text-zinc-200 truncate">{item.business_name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <CallDot state={item.state} />
+                            <p className="text-xs text-zinc-200 truncate">{item.business_name}</p>
+                          </div>
                           <p className="text-[10px] text-zinc-600 truncate">{item.city || item.phone}</p>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          {(item.contact_count ?? 0) >= 5 && ['new', 'contacted'].includes(item.status ?? '') && (
+                            <span className="text-[9px] font-medium bg-red-500/15 text-red-400 px-1 rounded">stale</span>
+                          )}
+                          {repliedLeadIds.has(item.id) && (
+                            <span className="text-[9px] font-medium bg-emerald-500/20 text-emerald-400 px-1 rounded">replied</span>
+                          )}
                           {(item.gatekeeper_count ?? 0) > 0 && (
                             <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">
                               GK×{item.gatekeeper_count}
@@ -1260,6 +1486,36 @@ export function Caller() {
                         : 'Try before 8 AM or after 5 PM. Ask for owner by first name.'
                       }
                     </p>
+                    {textInsteadLeadId !== queueView[selectedQueueIndex].id ? (
+                      <button
+                        onClick={() => openTextInstead(queueView[selectedQueueIndex])}
+                        className="mt-2 w-full text-[10px] py-1.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                      >Text instead (bypasses gatekeeper)</button>
+                    ) : (
+                      <div className="mt-2 space-y-1.5">
+                        <textarea
+                          value={textInsteadBody}
+                          onChange={e => setTextInsteadBody(e.target.value)}
+                          rows={2}
+                          className="w-full text-[11px] bg-zinc-800 border border-white/[0.06] rounded px-2 py-1.5 text-zinc-200 resize-none focus:outline-none focus:border-blue-500/50"
+                        />
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={async () => {
+                              await sendSmsMutation.mutateAsync({ lead_id: queueView[selectedQueueIndex].id, body: textInsteadBody });
+                              setTextInsteadLeadId(null);
+                              toast('SMS sent');
+                            }}
+                            disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
+                            className="flex-1 text-[10px] py-1.5 rounded bg-blue-600/20 border border-blue-500/30 text-blue-300 hover:bg-blue-600/30 disabled:opacity-40 transition-colors"
+                          >{sendSmsMutation.isPending ? 'Sending…' : 'Send'}</button>
+                          <button
+                            onClick={() => setTextInsteadLeadId(null)}
+                            className="text-[10px] px-2.5 py-1.5 rounded bg-zinc-800 border border-white/[0.06] text-zinc-500 hover:text-zinc-300 transition-colors"
+                          >Cancel</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1328,19 +1584,37 @@ export function Caller() {
                 </button>
               </div>
               {manualLead ? (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-emerald-500/[0.06] border border-emerald-500/20">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-100">{manualLead.business_name}</p>
-                    <p className="text-xs text-zinc-400 mt-0.5">
-                      {manualLead.phone}{manualLead.city ? ` · ${manualLead.city}, ${manualLead.state}` : ''}{manualLead.service_type ? ` · ${manualLead.service_type}` : ''}
-                    </p>
+                <div className="rounded-lg bg-emerald-500/[0.06] border border-emerald-500/20 overflow-hidden">
+                  <div className="flex items-center justify-between p-3">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-100">{manualLead.business_name}</p>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {manualLead.phone}{manualLead.city ? ` · ${manualLead.city}, ${manualLead.state}` : ''}{manualLead.service_type ? ` · ${manualLead.service_type}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setManualLead(null); setManualScriptBody(''); setCoaching(''); setLookingUpOwner(false); setPostCallEmail(null); }}
+                      className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
+                    >
+                      Change
+                    </button>
                   </div>
-                  <button
-                    onClick={() => { setManualLead(null); setManualScriptBody(''); setCoaching(''); }}
-                    className="text-xs text-zinc-600 hover:text-zinc-300 transition-colors px-2 py-1"
-                  >
-                    Change
-                  </button>
+                  {/* Ask for — owner name gatekeeper helper */}
+                  <div className="px-3 py-2 border-t border-emerald-500/10 bg-orange-500/[0.04] flex items-center gap-2">
+                    <span className="text-[10px] font-medium text-zinc-600 uppercase tracking-wide shrink-0">Ask for:</span>
+                    {manualLead.owner_name ? (
+                      <span className="text-sm font-bold text-orange-400">{manualLead.owner_name.split(' ')[0]}</span>
+                    ) : lookingUpOwner ? (
+                      <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Looking up owner name...
+                      </span>
+                    ) : manualLead.website ? (
+                      <span className="text-xs text-zinc-600 italic">not found on site</span>
+                    ) : (
+                      <span className="text-xs text-zinc-600 italic">no website — ask "What's the owner's name?"</span>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1358,17 +1632,28 @@ export function Caller() {
                       {manualLeadSearch.length < 2 && (
                         <p className="px-3 py-1.5 text-[10px] text-zinc-600 uppercase tracking-wide">Recent leads</p>
                       )}
-                      {(manualLeads.length > 0 ? manualLeads : recentLeads).map(l => (
+                      {[...(manualLeads.length > 0 ? manualLeads : recentLeads)].sort((a, b) =>
+                        (repliedLeadIds.has(b.id) ? 1 : 0) - (repliedLeadIds.has(a.id) ? 1 : 0)
+                      ).map(l => (
                         <button
                           key={l.id}
                           onClick={() => selectManualLead(l)}
                           className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-zinc-700/50 transition-colors text-left"
                         >
-                          <div>
-                            <p className="text-sm text-zinc-200">{l.business_name}</p>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <CallDot state={(l as any).state} />
+                              <p className="text-sm text-zinc-200 truncate">{l.business_name}</p>
+                              {repliedLeadIds.has(l.id) && (
+                                <span className="text-[9px] font-medium bg-emerald-500/20 text-emerald-400 px-1.5 rounded shrink-0">Replied</span>
+                              )}
+                              {(l.contact_count ?? 0) >= 5 && ['new', 'contacted'].includes(l.status ?? '') && (
+                                <span className="text-[9px] font-medium bg-red-500/15 text-red-400 px-1 rounded shrink-0">stale</span>
+                              )}
+                            </div>
                             <p className="text-xs text-zinc-500">{l.phone}{l.city ? ` · ${l.city}` : ''}</p>
                           </div>
-                          <span className="text-xs font-data text-zinc-600">{l.heat_score}</span>
+                          <span className="text-xs font-data text-zinc-600 shrink-0">{l.heat_score}</span>
                         </button>
                       ))}
                     </div>
@@ -1384,6 +1669,15 @@ export function Caller() {
             {manualLead && (
               <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
                 <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Script</p>
+                {priorMissedCalls > 0 && (
+                  <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/[0.08] border border-amber-500/20">
+                    <PhoneOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <p className="text-xs text-amber-300">
+                      <span className="font-semibold">{priorMissedCalls}x voicemail / no answer</span>
+                      {' — '}use <span className="font-bold">Section A (Callback Opener)</span>
+                    </p>
+                  </div>
+                )}
                 {manualScriptBody ? (
                   <div className="bg-zinc-950 rounded-lg border border-white/[0.04] p-4 max-h-80 overflow-y-auto">
                     <pre className="text-sm text-zinc-200 whitespace-pre-wrap font-sans leading-relaxed">{manualScriptBody}</pre>
@@ -1473,6 +1767,66 @@ export function Caller() {
                 </div>
               </div>
             )}
+
+            {/* Post-call email composer */}
+            {postCallEmail && (
+              <div className={cn(
+                'bg-zinc-900 rounded-xl border p-5',
+                postCallEmail.type === 'demo' ? 'border-emerald-500/20' : 'border-amber-500/20'
+              )}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                    {postCallEmail.type === 'voicemail' ? 'Follow-up Email' : 'Demo Booking Email'}
+                  </p>
+                  <button onClick={() => setPostCallEmail(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+                    Skip
+                  </button>
+                </div>
+                {!postCallEmail.leadEmail && (
+                  <p className="text-xs text-amber-400 mb-3">No email on file — add one in Lead Details to send.</p>
+                )}
+                <input
+                  type="text"
+                  value={postCallEmail.subject}
+                  onChange={e => setPostCallEmail(p => p ? { ...p, subject: e.target.value } : p)}
+                  className="w-full px-3 py-2 mb-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                  placeholder="Subject"
+                />
+                <textarea
+                  rows={7}
+                  value={postCallEmail.body}
+                  onChange={e => setPostCallEmail(p => p ? { ...p, body: e.target.value } : p)}
+                  className="w-full px-3 py-2 mb-3 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 outline-none focus:border-orange-500/40 resize-none [color-scheme:dark]"
+                />
+                <div className="flex gap-2">
+                  <button
+                    disabled={!postCallEmail.leadEmail || sendingEmail}
+                    onClick={async () => {
+                      if (!postCallEmail.leadEmail) return;
+                      setSendingEmail(true);
+                      try {
+                        await quickEmail(postCallEmail.leadId, postCallEmail.subject, postCallEmail.body);
+                        toast('Email sent');
+                        setPostCallEmail(null);
+                      } catch { toast('Failed to send email', 'error'); }
+                      finally { setSendingEmail(false); }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors disabled:opacity-40"
+                  >
+                    {sendingEmail ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                    Send Email
+                  </button>
+                  <button
+                    disabled
+                    title="SMS coming soon — configure Twilio in Settings"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-zinc-800 border border-white/[0.06] text-zinc-600 cursor-not-allowed"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Text (coming soon)
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right: AI Coach */}
@@ -1501,6 +1855,36 @@ export function Caller() {
                         }
                       </p>
                       <p className="text-[10px] text-zinc-600 mt-1.5">Also try calling before 8 AM or after 5 PM — no secretary.</p>
+                      {textInsteadLeadId !== manualLead.id ? (
+                        <button
+                          onClick={() => openTextInstead(manualLead)}
+                          className="mt-2 w-full text-[10px] py-1.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                        >Text instead (bypasses gatekeeper)</button>
+                      ) : (
+                        <div className="mt-2 space-y-1.5">
+                          <textarea
+                            value={textInsteadBody}
+                            onChange={e => setTextInsteadBody(e.target.value)}
+                            rows={2}
+                            className="w-full text-[11px] bg-zinc-800 border border-white/[0.06] rounded px-2 py-1.5 text-zinc-200 resize-none focus:outline-none focus:border-blue-500/50"
+                          />
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={async () => {
+                                await sendSmsMutation.mutateAsync({ lead_id: manualLead.id, body: textInsteadBody });
+                                setTextInsteadLeadId(null);
+                                toast('SMS sent');
+                              }}
+                              disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
+                              className="flex-1 text-[10px] py-1.5 rounded bg-blue-600/20 border border-blue-500/30 text-blue-300 hover:bg-blue-600/30 disabled:opacity-40 transition-colors"
+                            >{sendSmsMutation.isPending ? 'Sending…' : 'Send'}</button>
+                            <button
+                              onClick={() => setTextInsteadLeadId(null)}
+                              className="text-[10px] px-2.5 py-1.5 rounded bg-zinc-800 border border-white/[0.06] text-zinc-500 hover:text-zinc-300 transition-colors"
+                            >Cancel</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   <div className="space-y-1.5 mb-4">

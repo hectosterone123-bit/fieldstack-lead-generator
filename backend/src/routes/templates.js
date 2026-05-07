@@ -96,6 +96,20 @@ router.delete('/:id', (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Cannot delete default templates. Edit them instead.' });
     }
 
+    // Block deletion if any sequence step references this template
+    const sequences = db.all('SELECT id, name, steps FROM sequences');
+    for (const seq of sequences) {
+      let steps;
+      try { steps = JSON.parse(seq.steps || '[]'); } catch { continue; }
+      const used = steps.some(s => s.template_id === template.id || s.alt_template_id === template.id);
+      if (used) {
+        return res.status(400).json({
+          success: false,
+          error: `Template is used by sequence "${seq.name}". Remove it from the sequence first.`,
+        });
+      }
+    }
+
     db.run('DELETE FROM templates WHERE id = ?', [req.params.id]);
     res.json({ success: true, data: { deleted: true } });
   } catch (err) { next(err); }

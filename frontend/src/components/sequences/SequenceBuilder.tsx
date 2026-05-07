@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown, Save, X, Mail, MessageSquare, PhoneCall, Zap } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Save, X, Mail, MessageSquare, PhoneCall, Zap, Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTemplates } from '../../hooks/useTemplates';
 import type { Sequence, SequenceStep, TemplateChannel } from '../../types';
@@ -92,7 +92,7 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
   const filteredTemplates = (channel: TemplateChannel) =>
     (templates || []).filter(t => t.channel === channel);
 
-  const isValid = name.trim() && steps.every(s => s.template_id > 0);
+  const isValid = name.trim() && steps.every(s => s.template_id > 0 && (s.alt_template_id === undefined || s.alt_template_id > 0));
 
   return (
     <div className="space-y-5">
@@ -249,6 +249,40 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
                   </select>
                 </div>
 
+                {/* Variant B template (A/B test) — email steps only */}
+                {step.channel === 'email' && (
+                  <div className="flex items-center gap-2">
+                    {step.alt_template_id ? (
+                      <>
+                        <span className="text-[10px] text-violet-400 font-semibold shrink-0 w-16">Variant B</span>
+                        <select
+                          value={step.alt_template_id}
+                          onChange={e => updateStep(index, { alt_template_id: parseInt(e.target.value) || undefined })}
+                          className="flex-1 px-2 py-1 rounded bg-zinc-900 border border-violet-500/30 text-sm text-zinc-200 focus:outline-none focus:border-violet-500/50 [color-scheme:dark]"
+                        >
+                          <option value={0}>Select variant B...</option>
+                          {filteredTemplates(step.channel).map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => updateStep(index, { alt_template_id: undefined })}
+                          className="w-5 h-5 rounded flex items-center justify-center text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => updateStep(index, { alt_template_id: 0 })}
+                        className="text-[10px] text-zinc-600 hover:text-violet-400 transition-colors flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> A/B test — add variant B
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {/* From Email + plain text (email steps only) */}
                 {step.channel === 'email' && (
                   <div className="space-y-1.5">
@@ -271,6 +305,21 @@ export function SequenceBuilder({ sequence, onSave, onCancel, saving }: Props) {
                         className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${step.plain_text ? 'bg-orange-500' : 'bg-zinc-700'}`}
                       >
                         <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${step.plain_text ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3 text-violet-400 shrink-0" />
+                        <div>
+                          <span className="text-xs text-zinc-300">AI Personalize</span>
+                          <span className="text-[10px] text-zinc-600 block">Rewrites opening with lead-specific intel</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => updateStep(index, { ai_personalize: !step.ai_personalize })}
+                        className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${step.ai_personalize ? 'bg-violet-500' : 'bg-zinc-700'}`}
+                      >
+                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${step.ai_personalize ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                       </button>
                     </div>
                   </div>

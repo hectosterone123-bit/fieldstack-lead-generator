@@ -70,6 +70,64 @@ router.post('/send', async (req, res) => {
   res.json({ success: true, data: { sid: result.sid, status: result.status } });
 });
 
+// ─── Bulk SMS blast ───────────────────────────────────────────────────────────
+
+router.post('/bulk-send', async (req, res, next) => {
+  try {
+    const { lead_ids, body, template_id } = req.body;
+    if (!Array.isArray(lead_ids) || lead_ids.length === 0)
+      return res.status(400).json({ success: false, error: 'lead_ids required' });
+    if (!body && !template_id)
+      return res.status(400).json({ success: false, error: 'body or template_id required' });
+    if (!smsService.isConfigured())
+      return res.status(400).json({ success: false, error: 'SMS not configured' });
+
+    let sent = 0, skipped = 0, failed = 0;
+
+    for (const lead_id of lead_ids) {
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+      if (!lead || !lead.phone) { skipped++; continue; }
+      if (lead.dnc_at || lead.unsubscribed_at) { skipped++; continue; }
+
+      const normalized = smsService.normalizePhone(lead.phone);
+      if (normalized) {
+        const optedOut = db.get('SELECT id FROM sms_opt_outs WHERE phone = ?', [normalized]);
+        if (optedOut) { skipped++; continue; }
+      }
+
+      let messageBody = body;
+      if (!messageBody && template_id) {
+        const tmpl = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
+        if (!tmpl) { skipped++; continue; }
+        messageBody = renderTemplate(tmpl.body, lead);
+      }
+
+      const result = await smsService.sendSms(lead.phone, messageBody);
+      if (!result.success) { failed++; continue; }
+
+      db.run(
+        `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+         VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
+        [lead_id, process.env.TWILIO_PHONE_NUMBER, normalized || lead.phone, messageBody, result.sid || null, 'sent']
+      );
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+        [lead_id, 'sms_sent', 'SMS blast', messageBody.substring(0, 100),
+         JSON.stringify({ twilio_sid: result.sid, bulk: true })]
+      );
+      db.run(
+        `UPDATE leads SET contact_count = contact_count + 1,
+         last_contacted_at = CURRENT_TIMESTAMP,
+         first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [lead_id]
+      );
+      sent++;
+    }
+
+    res.json({ success: true, data: { sent, skipped, failed, total: lead_ids.length } });
+  } catch (err) { next(err); }
+});
+
 // ─── SMS conversation for a lead ─────────────────────────────────────────────
 
 router.get('/conversation/:leadId', (req, res) => {
@@ -166,7 +224,44 @@ router.post('/webhook', express.urlencoded({ extended: false }), async (req, res
 
   if (lead) applyRules(lead.id, 'sms_replied');
 
-  // Empty TwiML response (don't auto-reply — Sam AI will handle that separately)
+  // Sam AI auto-reply
+  try {
+    const autoReplyEnabled = db.get("SELECT value FROM settings WHERE key = 'sam_auto_reply_enabled'")?.value === '1';
+    if (autoReplyEnabled && lead && !lead.dnc_at && !lead.unsubscribed_at
+        && !['lost', 'closed_won', 'booked'].includes(lead.status)) {
+      const { draftSmsReply, classifySmsIntent } = require('../services/claudeService');
+      const recentMsgs = db.all(
+        'SELECT direction, body, created_at FROM sms_messages WHERE lead_id = ? ORDER BY created_at DESC LIMIT 6',
+        [lead.id]
+      );
+      let reply = await draftSmsReply(lead, recentMsgs.reverse());
+      if (reply) {
+        // Append booking link if lead shows positive intent
+        const { booking_intent } = await classifySmsIntent(Body);
+        if (booking_intent) {
+          const bookingLink = db.get("SELECT value FROM settings WHERE key = 'booking_link'")?.value;
+          if (bookingLink) reply = `${reply}\n\n${bookingLink}`;
+        }
+        const result = await smsService.sendSms(lead.phone, reply);
+        if (result.success) {
+          db.run(
+            `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+             VALUES (?, 'outbound', ?, ?, ?, ?, 'sent')`,
+            [lead.id, process.env.TWILIO_PHONE_NUMBER, normalized, reply, result.sid]
+          );
+          db.run(
+            'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+            [lead.id, 'sms_sent', 'Sam AI auto-reply', reply.substring(0, 120),
+             JSON.stringify({ auto_reply: true, booking_link_sent: booking_intent })]
+          );
+        }
+      }
+    }
+  } catch (err) {
+    // Don't block webhook response if AI reply fails
+    console.error('[Sam AI auto-reply error]', err.message);
+  }
+
   res.type('text/xml').send('<Response></Response>');
 });
 
@@ -371,6 +466,27 @@ router.get('/review-stats', (req, res) => {
 router.get('/review-requests', (req, res) => {
   const limit = parseInt(req.query.limit) || 50;
   res.json({ success: true, data: reviewService.getRecentRequests(limit) });
+});
+
+// ─── AI Draft Reply ───────────────────────────────────────────────────────────
+
+router.post('/draft-reply', async (req, res, next) => {
+  try {
+    const { lead_id } = req.body;
+    if (!lead_id) return res.status(400).json({ success: false, error: 'lead_id is required' });
+
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    const messages = db.all(
+      'SELECT direction, body, created_at FROM sms_messages WHERE lead_id = ? ORDER BY created_at ASC LIMIT 10',
+      [lead_id]
+    );
+
+    const { draftSmsReply } = require('../services/claudeService');
+    const suggested_reply = await draftSmsReply(lead, messages);
+    res.json({ success: true, data: { suggested_reply } });
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

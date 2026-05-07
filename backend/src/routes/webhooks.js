@@ -5,6 +5,7 @@ const smsService = require('../services/smsService');
 const emailService = require('../services/emailService');
 const { recomputeHeatScore } = require('../services/heatScoreService');
 const { applyRules } = require('../services/scoringRulesService');
+const { emit } = require('../services/eventBus');
 
 // Resend webhook signature verification (svix)
 function verifyResendSignature(req) {
@@ -18,6 +19,14 @@ function verifyResendSignature(req) {
   } catch {
     return false;
   }
+}
+
+// Sam AI shared secret verification
+function verifySamSecret(req) {
+  const secret = process.env.SAM_WEBHOOK_SECRET;
+  if (!secret) return true; // skip if not configured
+  const auth = req.headers['authorization'] || '';
+  return auth === `Bearer ${secret}`;
 }
 
 // Twilio request signature verification
@@ -117,7 +126,9 @@ router.post('/resend', async (req, res) => {
           if (lead) {
             const name = lead.business_name || 'A lead';
             const city = lead.city ? ` (${lead.city})` : '';
-            smsService.sendSms(alertPhone, `Fieldstack: ${name}${city} opened your email ${openCount}x — send the Loom now`).catch(() => {});
+            smsService.sendSms(alertPhone, `Fieldstack: ${name}${city} opened your email ${openCount}x — send the Loom now`).catch((err) => {
+              console.error('[Webhook] Failed to send alert SMS:', err.message);
+            });
           }
         }
       }
@@ -157,6 +168,8 @@ router.post('/resend', async (req, res) => {
         `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'email_bounced', 'Email bounced', 'Email address is invalid or unreachable — removed from future sends')`,
         [activity.lead_id]
       );
+      const bouncedLead = db.get('SELECT business_name FROM leads WHERE id = ?', [activity.lead_id]);
+      emit({ type: 'email_bounced', lead_id: activity.lead_id, business: bouncedLead?.business_name || 'Unknown' });
     }
   }
 
@@ -172,6 +185,8 @@ router.post('/resend', async (req, res) => {
         `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'email_complained', 'Spam complaint received', 'Lead marked this email as spam — unsubscribed automatically')`,
         [activity.lead_id]
       );
+      const complainedLead = db.get('SELECT business_name FROM leads WHERE id = ?', [activity.lead_id]);
+      emit({ type: 'email_complained', lead_id: activity.lead_id, business: complainedLead?.business_name || 'Unknown' });
     }
   }
 
@@ -539,6 +554,54 @@ router.post('/twilio-call-status', async (req, res) => {
   }
 
   res.sendStatus(200);
+});
+
+// POST /api/webhooks/sam — Sam AI pushes lead updates (qualification, booking, notes)
+// Sam sends: { phone, status?, heat_score_bump?, note?, appointment_time? }
+// Secure with SAM_WEBHOOK_SECRET env var (set same value in Sam's env)
+router.post('/sam', async (req, res) => {
+  if (!verifySamSecret(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { phone, status, heat_score_bump, note, appointment_time } = req.body;
+  if (!phone) return res.status(400).json({ error: 'phone is required' });
+
+  // Normalize: match by last 10 digits
+  const digits = phone.replace(/\D/g, '');
+  const allLeads = db.all('SELECT id, phone, heat_score, business_name FROM leads WHERE phone IS NOT NULL');
+  const lead = allLeads.find(l => (l.phone || '').replace(/\D/g, '').slice(-10) === digits.slice(-10));
+
+  if (!lead) return res.status(404).json({ error: 'Lead not found', phone });
+
+  const updates = [];
+  const params = [];
+
+  if (status) { updates.push('status = ?'); params.push(status); }
+  if (heat_score_bump) {
+    const newScore = Math.min(100, (lead.heat_score || 0) + parseInt(heat_score_bump));
+    updates.push('heat_score = ?');
+    params.push(newScore);
+  }
+  if (appointment_time) { updates.push('next_followup_at = ?'); params.push(appointment_time); }
+  updates.push("updated_at = datetime('now')");
+  params.push(lead.id);
+
+  if (updates.length > 1) {
+    db.run(`UPDATE leads SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+
+  const descParts = [
+    note,
+    status ? `Status → ${status}` : null,
+    heat_score_bump ? `Heat +${heat_score_bump}` : null,
+    appointment_time ? `Appt: ${appointment_time}` : null,
+  ].filter(Boolean);
+
+  db.run(
+    'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+    [lead.id, 'note', 'Sam AI update', descParts.join(' · ')]
+  );
+
+  res.json({ success: true, lead_id: lead.id, business_name: lead.business_name });
 });
 
 module.exports = router;

@@ -15,9 +15,33 @@ router.get('/', (req, res, next) => {
       `SELECT service_type, COUNT(*) as count FROM leads GROUP BY service_type ORDER BY count DESC`
     );
 
-    const by_source = db.all(
-      `SELECT source, COUNT(*) as count FROM leads GROUP BY source ORDER BY count DESC`
-    );
+    const source_performance = db.all(`
+      SELECT
+        source,
+        COUNT(*) as total_leads,
+        SUM(CASE WHEN status IN ('booked', 'closed_won') THEN 1 ELSE 0 END) as booked,
+        SUM(CASE WHEN status IN ('qualified', 'proposal_sent', 'booked', 'closed_won') THEN 1 ELSE 0 END) as pipeline,
+        ROUND(AVG(heat_score), 1) as avg_heat,
+        COALESCE(SUM(CASE WHEN status = 'closed_won' THEN won_amount ELSE 0 END), 0) as revenue
+      FROM leads
+      GROUP BY source
+      ORDER BY total_leads DESC
+    `);
+
+    const monthly_velocity = db.all(`
+      SELECT
+        strftime('%Y-%m', a.created_at) as month,
+        COUNT(DISTINCT l.id) as deals_closed,
+        ROUND(AVG(julianday(a.created_at) - julianday(l.created_at)), 1) as avg_days,
+        COALESCE(SUM(l.won_amount), 0) as revenue
+      FROM leads l
+      JOIN activities a ON a.lead_id = l.id
+      WHERE a.type = 'status_change'
+        AND (a.title LIKE '%booked%' OR a.title LIKE '%closed_won%')
+      GROUP BY strftime('%Y-%m', a.created_at)
+      ORDER BY month DESC
+      LIMIT 12
+    `);
 
     const pipeline_value = db.get(
       `SELECT SUM(estimated_value) as total FROM leads WHERE status NOT IN ('lost')`
@@ -285,13 +309,23 @@ router.get('/', (req, res, next) => {
       LIMIT 5
     `);
 
+    const gatekeeper_leads_count = db.get(`
+      SELECT COUNT(*) as count FROM leads
+      WHERE gatekeeper_count > 0
+        AND status NOT IN ('booked', 'lost', 'closed_won')
+        AND phone IS NOT NULL AND phone != ''
+        AND dnc_at IS NULL
+    `)?.count || 0;
+
     res.json({
       success: true,
       data: {
         total_leads,
         by_status,
         by_service_type,
-        by_source,
+        by_source: source_performance,
+        source_performance,
+        monthly_velocity,
         pipeline_value,
         hot_leads_count,
         booked_count,
@@ -318,6 +352,7 @@ router.get('/', (req, res, next) => {
         outreach_summary,
         step_performance,
         requeue_eligible,
+        gatekeeper_leads_count,
       }
     });
   } catch (err) { next(err); }

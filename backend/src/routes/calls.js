@@ -164,7 +164,41 @@ router.post('/queue', (req, res) => {
   res.json({ success: true, data: { queued } });
 });
 
-// POST /api/calls/queue/auto-load — auto-load top N leads by heat_score
+// Helper: daily-queue priority scoring (matches /api/leads/daily-queue)
+function scoreLeadForMorning(lead) {
+  const now = Date.now();
+  let score = (lead.heat_score || 0) * 0.4;
+
+  // Status weight
+  const sw = { new: 20, contacted: 30, qualified: 40, proposal_sent: 35 };
+  score += sw[lead.status] || 0;
+
+  // Never contacted — high priority
+  if (!lead.last_contacted_at) score += 30;
+
+  // Recency of last contact
+  if (lead.last_contacted_at) {
+    const days = Math.floor((now - new Date(lead.last_contacted_at).getTime()) / 86400000);
+    if (days >= 3 && days <= 14) score += 20;
+    else if (days > 14 && days <= 30) score += 10;
+    else if (days > 30) score -= 10;
+  }
+
+  // Overdue follow-up
+  if (lead.next_followup_at && new Date(lead.next_followup_at).getTime() <= now) score += 25;
+
+  // New lead bonus (added in last 48h)
+  const ageHrs = (now - new Date(lead.created_at).getTime()) / 3600000;
+  if (ageHrs <= 24) score += 30;
+  else if (ageHrs <= 48) score += 15;
+
+  // High rating bonus
+  if (lead.rating >= 4.5) score += 5;
+
+  return Math.round(score);
+}
+
+// POST /api/calls/queue/auto-load — auto-load top N leads by heat_score or smart priority
 router.post('/queue/auto-load', (req, res) => {
   const { service_type, count = 10, template_id, filter } = req.body;
   if (!template_id) {
@@ -172,26 +206,64 @@ router.post('/queue/auto-load', (req, res) => {
   }
   const limitCount = Math.min(Math.max(parseInt(count) || 10, 1), 100); // 1–100, default 10
 
-  let whereClause, whereParams;
-  if (filter === 'callbacks_due') {
-    whereClause = `WHERE next_followup_at IS NOT NULL AND next_followup_at <= datetime('now')
-                   AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
-    whereParams = [limitCount];
-  } else if (filter === 'this_week') {
-    whereClause = `WHERE status = 'new' AND created_at >= datetime('now', '-7 days')
-                   AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
-    whereParams = [limitCount];
-  } else {
-    whereClause = `WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL
-                   AND (phone_valid IS NULL OR phone_valid != 0)
-                   ${service_type ? 'AND service_type = ?' : ''}`;
-    whereParams = service_type ? [service_type, limitCount] : [limitCount];
-  }
+  let leads;
 
-  const leads = db.all(
-    `SELECT id, phone FROM leads ${whereClause} ORDER BY heat_score DESC LIMIT ?`,
-    whereParams
-  );
+  if (filter === 'morning') {
+    // Morning filter: use rich priority scoring (matches daily-queue endpoint)
+    const raw = db.all(`
+      SELECT * FROM leads
+      WHERE phone IS NOT NULL AND phone != ''
+        AND status NOT IN ('booked', 'lost', 'closed_won')
+        AND dnc_at IS NULL
+        AND (next_followup_at IS NULL OR datetime(next_followup_at) <= datetime('now'))
+        AND (phone_valid IS NULL OR phone_valid != 0)
+    `);
+
+    const scored = raw.map(lead => ({
+      ...lead,
+      _priority: scoreLeadForMorning(lead)
+    }));
+
+    scored.sort((a, b) => b._priority - a._priority);
+    leads = scored.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+  } else {
+    let whereClause, whereParams;
+    if (filter === 'callbacks_due') {
+      whereClause = `WHERE next_followup_at IS NOT NULL AND next_followup_at <= datetime('now')
+                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
+      whereParams = [limitCount];
+    } else if (filter === 'this_week') {
+      whereClause = `WHERE status = 'new' AND created_at >= datetime('now', '-7 days')
+                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
+      whereParams = [limitCount];
+    } else if (filter === 'gatekeeper') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE gatekeeper_count > 0
+          AND phone IS NOT NULL AND phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+      `);
+      raw.sort((a, b) =>
+        ((b.gatekeeper_count ?? 0) - (a.gatekeeper_count ?? 0)) ||
+        (new Date(a.next_followup_at || 0).getTime() - new Date(b.next_followup_at || 0).getTime())
+      );
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+    } else {
+      whereClause = `WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL
+                     AND (phone_valid IS NULL OR phone_valid != 0)
+                     ${service_type ? 'AND service_type = ?' : ''}`;
+      whereParams = service_type ? [service_type, limitCount] : [limitCount];
+    }
+
+    if (!leads) {
+      leads = db.all(
+        `SELECT id, phone FROM leads ${whereClause} ORDER BY heat_score DESC LIMIT ?`,
+        whereParams
+      );
+    }
+  }
 
   // Clear existing queue
   db.run("DELETE FROM call_queue WHERE status = 'pending'");

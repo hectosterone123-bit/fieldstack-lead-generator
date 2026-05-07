@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2, LayoutTemplate, X, MessageSquare,
+  Repeat, Plus, Trash2, Power, PowerOff, Users, Clock, ChevronRight, Zap, Mail, BarChart2, LayoutTemplate, X, MessageSquare, FlaskConical,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
@@ -225,12 +225,23 @@ export function Sequences() {
                       {analytics.steps.map(step => {
                         const openRate = step.sent > 0 ? Math.round((step.opened / step.sent) * 100) : 0;
                         const replyRate = step.sent > 0 ? Math.round((step.replied / step.sent) * 100) : 0;
+                        const ab = step.ab_data;
+                        const abWinner = ab
+                          ? ab.A.reply_rate > ab.B.reply_rate ? 'A'
+                            : ab.B.reply_rate > ab.A.reply_rate ? 'B'
+                            : null
+                          : null;
                         return (
                           <div key={step.step} className="bg-zinc-800/50 rounded-lg p-3 border border-white/[0.04]">
                             <div className="flex items-center justify-between mb-2">
                               <div className="flex items-center gap-2">
                                 <span className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-400 text-[10px] flex items-center justify-center font-medium">{step.step}</span>
                                 <span className="text-xs text-zinc-300">{step.label}</span>
+                                {ab && (
+                                  <span className="flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                                    <FlaskConical className="w-2.5 h-2.5" /> A/B
+                                  </span>
+                                )}
                               </div>
                               <span className="text-xs text-zinc-500">{step.sent} sent</span>
                             </div>
@@ -263,6 +274,50 @@ export function Sequences() {
                             )}
                             {step.sent === 0 && (
                               <p className="text-[10px] text-zinc-600">No sends yet</p>
+                            )}
+                            {/* A/B comparison table */}
+                            {ab && (ab.A.sent > 0 || ab.B.sent > 0) && (
+                              <div className="mt-3 pt-3 border-t border-white/[0.04]">
+                                <p className="text-[10px] text-zinc-500 mb-2 flex items-center gap-1">
+                                  <FlaskConical className="w-2.5 h-2.5" /> A/B Comparison
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {(['A', 'B'] as const).map(v => {
+                                    const vData = ab[v];
+                                    const isWinner = abWinner === v;
+                                    return (
+                                      <div
+                                        key={v}
+                                        className={cn(
+                                          'rounded-lg p-2.5 border',
+                                          isWinner
+                                            ? 'bg-emerald-500/5 border-emerald-500/20'
+                                            : 'bg-zinc-900/60 border-white/[0.04]'
+                                        )}
+                                      >
+                                        <div className="flex items-center justify-between mb-1.5">
+                                          <span className={cn(
+                                            'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                                            v === 'A' ? 'bg-orange-500/20 text-orange-400' : 'bg-violet-500/20 text-violet-400'
+                                          )}>
+                                            Variant {v}
+                                          </span>
+                                          {isWinner && (
+                                            <span className="text-[9px] text-emerald-400 font-semibold bg-emerald-500/10 px-1.5 py-0.5 rounded">WINNER</span>
+                                          )}
+                                        </div>
+                                        <div className="space-y-0.5">
+                                          <p className="text-[10px] text-zinc-400">{vData.sent} sent</p>
+                                          <p className="text-[10px] text-zinc-400">{vData.open_rate}% opened</p>
+                                          <p className={cn('text-[10px] font-medium', isWinner ? 'text-emerald-400' : 'text-zinc-300')}>
+                                            {vData.reply_rate}% replied
+                                          </p>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             )}
                           </div>
                         );
@@ -315,6 +370,22 @@ export function Sequences() {
                         <div>
                           <p className="text-sm font-medium text-zinc-200">{tpl.name}</p>
                           <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{tpl.description}</p>
+                        </div>
+                        {/* Step preview pills */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {tpl.steps.map((step, i) => (
+                            <span
+                              key={i}
+                              className={cn(
+                                'text-[10px] px-2 py-0.5 rounded border font-medium',
+                                step.channel === 'email'
+                                  ? 'bg-violet-500/10 border-violet-500/20 text-violet-400'
+                                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                              )}
+                            >
+                              Day {step.delay_days} · {step.channel === 'email' ? 'Email' : 'SMS'} · {step.label}
+                            </span>
+                          ))}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-700 text-zinc-400 flex items-center gap-1">

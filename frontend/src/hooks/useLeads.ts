@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchLeads, fetchLead, createLead, updateLead,
-  deleteLead, patchLeadStatus, patchLeadHeatScore, logActivity, enrichLead,
+  deleteLead, patchLeadStatus, patchLeadHeatScore, logActivity, enrichLead, regeneratePitch,
   fetchFollowups, snoozeLead, bulkUpdateLeads, bulkEnrichLeads,
   testSubmitLead, testRespondLead, sendLeadEmail,
-  fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms, fetchGbpData,
+  fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms, fetchGbpData, fetchDailyQueue,
+  bulkSendSms, generateColdWrite,
   type LeadsFilters
 } from '../lib/api';
 
@@ -95,6 +96,22 @@ export function useEnrichLead() {
       qc.invalidateQueries({ queryKey: ['lead', id] });
       qc.invalidateQueries({ queryKey: ['leads'] });
     },
+  });
+}
+
+export function useRegeneratePitch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => regeneratePitch(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+    },
+  });
+}
+
+export function useGenerateColdWrite() {
+  return useMutation({
+    mutationFn: (id: number) => generateColdWrite(id),
   });
 }
 
@@ -213,6 +230,18 @@ export function useFetchGbpData() {
       qc.invalidateQueries({ queryKey: ['lead', id] });
     },
   });
+}
+
+export function useDailyQueue() {
+  return useQuery({
+    queryKey: ['daily-queue'],
+    queryFn: fetchDailyQueue,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useBulkSendSms() {
+  return useMutation({ mutationFn: bulkSendSms });
 }
 
 export function useSendLeadSms() {
