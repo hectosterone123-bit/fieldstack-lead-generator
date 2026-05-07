@@ -16,7 +16,7 @@ import { STATUS_LABELS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '.
 import { StatusBadge } from '../shared/StatusBadge';
 import { HeatScore } from '../shared/HeatScore';
 import { formatCurrency, formatRelativeTime, cn } from '../../lib/utils';
-import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useRegeneratePitch, useGenerateColdWrite, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail, useFetchGbpData } from '../../hooks/useLeads';
+import { useLead, usePatchStatus, usePatchHeatScore, useLogActivity, useUpdateLead, useEnrichLead, useRegeneratePitch, useGenerateColdWrite, useTestSubmitLead, useTestRespondLead, useScheduledEmails, useCancelScheduledEmail, useFindLeadEmail, useFetchGbpData, useFindDirectPhone } from '../../hooks/useLeads';
 import { useSmsConversation, useSendSms, useSmsStatus, useDraftSmsReply } from '../../hooks/useSms';
 import { useTemplates } from '../../hooks/useTemplates';
 import type { GbpData } from '../../lib/api';
@@ -90,6 +90,7 @@ export function LeadDrawer({ leadId, onClose }: Props) {
   const logActivity = useLogActivity();
   const updateLead = useUpdateLead();
   const enrichLead = useEnrichLead();
+  const findPhone = useFindDirectPhone();
   const regeneratePitch = useRegeneratePitch();
   const testSubmit = useTestSubmitLead();
   const testRespond = useTestRespondLead();
@@ -462,6 +463,40 @@ export function LeadDrawer({ leadId, onClose }: Props) {
                       placeholder="Owner's direct line"
                       className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg px-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark]"
                     />
+                    {!(lead as any).direct_phone && (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <button
+                          onClick={() => findPhone.mutate(lead.id, {
+                            onSuccess: (d) => {
+                              if (d.found && d.phone) toast(`Direct number found: ${d.phone}`);
+                              else toast('No number found — try the search links', 'error');
+                            },
+                          })}
+                          disabled={findPhone.isPending}
+                          title="Ask AI to find owner's direct number"
+                          className="flex items-center gap-1 px-2 py-1 bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 rounded text-[10px] font-medium transition-colors disabled:opacity-50"
+                        >
+                          {findPhone.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                          AI Find
+                        </button>
+                        <a
+                          href={`https://www.google.com/search?q=${encodeURIComponent([lead.owner_name, lead.business_name, lead.city, lead.state, 'phone number'].filter(Boolean).join(' '))}`}
+                          target="_blank" rel="noreferrer"
+                          title="Search Google for owner's phone"
+                          className="flex items-center gap-1 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded text-[10px] transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Google
+                        </a>
+                        <a
+                          href={`https://www.whitepages.com/name/${encodeURIComponent(lead.owner_name || lead.business_name || '')}`}
+                          target="_blank" rel="noreferrer"
+                          title="Search Whitepages"
+                          className="flex items-center gap-1 px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded text-[10px] transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Whitepages
+                        </a>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div>

@@ -810,6 +810,24 @@ router.patch('/:id/heat-score', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /api/leads/:id/find-direct-phone — AI lookup for owner's direct/cell number
+router.post('/:id/find-direct-phone', async (req, res, next) => {
+  try {
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    const { findOwnerPhone } = require('../services/claudeService');
+    const phone = await findOwnerPhone(lead);
+    if (phone) {
+      db.run('UPDATE leads SET direct_phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [phone, lead.id]);
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Direct phone found via AI', ?)",
+        [lead.id, `AI lookup returned: ${phone}`]
+      );
+    }
+    res.json({ success: true, data: { found: !!phone, phone: phone || null } });
+  } catch (err) { next(err); }
+});
+
 // POST /api/leads/:id/enrich — scrape website for intel
 router.post('/:id/enrich', async (req, res, next) => {
   try {
@@ -839,6 +857,17 @@ router.post('/:id/enrich', async (req, res, next) => {
       ownerAutoFilled = true;
     }
 
+    // Auto-fill direct_phone if not set and scrape found a number different from the main phone
+    let directPhoneAutoFilled = false;
+    if (!lead.direct_phone && result.phones?.length > 0) {
+      const mainDigits = (lead.phone || '').replace(/\D/g, '').slice(-10);
+      const alt = result.phones.find(p => p !== mainDigits);
+      if (alt) {
+        db.run('UPDATE leads SET direct_phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [alt, req.params.id]);
+        directPhoneAutoFilled = alt;
+      }
+    }
+
     autoUpdateHeatScore(req.params.id);
 
     // Build activity description
@@ -849,6 +878,7 @@ router.post('/:id/enrich', async (req, res, next) => {
       if (result.emails?.length) parts.push(`${result.emails.length} email(s)`);
       if (result.team_names?.length) parts.push(`${result.team_names.length} team name(s)`);
       if (ownerAutoFilled) parts.push(`owner auto-filled: ${result.team_names[0]}`);
+      if (directPhoneAutoFilled) parts.push(`direct phone found: ${directPhoneAutoFilled}`);
       if (result.services?.length) parts.push(`${result.services.length} service(s)`);
       if (result.tech_stack) parts.push(`Tech: ${result.tech_stack}`);
       const toolsDetected = Object.values(result.detected_tools || {}).filter(Boolean);

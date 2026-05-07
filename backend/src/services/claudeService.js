@@ -1419,4 +1419,21 @@ Return ONLY valid JSON, no markdown:
   };
 }
 
-module.exports = { streamChat, generateTitle, generatePersonalizedEmail, draftSmsReply, classifySmsIntent, generatePitch, generateColdWrite };
+async function findOwnerPhone(lead) {
+  try {
+    const prompt = [
+      { role: 'system', content: 'You are a business research assistant. When given a business name and location, attempt to recall any known direct/mobile phone number for the business owner. If you know a specific number, return only the 10-digit US phone number with no other text or formatting (e.g. 5127891234). If you do not have a reliable number, return exactly: NOT_FOUND' },
+      { role: 'user', content: `Business: ${lead.business_name}. City: ${lead.city || ''}, ${lead.state || 'TX'}. Owner: ${lead.owner_name || 'unknown'}. Website: ${lead.website || 'unknown'}. Find the owner's direct or mobile phone number.` },
+    ];
+    const result = await callGemini(prompt, false);
+    const text = (result?.choices?.[0]?.message?.content || '').trim();
+    if (!text || text === 'NOT_FOUND') return null;
+    const digits = text.replace(/\D/g, '');
+    const ten = digits.length === 11 && digits[0] === '1' ? digits.slice(1) : digits.length === 10 ? digits : null;
+    return ten;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { streamChat, generateTitle, generatePersonalizedEmail, draftSmsReply, classifySmsIntent, generatePitch, generateColdWrite, findOwnerPhone };

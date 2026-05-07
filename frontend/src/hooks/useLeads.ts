@@ -5,7 +5,7 @@ import {
   fetchFollowups, snoozeLead, bulkUpdateLeads, bulkEnrichLeads,
   testSubmitLead, testRespondLead, sendLeadEmail,
   fetchScheduledEmails, cancelScheduledEmail, findLeadEmail, sendSms, fetchGbpData, fetchDailyQueue,
-  bulkSendSms, generateColdWrite,
+  bulkSendSms, generateColdWrite, findDirectPhone,
   type LeadsFilters
 } from '../lib/api';
 
@@ -92,6 +92,17 @@ export function useEnrichLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => enrichLead(id),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['lead', id] });
+      qc.invalidateQueries({ queryKey: ['leads'] });
+    },
+  });
+}
+
+export function useFindDirectPhone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => findDirectPhone(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['lead', id] });
       qc.invalidateQueries({ queryKey: ['leads'] });

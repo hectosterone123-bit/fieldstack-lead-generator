@@ -1,6 +1,56 @@
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
 
+const TOLLFREE_PREFIXES = new Set(['800','888','877','866','855','844','833']);
+const PHONE_REGEX = /(?:\+1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}/g;
+
+function normalizePhone(raw) {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return null;
+}
+
+function extractPhones($, html) {
+  const found = new Set();
+
+  // tel: links (most reliable)
+  $('a[href^="tel:"]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const n = normalizePhone(href.replace('tel:', ''));
+    if (n) found.add(n);
+  });
+
+  // Regex scan of full HTML
+  const matches = html.match(PHONE_REGEX) || [];
+  for (const m of matches) {
+    const n = normalizePhone(m);
+    if (n) found.add(n);
+  }
+
+  // Filter toll-free
+  return [...found].filter(n => !TOLLFREE_PREFIXES.has(n.slice(0, 3)));
+}
+
+async function scrapePagePhones(url) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    return extractPhones($, html);
+  } catch {
+    return [];
+  }
+}
+
 const FAKE_EMAILS = new Set([
   'example@example.com', 'test@test.com', 'noreply@', 'no-reply@',
   'info@example.com', 'admin@example.com', 'webmaster@example.com',
@@ -203,15 +253,25 @@ async function scrapeWebsite(url) {
   const $ = cheerio.load(html);
 
   const rootEmails = extractEmails($);
+  const rootPhones = extractPhones($, html);
 
-  // If root has no emails, try /contact and /about pages in parallel
+  // If root has no emails/phones, try /contact and /about pages in parallel
   let allEmails = rootEmails;
-  if (rootEmails.length === 0) {
+  let allPhones = rootPhones;
+  if (rootEmails.length === 0 || rootPhones.length === 0) {
     try {
       const base = new URL(normalized).origin;
       const subpages = ['/contact', '/contact-us', '/about', '/about-us'];
-      const subResults = await Promise.all(subpages.map(p => scrapePageEmails(base + p)));
-      allEmails = [...new Set(subResults.flat())];
+      const [emailResults, phoneResults] = await Promise.all([
+        rootEmails.length === 0
+          ? Promise.all(subpages.map(p => scrapePageEmails(base + p))).then(r => [...new Set(r.flat())])
+          : Promise.resolve(rootEmails),
+        rootPhones.length === 0
+          ? Promise.all(subpages.map(p => scrapePagePhones(base + p))).then(r => [...new Set(r.flat())])
+          : Promise.resolve(rootPhones),
+      ]);
+      allEmails = emailResults;
+      allPhones = [...new Set([...rootPhones, ...phoneResults])];
     } catch {}
   }
 
@@ -219,6 +279,7 @@ async function scrapeWebsite(url) {
 
   return {
     emails: allEmails,
+    phones: allPhones,
     team_names: extractTeamNames($),
     services: extractServices($),
     tech_stack: detectTechStack($, html),

@@ -89,6 +89,10 @@ export async function enrichLead(id: number): Promise<Lead & { activities: any[]
   return request(`/leads/${id}/enrich`, { method: 'POST' });
 }
 
+export async function findDirectPhone(id: number): Promise<{ found: boolean; phone: string | null }> {
+  return request(`/leads/${id}/find-direct-phone`, { method: 'POST' });
+}
+
 export async function quickEmail(id: number, subject: string, body: string): Promise<{ message_id: string }> {
   return request(`/leads/${id}/quick-email`, { method: 'POST', body: JSON.stringify({ subject, body }) });
 }
