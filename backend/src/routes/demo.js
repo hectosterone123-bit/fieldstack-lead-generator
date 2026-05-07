@@ -31,14 +31,15 @@ router.post('/seed', (req, res, next) => {
 
     const created = [];
     for (const lead of DEMO_LEADS) {
+      const ageDays = Math.floor(Math.random() * 21);
       const result = db.run(
         `INSERT INTO leads (business_name, first_name, last_name, phone, email, city, state, service_type, website, has_website, estimated_value, notes, status, source, heat_score, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', 0, datetime('now', '-' || ? || ' days'), datetime('now'))`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'demo', 0, datetime('now', ?), datetime('now'))`,
         [
           lead.business_name, lead.first_name, lead.last_name, lead.phone, lead.email,
           lead.city, lead.state, lead.service_type, lead.website || null, lead.website ? 1 : 0,
           lead.estimated_value, lead.notes, lead.status,
-          Math.floor(Math.random() * 21),
+          `-${ageDays} days`,
         ]
       );
       const newLead = db.get('SELECT * FROM leads WHERE id = ?', [result.lastInsertRowid]);
@@ -46,15 +47,18 @@ router.post('/seed', (req, res, next) => {
       db.run('UPDATE leads SET heat_score = ? WHERE id = ?', [score, newLead.id]);
 
       // Import activity
-      db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'import', 'Demo lead created', datetime('now', '-' || ? || ' days'))", [newLead.id, Math.floor(Math.random() * 21)]);
+      db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'import', 'Demo lead created', datetime('now', ?))", [newLead.id, `-${ageDays} days`]);
 
       // Add activities for non-new leads
       if (lead.status === 'contacted' || lead.status === 'qualified' || lead.status === 'proposal_sent' || lead.status === 'booked') {
-        db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'call_attempt', 'Cold call — spoke briefly', datetime('now', '-' || ? || ' days'))", [newLead.id, Math.floor(Math.random() * 14) + 1]);
-        db.run("UPDATE leads SET contact_count = 1, last_contacted_at = datetime('now', '-' || ? || ' days') WHERE id = ?", [Math.floor(Math.random() * 10) + 1, newLead.id]);
+        const callDays = Math.floor(Math.random() * 14) + 1;
+        db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'call_attempt', 'Cold call — spoke briefly', datetime('now', ?))", [newLead.id, `-${callDays} days`]);
+        const contactDays = Math.floor(Math.random() * 10) + 1;
+        db.run("UPDATE leads SET contact_count = 1, last_contacted_at = datetime('now', ?) WHERE id = ?", [`-${contactDays} days`, newLead.id]);
       }
       if (lead.status === 'qualified' || lead.status === 'proposal_sent' || lead.status === 'booked') {
-        db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'email_sent', 'Sent pitch email + Loom', datetime('now', '-' || ? || ' days'))", [newLead.id, Math.floor(Math.random() * 7) + 1]);
+        const emailDays = Math.floor(Math.random() * 7) + 1;
+        db.run("INSERT INTO activities (lead_id, type, title, created_at) VALUES (?, 'email_sent', 'Sent pitch email + Loom', datetime('now', ?))", [newLead.id, `-${emailDays} days`]);
         db.run("UPDATE leads SET contact_count = 2 WHERE id = ?", [newLead.id]);
       }
 

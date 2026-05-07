@@ -789,8 +789,10 @@ router.get('/stats/templates', (req, res) => {
 });
 
 // GET /api/calls/funnel — call outcome funnel (must be before /:callId)
-router.get('/funnel', (req, res) => {
+router.get('/funnel', (req, res, next) => {
+  try {
   const days = parseInt(req.query.days) || 30;
+  const modifier = `-${days} days`;
   const row = db.get(`
     SELECT
       COUNT(*)                                                                         as total,
@@ -804,8 +806,8 @@ router.get('/funnel', (req, res) => {
       ROUND(AVG(duration_seconds))                                                    as avg_duration
     FROM calls
     WHERE status = 'completed'
-    AND created_at >= datetime('now', '-' || ? || ' days')
-  `, [days]);
+    AND created_at >= datetime('now', ?)
+  `, [modifier]);
 
   const total = row?.total || 0;
   const pickups = row?.pickups || 0;
@@ -827,6 +829,7 @@ router.get('/funnel', (req, res) => {
       avg_duration: row?.avg_duration || 0,
     },
   });
+  } catch (err) { next(err); }
 });
 
 router.get('/:callId', (req, res) => {

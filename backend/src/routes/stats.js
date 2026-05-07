@@ -232,6 +232,7 @@ router.get('/', (req, res, next) => {
 
     let requeue_eligible = 0;
     try {
+      const rqModifier = `-${rqDelay} days`;
       requeue_eligible = db.get(`
         SELECT COUNT(DISTINCT l.id) as count FROM leads l
         LEFT JOIN lead_sequences ls_active ON ls_active.lead_id = l.id AND ls_active.status IN ('active', 'paused')
@@ -243,15 +244,15 @@ router.get('/', (req, res, next) => {
             EXISTS (
               SELECT 1 FROM lead_sequences ls2
               WHERE ls2.lead_id = l.id AND ls2.status = 'completed'
-              AND ls2.completed_at < datetime('now', '-' || ? || ' days')
+              AND ls2.completed_at < datetime('now', ?)
             )
             OR (
               l.status IN ('contacted', 'qualified')
               AND l.last_contacted_at IS NOT NULL
-              AND l.last_contacted_at < datetime('now', '-' || ? || ' days')
+              AND l.last_contacted_at < datetime('now', ?)
             )
           )
-      `, [rqMax, rqDelay, rqDelay])?.count || 0;
+      `, [rqMax, rqModifier, rqModifier])?.count || 0;
     } catch (e) {
       // requeue_count column may not exist yet
     }
