@@ -27,9 +27,10 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 // Capture raw body before JSON parsing — needed for Resend webhook signature verification
 app.use(express.json({
+  limit: '50mb',
   verify: (req, _res, buf) => { req.rawBody = buf; }
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
 // Routes (mounted after DB is ready)
 async function start() {
@@ -86,8 +87,11 @@ async function start() {
   const { startSequenceScheduler } = require('./services/sequenceScheduler');
   startSequenceScheduler();
 
-  const { startCampaignScheduler } = require('./services/campaignScheduler');
+  const { startCampaignScheduler, startMorningQueueScheduler, startAutopilotScheduler, startHailTriggerScheduler } = require('./services/campaignScheduler');
   startCampaignScheduler();
+  startMorningQueueScheduler();
+  startAutopilotScheduler();
+  startHailTriggerScheduler();
 
   // Serve frontend build
   const frontendDist = path.join(__dirname, '../../frontend/dist');

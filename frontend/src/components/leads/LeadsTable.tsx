@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2, CheckCheck, MailOpen, Repeat, CalendarClock } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, MapPin, Trash2, Download, X, Globe, Star, ChevronsUpDown, Phone, Sparkles, Loader2, CheckCheck, MailOpen, Repeat, CalendarClock, SlidersHorizontal } from 'lucide-react';
 import type { Lead, LeadStatus, ServiceType } from '../../types';
 import { STATUS_LABELS, SERVICE_LABELS, SERVICE_COLORS, PREDEFINED_TAGS, TAG_COLORS, TAG_COLOR_DEFAULT } from '../../types';
 import { StatusBadge } from '../shared/StatusBadge';
@@ -42,8 +42,13 @@ export function LeadsTable({ onRowClick, preset }: Props) {
   const [tagFilter, setTagFilter] = useState('');
   const [noResponseFilter, setNoResponseFilter] = useState(false);
   const [noWebsiteFilter, setNoWebsiteFilter] = useState(false);
+  const [phoneValidFilter, setPhoneValidFilter] = useState(false);
+  const [mobileOnlyFilter, setMobileOnlyFilter] = useState(false);
+  const [noGatekeeperFilter, setNoGatekeeperFilter] = useState(false);
+  const [directPhoneFilter, setDirectPhoneFilter] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkStatus, setBulkStatus] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const { data, isLoading } = useLeads({
     search: search || undefined,
@@ -52,6 +57,10 @@ export function LeadsTable({ onRowClick, preset }: Props) {
     tag: tagFilter || undefined,
     no_response: noResponseFilter || undefined,
     no_website: noWebsiteFilter || undefined,
+    phone_valid: phoneValidFilter || undefined,
+    mobile_only: mobileOnlyFilter || undefined,
+    no_gatekeeper: noGatekeeperFilter || undefined,
+    has_direct_phone: directPhoneFilter || undefined,
     sort, order, page, limit: 25,
   });
 
@@ -69,7 +78,7 @@ export function LeadsTable({ onRowClick, preset }: Props) {
 
   useEffect(() => {
     setSelected(new Set());
-  }, [search, statusFilter, serviceFilter, tagFilter, noResponseFilter, noWebsiteFilter, sort, order, page]);
+  }, [search, statusFilter, serviceFilter, tagFilter, noResponseFilter, noWebsiteFilter, phoneValidFilter, mobileOnlyFilter, noGatekeeperFilter, directPhoneFilter, sort, order, page]);
 
   function handleSort(col: string) {
     if (sort === col) setOrder(o => o === 'asc' ? 'desc' : 'asc');
@@ -231,7 +240,33 @@ export function LeadsTable({ onRowClick, preset }: Props) {
           ))}
         </div>
 
-        {/* Tag filter pills */}
+        {/* Advanced filters toggle */}
+        {(() => {
+          const activeCount = [tagFilter, noResponseFilter, noWebsiteFilter, phoneValidFilter, mobileOnlyFilter, noGatekeeperFilter, directPhoneFilter].filter(Boolean).length;
+          return (
+            <button
+              onClick={() => setFiltersOpen(f => !f)}
+              className={cn(
+                'flex items-center gap-1.5 text-xs font-medium transition-colors',
+                filtersOpen || activeCount > 0
+                  ? 'text-orange-400'
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filters
+              {activeCount > 0 && (
+                <span className="ml-0.5 w-4 h-4 rounded-full bg-orange-500/20 text-orange-400 text-[10px] font-bold flex items-center justify-center">
+                  {activeCount}
+                </span>
+              )}
+              <ChevronDown className={cn('w-3 h-3 transition-transform', filtersOpen && 'rotate-180')} />
+            </button>
+          );
+        })()}
+
+        {/* Tag filter pills — collapsible */}
+        {filtersOpen && (
         <div className="flex gap-1 overflow-x-auto">
           {PREDEFINED_TAGS.map(t => (
             <button
@@ -269,7 +304,52 @@ export function LeadsTable({ onRowClick, preset }: Props) {
           >
             No Website
           </button>
+          <button
+            onClick={() => { setPhoneValidFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              phoneValidFilter
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            Valid Phones
+          </button>
+          <button
+            onClick={() => { setMobileOnlyFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              mobileOnlyFilter
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            Mobile Only
+          </button>
+          <button
+            onClick={() => { setNoGatekeeperFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              noGatekeeperFilter
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            No Gatekeeper
+          </button>
+          <button
+            onClick={() => { setDirectPhoneFilter(f => !f); setPage(1); }}
+            className={cn(
+              'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+              directPhoneFilter
+                ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                : 'border-transparent text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50',
+            )}
+          >
+            Direct # Only
+          </button>
         </div>
+        )}
       </div>
 
       {/* Table */}

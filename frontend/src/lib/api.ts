@@ -37,6 +37,10 @@ export interface LeadsFilters {
   limit?: number;
   no_response?: boolean;
   no_website?: boolean;
+  phone_valid?: boolean;
+  mobile_only?: boolean;
+  no_gatekeeper?: boolean;
+  has_direct_phone?: boolean;
 }
 
 export interface LeadsPaginated {
@@ -93,6 +97,26 @@ export async function findDirectPhone(id: number): Promise<{ found: boolean; pho
   return request(`/leads/${id}/find-direct-phone`, { method: 'POST' });
 }
 
+export async function batchFindPhones(service_type?: string, limit?: number): Promise<{ checked: number; found: number; lead_ids: number[] }> {
+  return request('/leads/batch-find-phones', { method: 'POST', body: JSON.stringify({ service_type, limit }) });
+}
+
+export async function batchValidatePhones(service_type?: string, source?: string, limit?: number): Promise<{ checked: number; valid: number; invalid: number }> {
+  return request('/leads/batch-validate-phones', { method: 'POST', body: JSON.stringify({ service_type, source, limit }) });
+}
+
+export async function importTdlrCsv(csv: string, service_types: string[], active_only: boolean, metro?: string): Promise<{ imported: number; skipped_dedup: number; skipped_filter: number; lead_ids: number[] }> {
+  return request('/leads/import-tdlr', { method: 'POST', body: JSON.stringify({ csv, service_types, active_only, metro }) });
+}
+
+export async function importTsbpeCsv(csv: string, active_only: boolean): Promise<{ imported: number; skipped_dedup: number; skipped_filter: number; lead_ids: number[] }> {
+  return request('/leads/import-tsbpe', { method: 'POST', body: JSON.stringify({ csv, active_only }) });
+}
+
+export async function importPermitsCsv(csv: string, permit_types: string[], days_back: number): Promise<{ imported: number; skipped_dedup: number; skipped_filter: number; lead_ids: number[] }> {
+  return request('/leads/import-permits', { method: 'POST', body: JSON.stringify({ csv, permit_types, days_back }) });
+}
+
 export async function quickEmail(id: number, subject: string, body: string): Promise<{ message_id: string }> {
   return request(`/leads/${id}/quick-email`, { method: 'POST', body: JSON.stringify({ subject, body }) });
 }
@@ -128,6 +152,25 @@ export async function snoozeLead(id: number, days: number): Promise<Lead> {
 
 export async function bulkEnrichLeads(ids?: number[]): Promise<{ total: number; enriched: number; failed: number; skipped: number }> {
   return request('/leads/bulk/enrich', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) });
+}
+
+export async function blastSmsByFilter(params: {
+  message: string;
+  status?: string;
+  service_type?: string;
+  not_contacted_days?: number;
+}): Promise<{ sent: number; failed: number; skipped: number; total: number }> {
+  return request('/leads/bulk/blast-sms', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function bulkSendEmail(params: {
+  template_id: number;
+  status?: string;
+  service_type?: string;
+  not_contacted_days?: number;
+  ai_personalize?: boolean;
+}): Promise<{ sent: number; failed: number; ai_personalized: number; total: number; errors: string[] }> {
+  return request('/leads/bulk/send-email', { method: 'POST', body: JSON.stringify(params) });
 }
 
 export async function testSubmitLead(id: number): Promise<Lead> {
@@ -490,6 +533,10 @@ export async function repairSequenceTemplates(): Promise<{ repaired_sequences: n
   return request('/sequences/repair-templates', { method: 'POST' });
 }
 
+export async function runAutopilotImport(): Promise<{ triggered: boolean }> {
+  return request('/leads/autopilot/run', { method: 'POST' });
+}
+
 export async function markQueueItemSent(enrollmentId: number): Promise<void> {
   return request(`/sequences/queue/${enrollmentId}/mark-sent`, { method: 'POST' });
 }
@@ -718,6 +765,10 @@ export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string)
 
 export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number, filter?: string): Promise<{ queued: number }> {
   return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId, filter }) });
+}
+
+export async function getMorningStatus(): Promise<{ loaded_today: boolean; loaded_at: string | null; queue_count: number }> {
+  return request('/calls/morning-status');
 }
 
 export async function logManualCall(leadId: number, outcome?: string, durationSeconds?: number, templateId?: number): Promise<{ call_id: number }> {

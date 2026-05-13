@@ -190,52 +190,150 @@ router.post('/resend', async (req, res) => {
     }
   }
 
+  // Inbound reply via Resend — same webhook URL, no separate endpoint needed
+  if (type === 'email.received') {
+    const { email_id, from: rawFrom, to: rawTo, subject } = data || {};
+    const toAddr = Array.isArray(rawTo) ? rawTo[0] : rawTo || '';
+    const match = toAddr.match(/reply\+(\d+)@/);
+
+    if (match) {
+      const leadId = parseInt(match[1]);
+      const lead = db.get('SELECT * FROM leads WHERE id = ?', [leadId]);
+
+      if (lead) {
+        // Fetch full reply body from Resend API
+        let replyText = '';
+        const apiKey = process.env.RESEND_API_KEY || db.get("SELECT value FROM settings WHERE key = 'resend_api_key'")?.value;
+        if (apiKey && email_id) {
+          try {
+            const fetchMod = require('node-fetch');
+            const resp = await fetchMod(`https://api.resend.com/emails/receiving/${email_id}`, {
+              headers: { 'Authorization': `Bearer ${apiKey}` }
+            });
+            if (resp.ok) {
+              const emailData = await resp.json();
+              replyText = emailData.text || (emailData.html ? emailData.html.replace(/<[^>]+>/g, '') : '') || '';
+            }
+          } catch (e) {
+            console.warn('[resend-webhook] Failed to fetch inbound email body:', e.message);
+          }
+        }
+
+        const replyBody = replyText.slice(0, 500);
+
+        db.run(
+          'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+          [leadId, 'email_replied', 'Prospect replied via email', replyBody,
+           JSON.stringify({ from: rawFrom, subject: subject || '' })]
+        );
+        db.run("UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'", [leadId]);
+        db.run('INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+          [leadId, 'note', 'Sequence auto-paused', 'Lead replied via email — all active sequences paused']);
+        db.run("UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')", [leadId]);
+        applyRules(leadId, 'email_replied');
+
+        // SMS alert to operator
+        const smsService = require('../services/smsService');
+        const alertPhone = db.get("SELECT value FROM settings WHERE key = 'morning_alert_phone'")?.value;
+        if (alertPhone && smsService.isConfigured()) {
+          smsService.sendSms(alertPhone, `FieldStack: ${lead.business_name || 'A lead'} replied to your email! "${replyBody.slice(0, 80)}"`).catch(() => {});
+        }
+
+        emit({ type: 'email_replied', lead_id: leadId, business: lead.business_name });
+      }
+    }
+  }
+
   res.json({ ok: true });
 });
 
-// POST /api/webhooks/email-inbound — future-ready inbound email parser endpoint
-// Wire this to CloudMailin, SendGrid Inbound Parse, or similar service
-// Expects: { to: "reply+{lead_id}@domain.com", from: "prospect@gmail.com", text: "reply body", subject: "Re: ..." }
-router.post('/email-inbound', (req, res) => {
-  const { to, from, text, subject } = req.body;
+// POST /api/webhooks/email-inbound — inbound email reply handler
+// Supports: Resend native format ({ type: 'email.received', data: {...} }) AND generic forwarding ({ to, from, text, subject })
+router.post('/email-inbound', async (req, res) => {
+  try {
+    let toAddr, fromAddr, replyText, subjectLine;
 
-  // Extract lead_id from reply+{id}@domain.com
-  const match = (Array.isArray(to) ? to[0] : to || '').match(/reply\+(\d+)@/);
-  if (!match) return res.status(400).json({ ok: false, error: 'Could not parse lead_id from To address' });
+    if (req.body.type === 'email.received' && req.body.data) {
+      // Resend native inbound format — body not included, must fetch via API
+      const { email_id, from: rawFrom, to: rawTo, subject } = req.body.data;
+      toAddr = Array.isArray(rawTo) ? rawTo[0] : rawTo || '';
+      fromAddr = rawFrom || '';
+      subjectLine = subject || '';
+      replyText = '';
 
-  const leadId = parseInt(match[1]);
-  const lead = db.get('SELECT * FROM leads WHERE id = ?', [leadId]);
-  if (!lead) return res.status(404).json({ ok: false, error: 'Lead not found' });
+      const apiKey = process.env.RESEND_API_KEY || db.get("SELECT value FROM settings WHERE key = 'resend_api_key'")?.value;
+      if (apiKey && email_id) {
+        try {
+          const fetchMod = require('node-fetch');
+          const resp = await fetchMod(`https://api.resend.com/emails/receiving/${email_id}`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          if (resp.ok) {
+            const emailData = await resp.json();
+            replyText = emailData.text || (emailData.html ? emailData.html.replace(/<[^>]+>/g, '') : '') || '';
+          }
+        } catch (e) {
+          console.warn('[email-inbound] Failed to fetch email body:', e.message);
+        }
+      }
+    } else {
+      // Generic forwarding service format (CloudMailin, SendGrid, etc.)
+      const { to, from, text, subject } = req.body;
+      toAddr = Array.isArray(to) ? to[0] : to || '';
+      fromAddr = from || '';
+      replyText = text || '';
+      subjectLine = subject || '';
+    }
 
-  const replyBody = (text || '').slice(0, 500);
+    // Extract lead_id from reply+{id}@domain.com
+    const match = toAddr.match(/reply\+(\d+)@/);
+    if (!match) return res.status(400).json({ ok: false, error: 'Could not parse lead_id from To address' });
 
-  // Log email reply activity
-  db.run(
-    'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-    [leadId, 'email_replied', 'Prospect replied via email', replyBody,
-     JSON.stringify({ from, subject: subject || '' })]
-  );
+    const leadId = parseInt(match[1]);
+    const lead = db.get('SELECT * FROM leads WHERE id = ?', [leadId]);
+    if (!lead) return res.status(404).json({ ok: false, error: 'Lead not found' });
 
-  // Auto-pause all active enrollments for this lead
-  db.run(
-    "UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
-    [leadId]
-  );
+    const replyBody = (replyText || '').slice(0, 500);
 
-  db.run(
-    'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
-    [leadId, 'note', 'Sequence auto-paused', 'Lead replied via email (auto-detected) — all active sequences paused']
-  );
+    // Log email reply activity
+    db.run(
+      'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+      [leadId, 'email_replied', 'Prospect replied via email', replyBody,
+       JSON.stringify({ from: fromAddr, subject: subjectLine })]
+    );
 
-  // Advance lead to qualified if still in early stage
-  db.run(
-    "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
-    [leadId]
-  );
+    // Auto-pause all active enrollments for this lead
+    db.run(
+      "UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'",
+      [leadId]
+    );
 
-  applyRules(leadId, 'email_replied');
+    db.run(
+      'INSERT INTO activities (lead_id, type, title, description) VALUES (?, ?, ?, ?)',
+      [leadId, 'note', 'Sequence auto-paused', 'Lead replied via email (auto-detected) — all active sequences paused']
+    );
 
-  res.json({ ok: true, lead_id: leadId });
+    // Advance lead to qualified if still in early stage
+    db.run(
+      "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
+      [leadId]
+    );
+
+    applyRules(leadId, 'email_replied');
+
+    // SMS alert to operator
+    const smsService = require('../services/smsService');
+    const alertPhone = db.get("SELECT value FROM settings WHERE key = 'morning_alert_phone'")?.value;
+    if (alertPhone && smsService.isConfigured()) {
+      smsService.sendSms(alertPhone, `FieldStack: ${lead.business_name || 'A lead'} replied to your email! "${replyBody.slice(0, 80)}"`).catch(() => {});
+    }
+
+    emit({ type: 'email_replied', lead_id: leadId, business: lead.business_name });
+    res.json({ ok: true, lead_id: leadId });
+  } catch (err) {
+    console.error('[email-inbound] Error:', err.message);
+    res.status(500).json({ ok: false, error: 'Internal error' });
+  }
 });
 
 // POST /api/webhooks/vapi — VAPI call event webhooks
@@ -368,6 +466,12 @@ router.post('/vapi', async (req, res) => {
          updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         [followup, callRecord.lead_id]
       );
+      // Auto-enroll in configured callback sequence
+      const cbSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_callback_requested'")?.value;
+      if (cbSeqId) {
+        const { autoEnrollLeads } = require('../services/enrollmentService');
+        autoEnrollLeads([callRecord.lead_id], parseInt(cbSeqId));
+      }
     }
 
     // Post-call email follow-up (auto-send based on outcome)
@@ -446,6 +550,40 @@ router.post('/vapi', async (req, res) => {
         "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
         [callRecord.lead_id]
       );
+    }
+
+    // Auto-enroll voicemail outcome in configured sequence
+    if (outcome === 'voicemail') {
+      const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
+      if (vmSeqId) {
+        const { autoEnrollLeads } = require('../services/enrollmentService');
+        autoEnrollLeads([callRecord.lead_id], parseInt(vmSeqId));
+      }
+    }
+
+    // Gatekeeper: increment count + schedule early morning callback + enroll sequence
+    if (outcome === 'gatekeeper') {
+      db.run('UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [callRecord.lead_id]);
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+      if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+      const followup = d.toISOString().split('T')[0] + ' 07:30:00';
+      db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, callRecord.lead_id]);
+      const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
+      if (gkSeqId) {
+        const { autoEnrollLeads } = require('../services/enrollmentService');
+        autoEnrollLeads([callRecord.lead_id], parseInt(gkSeqId));
+      }
+    }
+
+    // No answer: enroll in configured sequence
+    if (outcome === 'no_answer') {
+      const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
+      if (naSeqId) {
+        const { autoEnrollLeads } = require('../services/enrollmentService');
+        autoEnrollLeads([callRecord.lead_id], parseInt(naSeqId));
+      }
     }
 
     // Auto-DNC after max no-answer attempts

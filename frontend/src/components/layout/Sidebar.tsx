@@ -38,6 +38,7 @@ const navGroups = [
 export function Sidebar() {
   const { data: followups } = useFollowups();
   const callbackCount = (followups?.overdue?.length ?? 0) + (followups?.due_today?.length ?? 0);
+  const overdueCount = followups?.overdue?.length ?? 0;
 
   return (
     <aside className="w-56 flex-shrink-0 bg-zinc-950 border-r border-white/[0.04] flex flex-col h-screen sticky top-0 relative">
@@ -84,6 +85,11 @@ export function Sidebar() {
                       )}
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="font-medium">{label}</span>
+                      {to === '/' && overdueCount > 0 && (
+                        <span className="ml-auto text-[10px] font-semibold bg-red-500/20 text-red-400 rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none">
+                          {overdueCount}
+                        </span>
+                      )}
                       {to === '/callbacks' && callbackCount > 0 && (
                         <span className="ml-auto text-[10px] font-semibold bg-orange-500/20 text-orange-400 rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-none">
                           {callbackCount}

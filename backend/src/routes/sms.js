@@ -254,6 +254,26 @@ router.post('/webhook', express.urlencoded({ extended: false }), async (req, res
             [lead.id, 'sms_sent', 'Sam AI auto-reply', reply.substring(0, 120),
              JSON.stringify({ auto_reply: true, booking_link_sent: booking_intent })]
           );
+          // Hot lead: auto-qualify + alert Hector
+          if (booking_intent) {
+            if (['new', 'contacted'].includes(lead.status)) {
+              db.run(
+                "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [lead.id]
+              );
+              db.run(
+                "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'status_change', 'Auto-qualified by Sam AI', ?)",
+                [lead.id, `Replied via SMS with booking intent: "${Body.substring(0, 80)}"`]
+              );
+            }
+            const alertPhone = db.get("SELECT value FROM settings WHERE key = 'morning_alert_phone'")?.value;
+            if (alertPhone) {
+              const leadName = lead.business_name || lead.owner_name || From;
+              smsService.sendSms(alertPhone,
+                `Sam AI: ${leadName} replied with interest. ${lead.phone}. Check leads now.`
+              ).catch(() => {});
+            }
+          }
         }
       }
     }

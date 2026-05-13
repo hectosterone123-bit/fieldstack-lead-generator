@@ -426,6 +426,7 @@ export interface OutreachQueueItem {
   has_replied: boolean;
   from_email: string | null;
   ai_personalize: boolean;
+  has_ab_test?: boolean;
   last_error?: string | null;
   last_error_at?: string | null;
 }

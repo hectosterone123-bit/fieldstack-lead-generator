@@ -7,6 +7,7 @@ const eventBus = require('../services/eventBus');
 const smsService = require('../services/smsService');
 const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
 const { getTimezone } = require('../services/timezoneService');
+const { validatePhoneForLead, validatePhonesAsync } = require('../services/phoneValidationService');
 const { analyzeGaps } = require('../services/gapService');
 const { generatePitch, generateColdWrite } = require('../services/claudeService');
 
@@ -64,6 +65,18 @@ router.get('/', (req, res, next) => {
     }
     if (req.query.no_website === 'true') {
       conditions.push('(has_website = 0 OR has_website IS NULL)');
+    }
+    if (req.query.phone_valid === 'true') {
+      conditions.push('phone_valid = 1');
+    }
+    if (req.query.mobile_only === 'true') {
+      conditions.push("phone_line_type = 'mobile'");
+    }
+    if (req.query.no_gatekeeper === 'true') {
+      conditions.push('(gatekeeper_count IS NULL OR gatekeeper_count = 0)');
+    }
+    if (req.query.has_direct_phone === 'true') {
+      conditions.push("direct_phone IS NOT NULL AND direct_phone != ''");
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -300,10 +313,10 @@ router.post('/bulk/enrich', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/leads/bulk/send-email — mass email via Resend with template
+// POST /api/leads/bulk/send-email — mass email via Resend with template (optionally AI-personalized)
 router.post('/bulk/send-email', async (req, res, next) => {
   try {
-    const { template_id, lead_ids, status, service_type } = req.body;
+    const { template_id, lead_ids, status, service_type, not_contacted_days, ai_personalize } = req.body;
     if (!template_id) return res.status(400).json({ success: false, error: 'template_id required' });
 
     const template = db.get('SELECT * FROM templates WHERE id = ?', [template_id]);
@@ -321,7 +334,10 @@ router.post('/bulk/send-email', async (req, res, next) => {
       const params = [];
       if (status) { conditions.push('status = ?'); params.push(status); }
       if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
-      leads = db.all(`SELECT * FROM leads WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`, params);
+      if (not_contacted_days && parseInt(not_contacted_days) > 0) {
+        conditions.push(`(last_contacted_at IS NULL OR datetime(last_contacted_at) <= datetime('now', '-${parseInt(not_contacted_days)} days'))`);
+      }
+      leads = db.all(`SELECT * FROM leads WHERE ${conditions.join(' AND ')} ORDER BY heat_score DESC`, params);
     }
 
     const emailService = require('../services/emailService');
@@ -330,19 +346,38 @@ router.post('/bulk/send-email', async (req, res, next) => {
     }
 
     const { renderTemplate } = require('../services/templateService');
-    let sent = 0, failed = 0;
+    const { generatePersonalizedEmail } = require('../services/claudeService');
+    const useAI = ai_personalize && process.env.GEMINI_API_KEY;
+    let sent = 0, failed = 0, ai_personalized = 0;
     const errors = [];
 
     for (const lead of leads) {
       try {
-        const rendered = renderTemplate(template, lead);
-        const result = await emailService.sendEmail(lead.email, rendered.subject || template.subject || 'Follow-up', rendered.body);
+        let subject, body;
+        if (useAI) {
+          try {
+            const p = await generatePersonalizedEmail(lead, template);
+            subject = p.subject;
+            body = p.body;
+            ai_personalized++;
+          } catch {
+            const rendered = renderTemplate(template, lead);
+            subject = rendered.subject || template.subject || 'Follow-up';
+            body = rendered.body;
+          }
+        } else {
+          const rendered = renderTemplate(template, lead);
+          subject = rendered.subject || template.subject || 'Follow-up';
+          body = rendered.body;
+        }
+
+        const result = await emailService.sendEmail(lead.email, subject, body);
         if (result.success) {
           sent++;
           db.run(
             'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
-            [lead.id, 'email_sent', `Email sent: ${template.name}`, template.subject || '',
-             JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'sam_ai_bulk' })]
+            [lead.id, 'email_sent', `Email sent: ${template.name}`, subject,
+             JSON.stringify({ resend_message_id: result.messageId, template_id, via: 'bulk_blast', ai_personalized: !!useAI })]
           );
           db.run(
             'UPDATE leads SET contact_count = contact_count + 1, last_contacted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -361,14 +396,83 @@ router.post('/bulk/send-email', async (req, res, next) => {
       }
     }
 
-    res.json({ success: true, data: { sent, failed, total: leads.length, errors: errors.slice(0, 5) } });
+    res.json({ success: true, data: { sent, failed, ai_personalized, total: leads.length, errors: errors.slice(0, 5) } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/bulk/blast-sms — broadcast a manual SMS to a filtered segment
+router.post('/bulk/blast-sms', async (req, res, next) => {
+  try {
+    const { message, status, service_type, not_contacted_days } = req.body;
+    if (!message || !message.trim()) return res.status(400).json({ success: false, error: 'message required' });
+    if (!smsService.isConfigured()) return res.status(503).json({ success: false, error: 'Twilio not configured' });
+
+    const conditions = [
+      "phone IS NOT NULL AND phone != ''",
+      "dnc_at IS NULL",
+      "status NOT IN ('lost', 'closed_won')"
+    ];
+    const params = [];
+    if (status) { conditions.push('status = ?'); params.push(status); }
+    if (service_type) { conditions.push('service_type = ?'); params.push(service_type); }
+    if (not_contacted_days && parseInt(not_contacted_days) > 0) {
+      conditions.push(`(last_contacted_at IS NULL OR datetime(last_contacted_at) <= datetime('now', '-${parseInt(not_contacted_days)} days'))`);
+    }
+
+    const leads = db.all(
+      `SELECT id, business_name, phone, status FROM leads WHERE ${conditions.join(' AND ')} ORDER BY heat_score DESC`,
+      params
+    );
+
+    let sent = 0, failed = 0, skipped = 0;
+    for (const lead of leads) {
+      const normalized = smsService.normalizePhone(lead.phone);
+      if (!normalized) { skipped++; continue; }
+      const optedOut = db.get('SELECT id FROM sms_opt_outs WHERE phone = ?', [normalized]);
+      if (optedOut) { skipped++; continue; }
+
+      const result = await smsService.sendSms(lead.phone, message);
+      if (!result.success) { failed++; continue; }
+
+      db.run(
+        `INSERT INTO sms_messages (lead_id, direction, from_number, to_number, body, twilio_sid, status)
+         VALUES (?, 'outbound', ?, ?, ?, ?, ?)`,
+        [lead.id, process.env.TWILIO_PHONE_NUMBER, normalized, message, result.sid || null, 'sent']
+      );
+      db.run(
+        'INSERT INTO activities (lead_id, type, title, description, metadata) VALUES (?, ?, ?, ?, ?)',
+        [lead.id, 'sms_sent', 'SMS blast', message.substring(0, 100),
+         JSON.stringify({ twilio_sid: result.sid, bulk: true })]
+      );
+      db.run(
+        `UPDATE leads SET contact_count = contact_count + 1,
+         last_contacted_at = CURRENT_TIMESTAMP,
+         first_contacted_at = CASE WHEN first_contacted_at IS NULL THEN CURRENT_TIMESTAMP ELSE first_contacted_at END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [lead.id]
+      );
+      if (lead.status === 'new') {
+        db.run("UPDATE leads SET status = 'contacted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead.id]);
+      }
+      sent++;
+    }
+
+    res.json({ success: true, data: { sent, failed, skipped, total: leads.length } });
   } catch (err) { next(err); }
 });
 
 // GET /api/leads/daily-queue — top 40 leads to cold call today, ranked by priority
+// Time-of-day strategy: 9 AM–2 PM = non-gatekeeper leads (owners answer direct lines)
+//                       5 PM+      = gatekeeper leads (gatekeepers have left for the day)
+//                       2 PM–5 PM  = mixed
 router.get('/daily-queue', (req, res, next) => {
   try {
     const now = Date.now();
+    // Use Central Time (Austin) — Railway runs UTC, so getHours() would be wrong
+    const ctHour = new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: false, hour: 'numeric' });
+    const hour = parseInt(ctHour, 10);
+    const isMorning = hour >= 9 && hour < 14;
+    const isEvening = hour >= 17;
+
     const leads = db.all(
       `SELECT * FROM leads
        WHERE phone IS NOT NULL AND phone != ''
@@ -378,8 +482,19 @@ router.get('/daily-queue', (req, res, next) => {
        ORDER BY heat_score DESC`
     );
 
-    const scored = leads.map(lead => {
+    // Morning: ONLY direct contractor numbers — skip office lines entirely
+    // Evening: all leads, but gatekeeper leads get score boost
+    const filtered = isMorning
+      ? leads.filter(lead => lead.direct_phone && lead.direct_phone.trim() !== '')
+      : leads;
+
+    const scored = filtered.map(lead => {
       let score = (lead.heat_score || 0) * 0.4;
+      const isGatekeeper = (lead.gatekeeper_count || 0) > 0;
+      const hasDirectPhone = !!lead.direct_phone;
+
+      // Morning: boost leads with direct contractor numbers
+      if (isMorning && hasDirectPhone) score += 25;
 
       // Status weight
       const sw = { new: 20, contacted: 30, qualified: 40, proposal_sent: 35 };
@@ -407,6 +522,11 @@ router.get('/daily-queue', (req, res, next) => {
       // High rating bonus
       if (lead.rating >= 4.5) score += 5;
 
+      // Evening: boost gatekeeper leads to the top (gatekeepers gone home)
+      if (isEvening && isGatekeeper) {
+        score += 40;
+      }
+
       // Build reason label
       let reason = 'Follow up';
       if (ageHrs <= 48 && !lead.last_contacted_at) reason = 'New lead — never contacted';
@@ -419,6 +539,8 @@ router.get('/daily-queue', (req, res, next) => {
       }
       if (lead.status === 'qualified') reason = `Qualified — ${reason}`;
       else if (lead.status === 'proposal_sent') reason = `Proposal sent — ${reason}`;
+      if (isGatekeeper && isEvening) reason = `Gatekeeper bypass — ${reason}`;
+      if (isMorning && hasDirectPhone) reason = `Direct line — ${reason}`;
 
       return { ...lead, _priority: Math.round(score), _reason: reason };
     });
@@ -627,6 +749,326 @@ router.post('/import-csv', (req, res, next) => {
     }
 
     res.json({ success: true, data: { imported, skipped, lead_ids: importedIds, auto_enrolled } });
+
+    // Non-blocking phone validation for newly imported leads
+    if (importedIds.length > 0) {
+      setImmediate(() => validatePhonesAsync(importedIds, db).catch(() => {}));
+    }
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/import-tdlr — import from Texas TDLR contractor license CSV
+const LICENSE_TO_SERVICE = {
+  // HVAC — actual TDLR type names
+  'a/c contractor': 'hvac',
+  'a/c technician': 'hvac',
+  'air conditioning and refrigeration contractor': 'hvac',
+  'air conditioning and refrigeration technician': 'hvac',
+  'hvac': 'hvac',
+  'hvac technician': 'hvac',
+  // Electrical
+  'electrician': 'electrical',
+  'master electrician': 'electrical',
+  'journeyman electrician': 'electrical',
+  'electrical sign': 'electrical',
+  'electrical contractor': 'electrical',
+  'apprentice electrician': 'electrical',
+  // Plumbing
+  'plumber': 'plumbing',
+  'master plumber': 'plumbing',
+  'journeyman plumber': 'plumbing',
+  'plumbing contractor': 'plumbing',
+  // Landscaping / Irrigation
+  'irrigator': 'landscaping',
+  'landscape irrigator': 'landscaping',
+  'lawn irrigator': 'landscaping',
+};
+
+function parseTdlrCityStateZip(raw) {
+  if (!raw) return { city: '', state: 'TX', zip: '' };
+  const m = raw.trim().match(/^(.+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+  if (!m) return { city: raw.trim(), state: 'TX', zip: '' };
+  return { city: m[1].trim(), state: m[2], zip: m[3] };
+}
+
+function normalizeTdlrPhone(raw) {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return null;
+}
+
+function parseTdlrExpiration(raw) {
+  if (!raw || raw.trim().length < 8) return null;
+  const s = raw.trim().replace(/\D/g, '');
+  if (s.length === 8) {
+    const mm = s.slice(0, 2), dd = s.slice(2, 4), yyyy = s.slice(4, 8);
+    return new Date(`${yyyy}-${mm}-${dd}`);
+  }
+  return null;
+}
+
+const PERMIT_TO_SERVICE = {
+  mechanical: 'hvac', 'a/c': 'hvac', hvac: 'hvac', 'air conditioning': 'hvac', heating: 'hvac',
+  electrical: 'electrical', electric: 'electrical',
+  plumbing: 'plumbing', plumb: 'plumbing',
+  roofing: 'roofing', roof: 'roofing',
+};
+
+router.post('/import-permits', (req, res, next) => {
+  try {
+    const { csv, permit_types = [], days_back = 180 } = req.body;
+    if (!csv) return res.status(400).json({ success: false, error: 'csv field required' });
+
+    const lines = csv.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return res.status(400).json({ success: false, error: 'CSV appears empty' });
+
+    const headers = parseCsvLine(lines[0]).map(h => h.trim());
+    const col = (candidates) => {
+      for (const c of candidates) {
+        const idx = headers.findIndex(h => h.toLowerCase().includes(c.toLowerCase()));
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+
+    const iPermitType  = col(['Permit Type Desc', 'Permit Type', 'PermitTypeDesc', 'PermitType', 'Work Type']);
+    const iPermitNum   = col(['Permit Num', 'PermitNum', 'Permit Number', 'PermitNumber']);
+    const iIssueDate   = col(['Issue Date', 'IssueDate', 'Issued Date', 'IssuedDate', 'Calendar Year']);
+    const iContractor  = col(['Contractor Company Name', 'Contractor Name', 'ContractorName', 'Contractor']);
+    const iPhone       = col(['Contractor Phone', 'ContractorPhone', 'Phone']);
+    const iAddress     = col(['Contractor Address', 'ContractorAddress', 'Original Address', 'OriginalAddress']);
+    const iCity        = col(['Contractor City', 'ContractorCity', 'Original City', 'OriginalCity']);
+    const iState       = col(['Contractor State', 'ContractorState', 'Original State', 'OriginalState']);
+    const iZip         = col(['Contractor Zip', 'ContractorZip', 'Original Zip', 'OriginalZip', 'Zip']);
+    const iDescription = col(['Work Description', 'Description', 'Permit Description']);
+
+    if (iContractor === -1) {
+      return res.status(400).json({ success: false, error: 'Not a recognized permit CSV — missing Contractor column' });
+    }
+
+    const cutoff = days_back > 0 ? new Date(Date.now() - days_back * 86400000) : null;
+    const filterTypes = permit_types.map(t => t.toLowerCase());
+    let imported = 0, skipped_dedup = 0, skipped_filter = 0;
+    const importedIds = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCsvLine(lines[i]);
+      if (row.length < 2) continue;
+      const get = (idx) => (idx >= 0 && idx < row.length ? row[idx]?.trim() : '') || '';
+
+      const permitTypeRaw = get(iPermitType).toLowerCase();
+      const permitNum     = get(iPermitNum);
+      const issueDate     = get(iIssueDate);
+      const contractor    = get(iContractor);
+      const phone         = normalizeTdlrPhone(get(iPhone));
+      const address       = get(iAddress);
+      const city          = get(iCity);
+      const state         = get(iState) || 'TX';
+      const zip           = get(iZip);
+      const description   = get(iDescription);
+
+      if (!contractor) continue;
+
+      // Map permit type → service_type
+      let service_type = 'general';
+      for (const [key, val] of Object.entries(PERMIT_TO_SERVICE)) {
+        if (permitTypeRaw.includes(key)) { service_type = val; break; }
+      }
+
+      // Filter by selected permit types
+      if (filterTypes.length > 0 && !filterTypes.includes(service_type)) {
+        skipped_filter++;
+        continue;
+      }
+
+      // Recency filter
+      if (cutoff && issueDate) {
+        const d = new Date(issueDate);
+        if (!isNaN(d.getTime()) && d < cutoff) { skipped_filter++; continue; }
+      }
+
+      // Dedup by phone
+      if (phone) {
+        const dup = db.get('SELECT id FROM leads WHERE phone = ?', [phone]);
+        if (dup) { skipped_dedup++; continue; }
+      }
+      // Dedup by contractor name + city
+      {
+        const dup = db.get(
+          "SELECT id FROM leads WHERE LOWER(business_name) = LOWER(?) AND LOWER(COALESCE(city,'')) = LOWER(COALESCE(?,?))",
+          [contractor, city, '']
+        );
+        if (dup) { skipped_dedup++; continue; }
+      }
+
+      const notesParts = [];
+      if (permitNum) notesParts.push(`Permit #${permitNum}`);
+      if (issueDate) notesParts.push(`issued ${issueDate}`);
+      if (description) notesParts.push(description.substring(0, 100));
+      const notes = notesParts.join(' · ') || null;
+
+      const leadForScore = { phone, website: null, has_website: 0, website_live: 0, email: null, rating: null, review_count: null };
+      const heat_score = Math.min(100, computeInitialHeatScore(leadForScore) + 20);
+
+      const r = db.run(
+        `INSERT INTO leads (business_name, address, city, state, zip, phone, direct_phone,
+           service_type, status, heat_score, notes, source, estimated_value, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 'permits', 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [contractor, address || null, city || null, state, zip || null,
+         phone, phone, service_type, heat_score, notes]
+      );
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'import', 'Imported from permits', ?)",
+        [r.lastInsertRowid, `Source: ${permitTypeRaw || 'permit'}. ${notes || ''}`]
+      );
+      importedIds.push(r.lastInsertRowid);
+      imported++;
+    }
+
+    res.json({ success: true, data: { imported, skipped_dedup, skipped_filter, lead_ids: importedIds } });
+  } catch (err) { next(err); }
+});
+
+const TDLR_METRO_CITIES = {
+  houston: ['houston','katy','sugar land','pearland','pasadena','league city',
+            'friendswood','baytown','cypress','spring','humble','missouri city',
+            'stafford','conroe','the woodlands','rosenberg','richmond'],
+  dallas:  ['dallas','plano','irving','garland','mesquite','frisco','mckinney',
+            'arlington','grand prairie','carrollton','richardson','denton',
+            'lewisville','allen','rowlett','wylie','desoto'],
+  austin:  ['austin','cedar park','round rock','pflugerville','georgetown',
+            'kyle','buda','leander','hutto','manor','bastrop','dripping springs'],
+};
+
+router.post('/import-tdlr', (req, res, next) => {
+  try {
+    const { csv, service_types = [], active_only = true, metro = '' } = req.body;
+    if (!csv) return res.status(400).json({ success: false, error: 'csv field required' });
+
+    const lines = csv.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return res.status(400).json({ success: false, error: 'CSV appears empty' });
+
+    const headers = parseCsvLine(lines[0]).map(h => h.trim().toUpperCase());
+    const col = (name) => headers.indexOf(name.toUpperCase());
+
+    const iLicenseType   = col('LICENSE TYPE');
+    const iLicenseNum    = col('LICENSE NUMBER');
+    const iBusinessName  = col('BUSINESS NAME');
+    const iAddressLine1  = col('BUSINESS ADDRESS-LINE1');
+    const iCityStateZip  = col('BUSINESS CITY, STATE ZIP');
+    const iBusinessPhone = col('BUSINESS TELEPHONE');
+    const iOwnerName     = col('OWNER NAME');
+    const iOwnerPhone    = col('OWNER TELEPHONE');
+    const iExpiration    = col('LICENSE EXPIRATION DATE (MMDDCCYY)');
+
+    if (iBusinessName === -1) {
+      return res.status(400).json({ success: false, error: 'Not a TDLR CSV — missing BUSINESS NAME column' });
+    }
+
+    let imported = 0, skipped_dedup = 0, skipped_filter = 0;
+    const importedIds = [];
+    const today = new Date();
+    const filterTypes = service_types.map(s => s.toLowerCase());
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCsvLine(lines[i]);
+      if (row.length < 3) continue;
+
+      const get = (idx) => (idx >= 0 && idx < row.length ? row[idx]?.trim() : '') || '';
+
+      const licenseType  = get(iLicenseType);
+      const licenseNum   = get(iLicenseNum);
+      const businessName = get(iBusinessName);
+      const addrLine1    = get(iAddressLine1);
+      const cityStateZip = get(iCityStateZip);
+      const bizPhone     = get(iBusinessPhone);
+      const ownerName    = get(iOwnerName);
+      const ownerPhone   = get(iOwnerPhone);
+      const expirationRaw = get(iExpiration);
+
+      if (!businessName) continue;
+
+      // Map license type → service_type
+      const service_type = LICENSE_TO_SERVICE[licenseType.toLowerCase()] || 'general';
+
+      // Filter by selected service types
+      if (filterTypes.length > 0 && !filterTypes.includes(service_type)) {
+        skipped_filter++;
+        continue;
+      }
+
+      // Filter expired licenses
+      if (active_only && expirationRaw) {
+        const expDate = parseTdlrExpiration(expirationRaw);
+        if (expDate && expDate < today) {
+          skipped_filter++;
+          continue;
+        }
+      }
+
+      const { city, state, zip } = parseTdlrCityStateZip(cityStateZip);
+
+      // Metro filter
+      if (metro && TDLR_METRO_CITIES[metro]) {
+        const cityLower = (city || '').toLowerCase();
+        if (!TDLR_METRO_CITIES[metro].some(c => cityLower.includes(c))) {
+          skipped_filter++;
+          continue;
+        }
+      }
+
+      const phone       = normalizeTdlrPhone(bizPhone);
+      const direct_phone = normalizeTdlrPhone(ownerPhone);
+
+      // Build notes
+      const notesParts = [];
+      if (licenseNum)   notesParts.push(`License #${licenseNum}`);
+      if (expirationRaw) {
+        const exp = parseTdlrExpiration(expirationRaw);
+        if (exp) notesParts.push(`expires ${(exp.getMonth()+1).toString().padStart(2,'0')}/${exp.getDate().toString().padStart(2,'0')}/${exp.getFullYear()}`);
+      }
+      if (licenseType)  notesParts.push(licenseType);
+      const notes = notesParts.join(', ') || null;
+
+      // Dedup: phone
+      if (phone) {
+        const dup = db.get('SELECT id FROM leads WHERE phone = ?', [phone]);
+        if (dup) { skipped_dedup++; continue; }
+      }
+      // Dedup: business_name + city
+      {
+        const dup = db.get(
+          "SELECT id FROM leads WHERE LOWER(business_name) = LOWER(?) AND LOWER(COALESCE(city,'')) = LOWER(COALESCE(?,?))",
+          [businessName, city, '']
+        );
+        if (dup) { skipped_dedup++; continue; }
+      }
+
+      const leadForScore = { phone, website: null, has_website: 0, website_live: 0, email: null, rating: null, review_count: null };
+      const heat_score = computeInitialHeatScore(leadForScore);
+
+      const result2 = db.run(
+        `INSERT INTO leads (business_name, address, city, state, zip, phone, direct_phone, owner_name,
+           service_type, status, heat_score, notes, source, estimated_value, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, 'tdlr', 2000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [businessName, addrLine1 || null, city || null, state || 'TX', zip || null,
+         phone, direct_phone, ownerName || null,
+         service_type, heat_score, notes]
+      );
+
+      const newId = result2.lastInsertRowid;
+      db.run(
+        `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'import', 'Imported from TDLR', ?)`,
+        [newId, `Source: Texas TDLR license database. ${notes || ''}`]
+      );
+
+      importedIds.push(newId);
+      imported++;
+    }
+
+    res.json({ success: true, data: { imported, skipped_dedup, skipped_filter, lead_ids: importedIds } });
   } catch (err) { next(err); }
 });
 
@@ -700,6 +1142,9 @@ router.post('/', (req, res, next) => {
     }
 
     eventBus.emit({ type: 'new_lead', id: lead.id, name: lead.business_name });
+
+    // Non-blocking phone validation
+    if (lead.phone) setImmediate(() => validatePhoneForLead(lead.id, db).catch(() => {}));
 
     res.status(201).json({ success: true, data: lead });
   } catch (err) { next(err); }
@@ -807,6 +1252,217 @@ router.patch('/:id/heat-score', (req, res, next) => {
 
     const updated = db.get('SELECT * FROM leads WHERE id = ?', [req.params.id]);
     res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/autopilot/run — manually trigger weekly autopilot import
+router.post('/autopilot/run', async (req, res, next) => {
+  try {
+    const { runAutopilotImport } = require('../services/campaignScheduler');
+    await runAutopilotImport();
+    res.json({ success: true, data: { triggered: true } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/batch-validate-phones — Twilio Lookup v2 on all leads with phone_valid IS NULL
+router.post('/batch-validate-phones', async (req, res, next) => {
+  try {
+    const { service_type, source, limit = 100 } = req.body;
+    const { isConfigured, getClient } = require('../services/smsService');
+    if (!isConfigured()) return res.status(503).json({ success: false, error: 'Twilio not configured' });
+    const client = getClient();
+
+    let query = `SELECT * FROM leads WHERE phone IS NOT NULL AND phone != '' AND phone_valid IS NULL AND dnc_at IS NULL`;
+    const params = [];
+    if (service_type) { query += ` AND service_type = ?`; params.push(service_type); }
+    if (source) { query += ` AND source = ?`; params.push(source); }
+    query += ` LIMIT ?`;
+    params.push(parseInt(limit, 10));
+
+    const leads = db.all(query, params);
+    let checked = 0, valid = 0, invalid = 0;
+
+    for (const lead of leads) {
+      checked++;
+      try {
+        const digits = lead.phone.replace(/\D/g, '');
+        const e164 = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+        const lookup = await client.lookups.v2.phoneNumbers(e164).fetch({ fields: 'line_type_intelligence' });
+        const lineType = lookup.lineTypeIntelligence?.type || null;
+        const isValid = lookup.valid !== false && !['voip', 'nonFixedVoip'].includes(lineType);
+        db.run('UPDATE leads SET phone_valid = ?, phone_line_type = ? WHERE id = ?', [isValid ? 1 : 0, lineType, lead.id]);
+        if (isValid) valid++; else invalid++;
+      } catch (e) {
+        console.warn(`[BatchValidate] Lead ${lead.id} failed:`, e.message);
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    res.json({ success: true, data: { checked, valid, invalid } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/import-tsbpe — import Texas plumber licenses from TSBPE bulk CSV
+router.post('/import-tsbpe', (req, res, next) => {
+  try {
+    const { csv, active_only = true } = req.body;
+    if (!csv) return res.status(400).json({ success: false, error: 'csv field required' });
+
+    const lines = csv.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) return res.status(400).json({ success: false, error: 'CSV appears empty' });
+
+    const headers = parseCsvLine(lines[0]).map(h => h.trim().toUpperCase());
+    const col = (name) => headers.indexOf(name.toUpperCase());
+
+    const iCompany    = col('PLUMB_COMPANY');
+    const iLicNum     = col('LICENSE_NBR');
+    const iStatus     = col('LIC_STATUS');
+    const iExpDate    = col('EXPIRATION_DTE');
+    const iFirstName  = col('FIRST_NAME');
+    const iMiddleName = col('MIDDLE_NAME');
+    const iLastName   = col('LAST_NAME');
+    const iAddr1      = col('ADDR1');
+    const iCity       = col('CITY');
+    const iState      = col('STATE');
+    const iZip        = col('ZIP');
+    const iPhone      = col('PHONE');
+    const iCounty     = col('COUNTY');
+
+    if (iCompany === -1) {
+      return res.status(400).json({ success: false, error: 'Not a TSBPE CSV — missing PLUMB_COMPANY column' });
+    }
+
+    function normalizeTsbpePhone(raw) {
+      if (!raw) return null;
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 11 && digits[0] === '1') return digits.slice(1);
+      if (digits.length === 10) return digits;
+      return null;
+    }
+
+    let imported = 0, skipped_dedup = 0, skipped_filter = 0;
+    const importedIds = [];
+    const today = new Date();
+
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseCsvLine(lines[i]);
+      if (row.length < 3) continue;
+
+      const get = (idx) => (idx >= 0 && idx < row.length ? row[idx]?.trim() : '') || '';
+
+      const businessName = get(iCompany);
+      if (!businessName) continue;
+
+      const licStatus   = get(iStatus);
+      const expirationRaw = get(iExpDate);
+
+      // Filter inactive licenses
+      if (active_only) {
+        if (licStatus && licStatus !== 'Current') { skipped_filter++; continue; }
+        if (expirationRaw) {
+          const expDate = new Date(expirationRaw);
+          if (!isNaN(expDate.getTime()) && expDate < today) { skipped_filter++; continue; }
+        }
+      }
+
+      const firstName  = get(iFirstName);
+      const middleName = get(iMiddleName);
+      const lastName   = get(iLastName);
+      const ownerName  = [firstName, middleName, lastName].filter(Boolean).join(' ') || null;
+
+      const address = get(iAddr1) || null;
+      const city    = get(iCity) || null;
+      const state   = get(iState) || 'TX';
+      const zip     = get(iZip) || null;
+      const phone   = normalizeTsbpePhone(get(iPhone));
+      const county  = get(iCounty);
+      const licNum  = get(iLicNum);
+
+      const notesParts = [];
+      if (licNum) notesParts.push(`License #${licNum}`);
+      if (expirationRaw) notesParts.push(`expires ${expirationRaw}`);
+      if (county) notesParts.push(`${county} County`);
+      const notes = notesParts.join(', ') || null;
+
+      // Dedup by phone
+      if (phone) {
+        const dup = db.get('SELECT id FROM leads WHERE phone = ?', [phone]);
+        if (dup) { skipped_dedup++; continue; }
+      }
+      // Dedup by business_name + city
+      {
+        const dup = db.get(
+          "SELECT id FROM leads WHERE LOWER(business_name) = LOWER(?) AND LOWER(COALESCE(city,'')) = LOWER(COALESCE(?,?))",
+          [businessName, city, '']
+        );
+        if (dup) { skipped_dedup++; continue; }
+      }
+
+      const leadForScore = { phone, website: null, has_website: 0, website_live: 0, email: null, rating: null, review_count: null };
+      const heat_score = computeInitialHeatScore(leadForScore);
+
+      const result2 = db.run(
+        `INSERT INTO leads (business_name, address, city, state, zip, phone, direct_phone, owner_name,
+           service_type, status, heat_score, notes, source, estimated_value, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'plumbing', 'new', ?, ?, 'tsbpe', 3000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [businessName, address, city, state, zip, phone, phone, ownerName, heat_score, notes]
+      );
+
+      const newId = result2.lastInsertRowid;
+      db.run(
+        `INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'import', 'Imported from TSBPE', ?)`,
+        [newId, `Source: Texas TSBPE plumber license database. ${notes || ''}`]
+      );
+
+      importedIds.push(newId);
+      imported++;
+    }
+
+    res.json({ success: true, data: { imported, skipped_dedup, skipped_filter, lead_ids: importedIds } });
+  } catch (err) { next(err); }
+});
+
+// POST /api/leads/batch-find-phones — AI lookup for owner phones on multiple leads
+router.post('/batch-find-phones', async (req, res, next) => {
+  try {
+    const { service_type, limit = 20 } = req.body;
+    const { findOwnerPhone } = require('../services/claudeService');
+
+    let query = `SELECT * FROM leads WHERE (direct_phone IS NULL OR direct_phone = '') AND dnc_at IS NULL AND status NOT IN ('booked','lost','closed_won')`;
+    const params = [];
+    if (service_type) {
+      query += ` AND service_type = ?`;
+      params.push(service_type);
+    }
+    query += ` ORDER BY heat_score DESC LIMIT ?`;
+    params.push(parseInt(limit, 10));
+
+    const leads = db.all(query, params);
+    let checked = 0;
+    let found = 0;
+    const foundIds = [];
+
+    for (const lead of leads) {
+      checked++;
+      try {
+        const phone = await findOwnerPhone(lead);
+        if (phone) {
+          db.run('UPDATE leads SET direct_phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [phone, lead.id]);
+          db.run(
+            "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Direct phone found via AI', ?)",
+            [lead.id, `Batch AI lookup returned: ${phone}`]
+          );
+          found++;
+          foundIds.push(lead.id);
+        }
+      } catch (e) {
+        console.warn(`[BatchFindPhones] Lead ${lead.id} failed:`, e.message);
+      }
+      // Rate limit: 500ms between calls
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    res.json({ success: true, data: { checked, found, lead_ids: foundIds } });
   } catch (err) { next(err); }
 });
 

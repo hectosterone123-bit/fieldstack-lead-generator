@@ -5,6 +5,7 @@ import {
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
   Bot, Zap, X, Square, Brain, Search, Shield, Mail,
+  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -15,8 +16,10 @@ import {
 import { useSequences, useEnrollLeads } from '../hooks/useSequences';
 import { useUpdateLead } from '../hooks/useLeads';
 import { useSendSms } from '../hooks/useSms';
-import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads } from '../lib/api';
-import { useQueryClient } from '@tanstack/react-query';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep } from '../lib/api';
+import type { CallPrep } from '../lib/api';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { getMorningStatus } from '../lib/api';
 import type { Template, Lead, Call } from '../types';
 import { cn, formatRelativeTime, getCallWindow } from '../lib/utils';
 import { useToast } from '../lib/toast';
@@ -40,6 +43,7 @@ const OUTCOME_LABELS: Record<string, { label: string; color: string; bg: string 
   wrong_number: { label: 'Wrong Number', color: 'text-red-400', bg: 'bg-red-500/[0.04]' },
   transferred: { label: 'Transferred', color: 'text-blue-400', bg: 'bg-blue-500/[0.06]' },
   gatekeeper: { label: 'Gatekeeper', color: 'text-violet-400', bg: 'bg-violet-500/[0.06]' },
+  not_a_fit: { label: 'Not a Fit', color: 'text-zinc-400', bg: 'bg-zinc-800/60' },
 };
 
 function CallDot({ state }: { state?: string | null }) {
@@ -129,6 +133,9 @@ export function Caller() {
   // Manual caller mode
   const [callerMode, setCallerMode] = useState<'ai' | 'manual'>('ai');
   const [manualLead, setManualLead] = useState<Lead | null>(null);
+  const [callPrep, setCallPrep] = useState<CallPrep | null>(null);
+  const [callPrepLoading, setCallPrepLoading] = useState(false);
+  const [callPrepFailed, setCallPrepFailed] = useState(false);
   const [manualLeadSearch, setManualLeadSearch] = useState('');
   const [manualLeads, setManualLeads] = useState<Lead[]>([]);
   const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
@@ -149,6 +156,7 @@ export function Caller() {
   const [selectedQueueIndex, setSelectedQueueIndex] = useState<number>(0);
   const [manualCountdown, setManualCountdown] = useState<number | null>(null);
   const [autoAdvanceManual, setAutoAdvanceManual] = useState(true);
+  const [queueCallView, setQueueCallView] = useState(true);
 
   // Owner name lookup
   const [lookingUpOwner, setLookingUpOwner] = useState(false);
@@ -181,6 +189,13 @@ export function Caller() {
   const [batchTarget, setBatchTarget] = useState<number | null>(null);
   const [batchTargetInput, setBatchTargetInput] = useState('40');
   const [batchServiceFilter, setBatchServiceFilter] = useState('');
+  const [morningBannerDismissed, setMorningBannerDismissed] = useState(false);
+  const { data: morningStatus } = useQuery({
+    queryKey: ['morning-status'],
+    queryFn: getMorningStatus,
+    refetchInterval: 60000,
+    staleTime: 30000,
+  });
 
   // Phase 4: Auto-SMS toggle + Phase 9: Callback scheduling
   const [autoSmsEnabled, setAutoSmsEnabled] = useState(false);
@@ -265,6 +280,18 @@ export function Caller() {
     src.start(nextPlayTimeRef.current);
     nextPlayTimeRef.current += buf.duration;
   }
+
+  // Fetch AI call prep brief when a lead is selected
+  useEffect(() => {
+    if (!manualLead) { setCallPrep(null); setCallPrepFailed(false); return; }
+    setCallPrepLoading(true);
+    setCallPrep(null);
+    setCallPrepFailed(false);
+    fetchCallPrep(manualLead.id)
+      .then(setCallPrep)
+      .catch(() => setCallPrepFailed(true))
+      .finally(() => setCallPrepLoading(false));
+  }, [manualLead?.id]);
 
   // Initialize Vapi SDK + load settings
   useEffect(() => {
@@ -618,6 +645,7 @@ export function Caller() {
   const selectQueueLead = async (queueItem: any, index: number) => {
     setSelectedQueueIndex(index);
     setManualCountdown(null); // Cancel any pending countdown
+    setQueueCallView(true); // always show phone card when navigating queue
     try {
       const fullLead = await fetchLead(queueItem.lead_id);
       if (fullLead) {
@@ -642,8 +670,13 @@ export function Caller() {
     const loggedLeadServiceType = (manualLead as any).service_type as string | undefined;
     setLoggingCall(true);
     try {
-      // Log to calls table (for cockpit stats + history) — fire and forget
-      logManualCall(loggedLeadId, outcome || undefined, manualElapsed > 0 ? manualElapsed : undefined, selectedScript || undefined).catch(() => {});
+      // Log to calls table (for cockpit stats + history) — fire and forget, but invalidate cache on success
+      logManualCall(loggedLeadId, outcome || undefined, manualElapsed > 0 ? manualElapsed : undefined, selectedScript || undefined)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['call-history'] });
+          queryClient.invalidateQueries({ queryKey: ['cockpit'] });
+        })
+        .catch(() => {});
 
       const desc = [
         outcome && `Outcome: ${OUTCOME_LABELS[outcome]?.label || outcome}`,
@@ -654,6 +687,18 @@ export function Caller() {
         title: `Manual call${outcome ? ` — ${OUTCOME_LABELS[outcome]?.label || outcome}` : ''}`,
         description: desc || undefined,
       } as any);
+      if (outcome === 'not_a_fit') {
+        await patchLeadStatus(loggedLeadId, 'lost');
+        await new Promise<void>((resolve) => updateLead.mutate({ id: loggedLeadId, data: { dnc_at: new Date().toISOString() } }, { onSuccess: () => resolve(), onError: () => resolve() }));
+        toast('Lead removed from pipeline');
+        setManualOutcome('');
+        setManualNote('');
+        setCoaching('');
+        setManualLead(null);
+        setManualCallStartTime(null);
+        setLoggingCall(false);
+        return;
+      }
       if (outcome === 'interested') {
         await patchLeadStatus(loggedLeadId, 'qualified');
       } else if (outcome && !['no_answer', 'voicemail'].includes(outcome)) {
@@ -699,7 +744,7 @@ export function Caller() {
       if (!queueView[selectedQueueIndex + 1]) setSessionDone(true);
 
       // Phase 4: Auto-SMS on outcome
-      if (autoSmsEnabled && outcome && ['interested', 'callback_requested', 'voicemail', 'not_interested'].includes(outcome)) {
+      if (autoSmsEnabled && outcome && ['interested', 'callback_requested', 'voicemail', 'no_answer', 'not_interested'].includes(outcome)) {
         sendOutcomeSms(loggedLeadId, outcome).catch(() => {});
       }
 
@@ -781,6 +826,7 @@ export function Caller() {
       '4': 'voicemail',
       '5': 'gatekeeper',
       '6': 'not_interested',
+      '7': 'not_a_fit',
     };
     const handler = (e: KeyboardEvent) => {
       // Don't fire if user is typing in an input/textarea
@@ -796,7 +842,10 @@ export function Caller() {
   // Sync queue data from call-queue query — always, regardless of mode, so queue persists across navigation
   useEffect(() => {
     if (queue.length > 0) {
-      if (prevQueueLenRef.current === 0) setSelectedQueueIndex(0); // only reset index on initial load
+      if (prevQueueLenRef.current === 0) {
+        setSelectedQueueIndex(0); // only reset index on initial load
+        setSessionDone(false);    // fresh batch arrived — dismiss session complete card
+      }
       prevQueueLenRef.current = queue.length;
       setQueueView(queue.slice(0, 10));
       // NOTE: do NOT clear manualLead here — queue refetches every 3s and would wipe the selection
@@ -806,13 +855,10 @@ export function Caller() {
   // Auto-load queue when entering manual mode — only if queue is genuinely empty (not mid-fetch)
   useEffect(() => {
     if (callerMode === 'manual' && selectedScript && !queueLoading && queue.length === 0 && queueView.length === 0) {
-      try {
-        autoLoadQueue.mutate({
-          serviceType: undefined,
-          count: 10,
-          templateId: selectedScript,
-        });
-      } catch { /* ignore */ }
+      autoLoadQueue.mutate(
+        { serviceType: undefined, count: 10, templateId: selectedScript },
+        { onError: () => toast('Could not load queue — check settings', 'error') }
+      );
     }
   }, [callerMode, selectedScript, queue, queueLoading]);
 
@@ -1099,6 +1145,7 @@ export function Caller() {
                 { outcome: 'voicemail', label: 'Voicemail', key: '4', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
                 { outcome: 'gatekeeper', label: 'Gatekeeper', key: '5', cls: 'bg-violet-500/20 border-violet-500/40 text-violet-300 hover:bg-violet-500/30' },
                 { outcome: 'not_interested', label: 'Not Interested', key: '6', cls: 'bg-red-600/20 border-red-500/40 text-red-400 hover:bg-red-600/30' },
+                { outcome: 'not_a_fit', label: 'Not a Fit', key: '7', cls: 'bg-zinc-800/80 border-white/[0.06] text-zinc-500 hover:bg-zinc-700 col-span-2' },
               ] as const).map(({ outcome, label, key, cls }) => (
                 <button
                   key={outcome}
@@ -1305,6 +1352,21 @@ export function Caller() {
         </div>
       )}
 
+      {/* Morning queue ready banner */}
+      {morningStatus?.loaded_today && !morningBannerDismissed && (morningStatus?.queue_count ?? 0) > 0 && (
+        <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+            <span className="text-sm text-orange-300">
+              Morning queue ready — <span className="font-semibold">{morningStatus.queue_count} leads</span> loaded by priority. Start calling now.
+            </span>
+          </div>
+          <button onClick={() => setMorningBannerDismissed(true)} className="text-zinc-500 hover:text-zinc-300 transition-colors ml-4">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Session stats bar + batch progress (always visible in manual mode) */}
       {callerMode === 'manual' && (
         <div className="rounded-xl bg-zinc-900 border border-white/[0.06] px-4 py-3 space-y-2">
@@ -1502,9 +1564,11 @@ export function Caller() {
                         <div className="flex gap-1.5">
                           <button
                             onClick={async () => {
-                              await sendSmsMutation.mutateAsync({ lead_id: queueView[selectedQueueIndex].id, body: textInsteadBody });
-                              setTextInsteadLeadId(null);
-                              toast('SMS sent');
+                              try {
+                                await sendSmsMutation.mutateAsync({ lead_id: queueView[selectedQueueIndex].id, body: textInsteadBody });
+                                setTextInsteadLeadId(null);
+                                toast('SMS sent');
+                              } catch { toast('Failed to send SMS', 'error'); }
                             }}
                             disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
                             className="flex-1 text-[10px] py-1.5 rounded bg-blue-600/20 border border-blue-500/30 text-blue-300 hover:bg-blue-600/30 disabled:opacity-40 transition-colors"
@@ -1566,6 +1630,243 @@ export function Caller() {
 
           {/* Main: Lead selector + Script + Log */}
           <div className="lg:col-span-2 space-y-4">
+
+            {/* ── Queue Phone Card ── */}
+            {queueCallView && queueView.length > 0 && manualLead && queueView[selectedQueueIndex]?.lead_id === manualLead.id ? (
+              <div className="space-y-4">
+                <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-6">
+                  {/* Header row */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] text-zinc-600 uppercase tracking-wide mb-1">
+                        Lead {selectedQueueIndex + 1} of {queueView.length}
+                      </p>
+                      <h2 className="text-2xl font-semibold text-zinc-100 leading-tight truncate">{manualLead.business_name}</h2>
+                      {(manualLead as any).owner_name && (
+                        <p className="text-base text-orange-400 mt-0.5">
+                          Ask for: <span className="font-semibold">{(manualLead as any).owner_name.split(' ')[0]}</span>
+                        </p>
+                      )}
+                      {manualLead.city && (
+                        <p className="text-sm text-zinc-500 mt-0.5 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 shrink-0" />
+                          {manualLead.city}{manualLead.state ? `, ${manualLead.state}` : ''}
+                          {manualLead.service_type ? ` · ${manualLead.service_type}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-4">
+                      <button
+                        onClick={() => setQueueCallView(false)}
+                        className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                      >
+                        Detail
+                      </button>
+                      <button
+                        onClick={skipQueueLead}
+                        disabled={queueView.length <= selectedQueueIndex + 1}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 bg-zinc-800 border border-white/[0.06] transition-colors disabled:opacity-30"
+                      >
+                        <SkipForward className="w-3 h-3" />
+                        Skip
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* AI Call Prep Brief */}
+                  {(callPrepLoading || callPrep || callPrepFailed) && (
+                    <div className="mb-5 rounded-xl bg-zinc-800/60 border border-white/[0.05] p-4">
+                      <div className="flex items-center gap-1.5 mb-3">
+                        <Zap className="w-3.5 h-3.5 text-orange-400" />
+                        <span className="text-[10px] text-orange-400 uppercase tracking-wider font-semibold">AI Brief</span>
+                      </div>
+                      {callPrepLoading ? (
+                        <div className="space-y-2">
+                          {[78, 86, 62].map((w, n) => (
+                            <div key={n} className="h-3 rounded bg-zinc-700 animate-pulse" style={{ width: `${w}%` }} />
+                          ))}
+                        </div>
+                      ) : callPrep ? (
+                        <div className="space-y-2.5 text-xs">
+                          <p className="text-zinc-200 font-medium leading-relaxed">"{callPrep.opener}"</p>
+                          {callPrep.context && <p className="text-zinc-400 leading-relaxed">{callPrep.context}</p>}
+                          {callPrep.goal && <p className="text-emerald-400">Goal: {callPrep.goal}</p>}
+                          {callPrep.objections?.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                              {callPrep.objections.slice(0, 2).map((obj, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded-md bg-zinc-700 text-zinc-400 text-[10px]">{obj}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : callPrepFailed ? (
+                        <p className="text-xs text-zinc-600 italic">Brief unavailable — check AI settings</p>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Big dial button */}
+                  <a
+                    href={`tel:${(manualLead as any).direct_phone || manualLead.phone}`}
+                    className="flex items-center justify-center gap-4 w-full py-7 rounded-2xl bg-emerald-500/10 border-2 border-emerald-500/30 hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors mb-5 group"
+                  >
+                    <Phone className="w-8 h-8 text-emerald-400" />
+                    <div className="text-center">
+                      {(manualLead as any).direct_phone && (
+                        <p className="text-[10px] text-emerald-600 uppercase tracking-widest mb-0.5">Direct Line</p>
+                      )}
+                      <span className="text-3xl font-data font-bold text-emerald-200 tracking-wider">
+                        {(manualLead as any).direct_phone || manualLead.phone}
+                      </span>
+                    </div>
+                  </a>
+
+                  {/* Auto-advance countdown */}
+                  {manualCountdown !== null && (
+                    <div className="flex items-center justify-between px-3 py-2 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <span className="text-xs text-amber-300">Next lead in <span className="font-data font-semibold">{manualCountdown}s</span>…</span>
+                      <button onClick={() => setManualCountdown(null)} className="text-xs text-amber-400 hover:text-amber-200 px-1 rounded">Cancel [Esc]</button>
+                    </div>
+                  )}
+
+                  {/* Outcome buttons */}
+                  {enrollModal ? (
+                    <div className="p-4 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20">
+                      <p className="text-sm font-medium text-emerald-400 mb-3">
+                        Enroll <span className="text-emerald-300">{enrollModal.leadName}</span> in a sequence?
+                      </p>
+                      <select
+                        value={enrollSeqId}
+                        onChange={e => setEnrollSeqId(e.target.value ? Number(e.target.value) : '')}
+                        className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-300 [color-scheme:dark] mb-3"
+                      >
+                        <option value="">Pick a sequence...</option>
+                        {sequences.filter(s => !!s.is_active).map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEnrollAndContinue(false)}
+                          disabled={enrollSeqId === '' || enrollMutation.isPending}
+                          className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 transition-colors"
+                        >
+                          {enrollMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Enroll & Continue'}
+                        </button>
+                        <button
+                          onClick={() => handleEnrollAndContinue(true)}
+                          className="px-5 py-2.5 rounded-xl text-sm text-zinc-400 hover:text-zinc-200 bg-zinc-800 border border-white/[0.06] transition-colors"
+                        >
+                          Skip
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {([
+                        { outcome: 'interested', label: 'Interested', cls: 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/30' },
+                        { outcome: 'callback_requested', label: 'Callback', cls: 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/30' },
+                        { outcome: 'no_answer', label: 'No Answer', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
+                        { outcome: 'voicemail', label: 'Voicemail', cls: 'bg-zinc-800/80 border-white/[0.08] text-zinc-400 hover:bg-zinc-700' },
+                        { outcome: 'gatekeeper', label: 'Gatekeeper', cls: 'bg-violet-500/20 border-violet-500/40 text-violet-300 hover:bg-violet-500/30' },
+                        { outcome: 'not_interested', label: 'Not Interested', cls: 'bg-red-600/20 border-red-500/40 text-red-400 hover:bg-red-600/30' },
+                        { outcome: 'not_a_fit', label: 'Not a Fit — Remove', cls: 'bg-zinc-800/60 border-white/[0.06] text-zinc-500 hover:bg-zinc-700 col-span-2' },
+                      ] as const).map(({ outcome, label, cls }) => (
+                        <button
+                          key={outcome}
+                          onClick={() => handleLogManualCall(outcome)}
+                          disabled={loggingCall}
+                          className={cn('py-4 rounded-xl text-sm font-semibold border-2 transition-colors disabled:opacity-40', cls)}
+                        >
+                          {loggingCall ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Quick note */}
+                  <div className="mt-4 pt-4 border-t border-white/[0.04]">
+                    <textarea
+                      value={manualNote}
+                      onChange={e => setManualNote(e.target.value)}
+                      placeholder="Quick note… (optional)"
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 placeholder:text-zinc-600 resize-none outline-none focus:border-orange-500/50 [color-scheme:dark]"
+                    />
+                  </div>
+                </div>
+
+                {/* Post-call email (queue call view) */}
+                {postCallEmail && (
+                  <div className={cn(
+                    'bg-zinc-900 rounded-xl border p-5',
+                    postCallEmail.type === 'demo' ? 'border-emerald-500/20' : 'border-amber-500/20'
+                  )}>
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                        {postCallEmail.type === 'voicemail' ? 'Follow-up Email' : 'Demo Booking Email'}
+                      </p>
+                      <button onClick={() => setPostCallEmail(null)} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">Skip</button>
+                    </div>
+                    {!postCallEmail.leadEmail && (
+                      <p className="text-xs text-amber-400 mb-3">No email on file — add one in Lead Details to send.</p>
+                    )}
+                    <input
+                      type="text"
+                      value={postCallEmail.subject}
+                      onChange={e => setPostCallEmail(p => p ? { ...p, subject: e.target.value } : p)}
+                      className="w-full px-3 py-2 mb-2 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                      placeholder="Subject"
+                    />
+                    <textarea
+                      rows={7}
+                      value={postCallEmail.body}
+                      onChange={e => setPostCallEmail(p => p ? { ...p, body: e.target.value } : p)}
+                      className="w-full px-3 py-2 mb-3 rounded-lg text-sm bg-zinc-800 border border-white/[0.06] text-zinc-200 outline-none focus:border-orange-500/40 resize-none [color-scheme:dark]"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        disabled={!postCallEmail.leadEmail || sendingEmail}
+                        onClick={async () => {
+                          if (!postCallEmail.leadEmail) return;
+                          setSendingEmail(true);
+                          try {
+                            await quickEmail(postCallEmail.leadId, postCallEmail.subject, postCallEmail.body);
+                            toast('Email sent');
+                            setPostCallEmail(null);
+                          } catch { toast('Failed to send email', 'error'); }
+                          finally { setSendingEmail(false); }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors disabled:opacity-40"
+                      >
+                        {sendingEmail ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                        Send Email
+                      </button>
+                      <button
+                        disabled
+                        title="SMS coming soon — configure Twilio in Settings"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-zinc-800 border border-white/[0.06] text-zinc-600 cursor-not-allowed"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        Text (coming soon)
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Back to Queue View button */}
+                {queueView.length > 0 && manualLead && queueView[selectedQueueIndex]?.lead_id === manualLead.id && (
+                  <button
+                    onClick={() => setQueueCallView(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs text-emerald-400 bg-emerald-500/[0.06] border border-emerald-500/20 hover:bg-emerald-500/10 transition-colors"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    Back to Queue View
+                  </button>
+                )}
+
             {/* Lead selector */}
             <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
               <div className="flex items-center justify-between mb-3">
@@ -1827,6 +2128,8 @@ export function Caller() {
                 </div>
               </div>
             )}
+              </div>
+            )}
           </div>
 
           {/* Right: AI Coach */}
@@ -1871,9 +2174,11 @@ export function Caller() {
                           <div className="flex gap-1.5">
                             <button
                               onClick={async () => {
-                                await sendSmsMutation.mutateAsync({ lead_id: manualLead.id, body: textInsteadBody });
-                                setTextInsteadLeadId(null);
-                                toast('SMS sent');
+                                try {
+                                  await sendSmsMutation.mutateAsync({ lead_id: manualLead.id, body: textInsteadBody });
+                                  setTextInsteadLeadId(null);
+                                  toast('SMS sent');
+                                } catch { toast('Failed to send SMS', 'error'); }
                               }}
                               disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
                               className="flex-1 text-[10px] py-1.5 rounded bg-blue-600/20 border border-blue-500/30 text-blue-300 hover:bg-blue-600/30 disabled:opacity-40 transition-colors"
@@ -2506,30 +2811,37 @@ export function Caller() {
               <h3 className="text-sm font-medium text-zinc-200">Add Leads to Queue</h3>
               <span className="text-xs text-zinc-500">{selectedLeadIds.size} selected</span>
             </div>
-            {/* Quick presets */}
-            <div className="px-4 py-2.5 border-b border-white/[0.04] flex flex-wrap gap-2 items-center">
-              <span className="text-[10px] text-zinc-600 mr-1">Quick load:</span>
-              {[
-                { label: 'All New', serviceType: undefined as string | undefined, filter: undefined as string | undefined },
-                { label: 'HVAC Hot', serviceType: 'hvac', filter: undefined as string | undefined },
-                { label: 'Callbacks Due', serviceType: undefined as string | undefined, filter: 'callbacks_due' },
-                { label: 'This Week', serviceType: undefined as string | undefined, filter: 'this_week' },
-              ].map(p => (
+            {/* Outreach Modes */}
+            <div className="px-4 py-2.5 border-b border-white/[0.04]">
+              <span className="text-[10px] text-zinc-600 mb-2 block">Outreach Modes</span>
+              <div className="grid grid-cols-4 gap-1.5">
+              {([
+                { label: 'Direct Lines', filter: 'direct_phone', icon: Phone },
+                { label: 'Gatekeepers', filter: 'gatekeeper', icon: ShieldAlert },
+                { label: 'Hot Leads', filter: 'hot', icon: Flame },
+                { label: 'Callbacks', filter: 'callbacks_due', icon: PhoneIncoming },
+                { label: 'New This Week', filter: 'this_week', icon: Sparkles },
+                { label: 'Never Called', filter: 'never_contacted', icon: UserPlus },
+                { label: 'Re-engage', filter: 'stale', icon: RefreshCw },
+                { label: 'Mobile Only', filter: 'mobile', icon: Smartphone },
+              ] as const).map(p => (
                 <button
                   key={p.label}
                   disabled={!selectedScript}
                   onClick={() => {
                     if (!selectedScript) return;
                     autoLoadQueue.mutate(
-                      { serviceType: p.serviceType, count: 10, templateId: selectedScript, filter: p.filter },
+                      { count: 10, templateId: selectedScript, filter: p.filter },
                       { onSuccess: () => setShowAddLeads(false) }
                     );
                   }}
-                  className="px-3 py-1 rounded-full text-xs border border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-orange-500/40 transition-colors disabled:opacity-30"
+                  className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] border border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-orange-500/40 transition-colors disabled:opacity-30"
                 >
+                  <p.icon className="w-3 h-3 flex-shrink-0" />
                   {p.label}
                 </button>
               ))}
+              </div>
             </div>
             <div className="px-4 py-3 border-b border-white/[0.04] flex items-center gap-2">
               <input
@@ -2751,20 +3063,23 @@ export function Caller() {
 
           <div className="grid grid-cols-3 gap-2">
             {(() => {
-              const presets = [];
+              const presets: { label: string; val: string }[] = [];
               const now = new Date();
-              for (let h of [9, 10, 14, 15, 16]) {
-                for (let d = 0; d < 5; d++) {
-                  const dt = new Date(now);
-                  dt.setDate(dt.getDate() + d + 1);
-                  if (dt.getDay() === 0) dt.setDate(dt.getDate() + 1);
-                  if (dt.getDay() === 6) dt.setDate(dt.getDate() + 2);
+              // Build next 5 business days (skip weekends) with clean Date objects
+              const bizDays: Date[] = [];
+              let cursor = new Date(now);
+              while (bizDays.length < 5) {
+                cursor = new Date(cursor);
+                cursor.setDate(cursor.getDate() + 1);
+                if (cursor.getDay() !== 0 && cursor.getDay() !== 6) bizDays.push(cursor);
+              }
+              for (const dayBase of bizDays.slice(0, 2)) {
+                for (const h of [9, 14, 16]) {
+                  const dt = new Date(dayBase);
                   dt.setHours(h, 0, 0, 0);
-                  if (d < 2 && [9, 14, 16].includes(h)) {
-                    const label = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` ${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}`;
-                    const val = dt.toISOString().slice(0, 16);
-                    presets.push({ label, val });
-                  }
+                  const label = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` ${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}`;
+                  const val = dt.toISOString().slice(0, 16);
+                  presets.push({ label, val });
                 }
               }
               return presets.slice(0, 6).map(p => (

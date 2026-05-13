@@ -128,6 +128,7 @@ router.get('/queue', (req, res) => {
         has_replied: !!enrollment.has_replied,
         from_email: step.from_email || null,
         ai_personalize: !!step.ai_personalize,
+        has_ab_test: !!step.alt_template_id,
         last_error: enrollment.last_error || null,
         last_error_at: enrollment.last_error_at || null,
       });
@@ -435,6 +436,7 @@ router.post('/queue/:enrollmentId/send', async (req, res) => {
   const lead = db.get('SELECT * FROM leads WHERE id = ?', [enrollment.lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
   if (lead.unsubscribed_at) return res.status(400).json({ success: false, error: 'Lead has unsubscribed' });
+  if (lead.email_invalid_at) return res.status(400).json({ success: false, error: 'Email previously bounced — address is invalid' });
   if (!lead.email) return res.status(400).json({ success: false, error: 'Lead has no email address' });
 
   const useAltEmail = step.alt_template_id && Math.random() < 0.5;

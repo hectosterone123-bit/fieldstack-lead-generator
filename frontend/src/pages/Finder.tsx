@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, MapPin, Globe, Phone, CheckSquare, Square, ExternalLink, Loader2, CheckCircle, Wrench, ChevronDown, Star, Zap, LayoutList, LayoutGrid, X, Sparkles, ListChecks, Mail, Copy, Check } from 'lucide-react';
+import { Search, MapPin, Globe, Phone, CheckSquare, Square, ExternalLink, Loader2, CheckCircle, Wrench, ChevronDown, Star, Zap, LayoutList, LayoutGrid, X, Sparkles, ListChecks, Mail, Copy, Check, Upload, FileText } from 'lucide-react';
 import type { FinderResult, ImportOptions, Sequence } from '../types';
 import { SERVICE_LABELS } from '../types';
 import { HeatScore } from '../components/shared/HeatScore';
@@ -9,6 +9,7 @@ import { useSequences } from '../hooks/useSequences';
 import { EmptyState } from '../components/shared/EmptyState';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../lib/toast';
+import { importTdlrCsv, importTsbpeCsv, importPermitsCsv } from '../lib/api';
 
 const RADIUS_OPTIONS = [5, 10, 25, 50];
 const SOURCE_OPTIONS = [
@@ -226,6 +227,27 @@ export function Finder() {
   const [scrapedEmails, setScrapedEmails] = useState<Record<string, string[]>>({});
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
 
+  const [tdlrOpen, setTdlrOpen] = useState(false);
+  const [tdlrFile, setTdlrFile] = useState<File | null>(null);
+  const [tdlrTypes, setTdlrTypes] = useState(['hvac', 'electrical', 'plumbing', 'landscaping', 'general']);
+  const [tdlrActiveOnly, setTdlrActiveOnly] = useState(true);
+  const [tdlrMetro, setTdlrMetro] = useState('');
+  const [tdlrLoading, setTdlrLoading] = useState(false);
+  const [tdlrResult, setTdlrResult] = useState<{ imported: number; skipped_dedup: number; skipped_filter: number } | null>(null);
+
+  const [tsbpeOpen, setTsbpeOpen] = useState(false);
+  const [tsbpeFile, setTsbpeFile] = useState<File | null>(null);
+  const [tsbpeActiveOnly, setTsbpeActiveOnly] = useState(true);
+  const [tsbpeLoading, setTsbpeLoading] = useState(false);
+  const [tsbpeResult, setTsbpeResult] = useState<{ imported: number; skipped_dedup: number; skipped_filter: number } | null>(null);
+
+  const [permitsOpen, setPermitsOpen] = useState(false);
+  const [permitsFile, setPermitsFile] = useState<File | null>(null);
+  const [permitsTypes, setPermitsTypes] = useState(['hvac', 'electrical', 'roofing', 'plumbing']);
+  const [permitsDaysBack, setPermitsDaysBack] = useState(180);
+  const [permitsLoading, setPermitsLoading] = useState(false);
+  const [permitsResult, setPermitsResult] = useState<{ imported: number; skipped_dedup: number; skipped_filter: number } | null>(null);
+
   const activeStates = form.country === 'MX' ? MX_STATES : US_STATES;
   const activeBatchStates = batchCountry === 'MX' ? MX_STATES : US_STATES;
   const activePresets = batchCountry === 'MX' ? MX_CITY_PRESETS : CITY_PRESETS;
@@ -368,6 +390,62 @@ export function Finder() {
 
   const newResults = filteredResults.filter(r => !r.already_imported);
   const alreadyImported = filteredResults.filter(r => r.already_imported);
+
+  async function handleTsbpeImport() {
+    if (!tsbpeFile) return;
+    setTsbpeLoading(true);
+    setTsbpeResult(null);
+    try {
+      const csv = await tsbpeFile.text();
+      const result = await importTsbpeCsv(csv, tsbpeActiveOnly);
+      setTsbpeResult(result);
+      toast(`${result.imported} plumber leads imported from TSBPE`);
+    } catch (err) {
+      toast((err as Error).message || 'TSBPE import failed', 'error');
+    } finally {
+      setTsbpeLoading(false);
+    }
+  }
+
+  async function handlePermitsImport() {
+    if (!permitsFile) return;
+    setPermitsLoading(true);
+    setPermitsResult(null);
+    try {
+      const csv = await permitsFile.text();
+      const result = await importPermitsCsv(csv, permitsTypes, permitsDaysBack);
+      setPermitsResult(result);
+      toast(`${result.imported} contractor leads imported from permits`);
+    } catch (err) {
+      toast((err as Error).message || 'Permits import failed', 'error');
+    } finally {
+      setPermitsLoading(false);
+    }
+  }
+
+  async function handleTdlrImport() {
+    if (!tdlrFile) return;
+    setTdlrLoading(true);
+    setTdlrResult(null);
+    try {
+      const csv = await tdlrFile.text();
+      const result = await importTdlrCsv(csv, tdlrTypes, tdlrActiveOnly, tdlrMetro || undefined);
+      setTdlrResult(result);
+      toast(`${result.imported} leads imported from TDLR`);
+    } catch (err) {
+      toast((err as Error).message || 'TDLR import failed', 'error');
+    } finally {
+      setTdlrLoading(false);
+    }
+  }
+
+  const TDLR_TYPE_OPTIONS = [
+    { value: 'hvac', label: 'HVAC' },
+    { value: 'electrical', label: 'Electrical' },
+    { value: 'plumbing', label: 'Plumbing' },
+    { value: 'landscaping', label: 'Irrigation' },
+    { value: 'general', label: 'Other' },
+  ];
 
   return (
     <div className="flex gap-6 p-6 min-h-full">
@@ -651,6 +729,343 @@ export function Finder() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* TDLR Import card */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] shadow-surface overflow-hidden mt-3">
+          <button
+            onClick={() => setTdlrOpen(o => !o)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Upload className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">TDLR Import</span>
+              <span className="text-[10px] text-zinc-600 font-medium bg-zinc-800 px-1.5 py-0.5 rounded">TX</span>
+            </div>
+            <ChevronDown className={cn('w-3.5 h-3.5 text-zinc-500 transition-transform', tdlrOpen && 'rotate-180')} />
+          </button>
+
+          {tdlrOpen && (
+            <div className="px-5 pb-5 space-y-4 border-t border-white/[0.04]">
+              <p className="text-xs text-zinc-500 pt-3">
+                Import Texas contractor licenses from the free TDLR bulk CSV. Includes owner name + direct phone number.
+              </p>
+
+              {/* Step 1 */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 1 — Download CSV</label>
+                <a
+                  href="https://data.texas.gov/api/views/7358-krk7/rows.csv?accessType=DOWNLOAD"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Download from Texas.gov
+                </a>
+              </div>
+
+              {/* Step 2: license types */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 2 — License Types</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {TDLR_TYPE_OPTIONS.map(opt => {
+                    const checked = tdlrTypes.includes(opt.value);
+                    return (
+                      <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setTdlrTypes(prev =>
+                            checked ? prev.filter(t => t !== opt.value) : [...prev, opt.value]
+                          )}
+                          className="accent-orange-500"
+                        />
+                        <span className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer mt-2">
+                  <input
+                    type="checkbox"
+                    checked={tdlrActiveOnly}
+                    onChange={e => setTdlrActiveOnly(e.target.checked)}
+                    className="accent-orange-500"
+                  />
+                  <span className="text-xs text-zinc-400">Active licenses only</span>
+                </label>
+              </div>
+
+              {/* Metro area filter */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Metro Area (optional)</label>
+                <select
+                  value={tdlrMetro}
+                  onChange={e => setTdlrMetro(e.target.value)}
+                  className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                >
+                  <option value="">All Texas</option>
+                  <option value="houston">Houston Metro</option>
+                  <option value="dallas">Dallas Metro</option>
+                  <option value="austin">Austin Metro</option>
+                </select>
+              </div>
+
+              {/* Step 3: file picker */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 3 — Upload CSV</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={e => {
+                    setTdlrFile(e.target.files?.[0] ?? null);
+                    setTdlrResult(null);
+                  }}
+                  className="block w-full text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer"
+                />
+              </div>
+
+              <button
+                onClick={handleTdlrImport}
+                disabled={!tdlrFile || tdlrLoading || tdlrTypes.length === 0}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-white transition-colors"
+              >
+                {tdlrLoading ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
+                ) : (
+                  <><Upload className="w-3.5 h-3.5" /> Import Leads</>
+                )}
+              </button>
+
+              {tdlrResult && (
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-xs space-y-0.5">
+                  <p className="text-emerald-400 font-medium">{tdlrResult.imported} leads imported</p>
+                  {tdlrResult.skipped_dedup > 0 && (
+                    <p className="text-zinc-500">{tdlrResult.skipped_dedup} skipped (duplicates)</p>
+                  )}
+                  {tdlrResult.skipped_filter > 0 && (
+                    <p className="text-zinc-500">{tdlrResult.skipped_filter} skipped (filtered)</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* TSBPE Import card */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] shadow-surface overflow-hidden mt-3">
+          <button
+            onClick={() => setTsbpeOpen(o => !o)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Upload className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">TSBPE Import</span>
+              <span className="text-[10px] text-zinc-600 font-medium bg-zinc-800 px-1.5 py-0.5 rounded">TX</span>
+            </div>
+            <ChevronDown className={cn('w-3.5 h-3.5 text-zinc-500 transition-transform', tsbpeOpen && 'rotate-180')} />
+          </button>
+
+          {tsbpeOpen && (
+            <div className="px-5 pb-5 space-y-4 border-t border-white/[0.04]">
+              <p className="text-xs text-zinc-500 pt-3">
+                Import Texas licensed plumbers from the free TSBPE bulk CSV. Includes owner name + direct phone number.
+              </p>
+
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 1 — Download CSV</label>
+                <div className="flex flex-col gap-1.5">
+                  <a
+                    href="https://tsbpe.texas.gov/download-csv/RMP/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    RMP List (Responsible Master Plumbers)
+                  </a>
+                  <a
+                    href="https://tsbpe.texas.gov/download-csv/MP/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    MP List (Master Plumbers)
+                  </a>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 2 — Options</label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={tsbpeActiveOnly}
+                    onChange={e => setTsbpeActiveOnly(e.target.checked)}
+                    className="accent-orange-500"
+                  />
+                  <span className="text-xs text-zinc-400">Active licenses only</span>
+                </label>
+              </div>
+
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 3 — Upload CSV</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={e => {
+                    setTsbpeFile(e.target.files?.[0] ?? null);
+                    setTsbpeResult(null);
+                  }}
+                  className="block w-full text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer"
+                />
+              </div>
+
+              <button
+                onClick={handleTsbpeImport}
+                disabled={!tsbpeFile || tsbpeLoading}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-white transition-colors"
+              >
+                {tsbpeLoading ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
+                ) : (
+                  <><Upload className="w-3.5 h-3.5" /> Import Leads</>
+                )}
+              </button>
+
+              {tsbpeResult && (
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-xs space-y-0.5">
+                  <p className="text-emerald-400 font-medium">{tsbpeResult.imported} leads imported</p>
+                  {tsbpeResult.skipped_dedup > 0 && (
+                    <p className="text-zinc-500">{tsbpeResult.skipped_dedup} skipped (duplicates)</p>
+                  )}
+                  {tsbpeResult.skipped_filter > 0 && (
+                    <p className="text-zinc-500">{tsbpeResult.skipped_filter} skipped (filtered)</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        {/* Permits Import card */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] shadow-surface overflow-hidden mt-3">
+          <button
+            onClick={() => setPermitsOpen(o => !o)}
+            className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-white/[0.02] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FileText className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="text-sm font-medium text-zinc-300">Permit Import</span>
+              <span className="text-[10px] text-zinc-600 font-medium bg-zinc-800 px-1.5 py-0.5 rounded">TX</span>
+            </div>
+            <ChevronDown className={cn('w-3.5 h-3.5 text-zinc-500 transition-transform', permitsOpen && 'rotate-180')} />
+          </button>
+
+          {permitsOpen && (
+            <div className="px-5 pb-5 space-y-4 border-t border-white/[0.04]">
+              <p className="text-xs text-zinc-500 pt-3">
+                Import contractors from city permit databases. Active contractors = proven business + likely cash flow.
+              </p>
+
+              {/* Step 1: Download */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 1 — Download CSV</label>
+                <div className="space-y-1.5">
+                  <a
+                    href="https://data.austintexas.gov/api/views/3syk-w9eu/rows.csv?accessType=DOWNLOAD"
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />Austin Open Data (Construction Permits)
+                  </a>
+                  <p className="text-[10px] text-zinc-600">Houston/Dallas: search "[city] open data permits CSV" — same format works.</p>
+                </div>
+              </div>
+
+              {/* Step 2: Permit types */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 2 — Permit Types</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[
+                    { label: 'HVAC / Mechanical', value: 'hvac' },
+                    { label: 'Electrical', value: 'electrical' },
+                    { label: 'Roofing', value: 'roofing' },
+                    { label: 'Plumbing', value: 'plumbing' },
+                  ].map(opt => {
+                    const checked = permitsTypes.includes(opt.value);
+                    return (
+                      <label key={opt.value} className="flex items-center gap-1.5 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setPermitsTypes(prev =>
+                            checked ? prev.filter(t => t !== opt.value) : [...prev, opt.value]
+                          )}
+                          className="accent-orange-500"
+                        />
+                        <span className="text-xs text-zinc-400 group-hover:text-zinc-300 transition-colors">{opt.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Step 3: Recency */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 3 — Issued Within</label>
+                <select
+                  value={permitsDaysBack}
+                  onChange={e => setPermitsDaysBack(Number(e.target.value))}
+                  className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+                >
+                  <option value={90}>Last 90 days</option>
+                  <option value={180}>Last 180 days</option>
+                  <option value={365}>Last 12 months</option>
+                  <option value={0}>All time</option>
+                </select>
+              </div>
+
+              {/* Step 4: File picker */}
+              <div>
+                <label className="text-overline text-zinc-500 block mb-1.5">Step 4 — Upload CSV</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={e => {
+                    setPermitsFile(e.target.files?.[0] ?? null);
+                    setPermitsResult(null);
+                  }}
+                  className="block w-full text-xs text-zinc-400 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700 file:cursor-pointer cursor-pointer"
+                />
+              </div>
+
+              <button
+                onClick={handlePermitsImport}
+                disabled={!permitsFile || permitsLoading || permitsTypes.length === 0}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold text-white transition-colors"
+              >
+                {permitsLoading ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing...</>
+                ) : (
+                  <><Upload className="w-3.5 h-3.5" /> Import Leads</>
+                )}
+              </button>
+
+              {permitsResult && (
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-xs space-y-0.5">
+                  <p className="text-emerald-400 font-medium">{permitsResult.imported} leads imported</p>
+                  {permitsResult.skipped_dedup > 0 && (
+                    <p className="text-zinc-500">{permitsResult.skipped_dedup} skipped (duplicates)</p>
+                  )}
+                  {permitsResult.skipped_filter > 0 && (
+                    <p className="text-zinc-500">{permitsResult.skipped_filter} skipped (filtered)</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         </div>
       </div>
 

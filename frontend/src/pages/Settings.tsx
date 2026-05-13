@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { ScoringRulesCard } from '../components/settings/ScoringRulesCard';
-import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon, Code2, FlaskConical, Trash2, MessageSquare } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Loader2, Link, Mail, Globe, User, Star, BarChart3, Zap, Repeat, ChevronDown, PhoneOutgoing, Copy, CheckCheck, MailCheck, CheckCircle2, AlertCircle, FileText as FileIcon, Code2, FlaskConical, Trash2, MessageSquare, Plus, Play, CloudLightning, ShieldCheck, XCircle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates } from '../lib/api';
+import { fetchSettings, updateSetting, fetchReviewStats, fetchSequences, fetchTemplates, runAutopilotImport } from '../lib/api';
 import { useToast } from '../lib/toast';
+import { cn } from '../lib/utils';
 
 export function Settings() {
   const queryClient = useQueryClient();
@@ -32,6 +33,13 @@ export function Settings() {
   const [defaultSequenceId, setDefaultSequenceId] = useState('');
   const [digestEmail, setDigestEmail] = useState('');
   const [alertPhone, setAlertPhone] = useState('');
+  const [morningAlertPhone, setMorningAlertPhone] = useState('');
+  const [outcomeSeqCallback, setOutcomeSeqCallback] = useState('');
+  const [outcomeSeqVoicemail, setOutcomeSeqVoicemail] = useState('');
+  const [outcomeSeqGatekeeper, setOutcomeSeqGatekeeper] = useState('');
+  const [outcomeSeqNoAnswer, setOutcomeSeqNoAnswer] = useState('');
+  const [hailTriggerEnabled, setHailTriggerEnabled] = useState(false);
+  const [hailSequenceId, setHailSequenceId] = useState('');
   const [dailySendLimit, setDailySendLimit] = useState('20');
   const [monthlyReportEnabled, setMonthlyReportEnabled] = useState(true);
   const [monthlyPlanCost, setMonthlyPlanCost] = useState('');
@@ -52,6 +60,11 @@ export function Settings() {
   const [vapiFirstMessage, setVapiFirstMessage] = useState('');
   const [vapiMaxNoAnswer, setVapiMaxNoAnswer] = useState('3');
   const [dailyCallGoal, setDailyCallGoal] = useState('50');
+  const [morningQueueCount, setMorningQueueCount] = useState('100');
+  const [autopilotConfigs, setAutopilotConfigs] = useState<{ city: string; state: string; service_type: string }[]>([]);
+  const [apNewCity, setApNewCity] = useState('');
+  const [apNewState, setApNewState] = useState('TX');
+  const [apNewService, setApNewService] = useState('hvac');
   const [speedToLeadEnabled, setSpeedToLeadEnabled] = useState(false);
   const [speedToLeadTemplateId, setSpeedToLeadTemplateId] = useState('');
   const [vapiCampaignEnabled, setVapiCampaignEnabled] = useState(false);
@@ -93,6 +106,13 @@ export function Settings() {
       setDefaultSequenceId(settings.default_sequence_id || '');
       setDigestEmail(settings.digest_email || '');
       setAlertPhone(settings.alert_phone || '');
+      setMorningAlertPhone(settings.morning_alert_phone || '');
+      setOutcomeSeqCallback(settings.outcome_sequence_callback_requested || '');
+      setOutcomeSeqVoicemail(settings.outcome_sequence_voicemail || '');
+      setOutcomeSeqGatekeeper(settings.outcome_sequence_gatekeeper || '');
+      setOutcomeSeqNoAnswer(settings.outcome_sequence_no_answer || '');
+      setHailTriggerEnabled(settings.hail_trigger_enabled === '1');
+      setHailSequenceId(settings.hail_sequence_id || '');
       setDailySendLimit(settings.daily_send_limit || '20');
       setMonthlyReportEnabled(settings.monthly_report_enabled !== '0');
       setMonthlyPlanCost(settings.monthly_plan_cost || '');
@@ -113,6 +133,8 @@ export function Settings() {
       setVapiFirstMessage(settings.vapi_first_message || '');
       setVapiMaxNoAnswer(settings.vapi_max_no_answer_attempts || '3');
       setDailyCallGoal(settings.daily_call_goal || '50');
+      setMorningQueueCount(settings.morning_queue_count || '100');
+      try { setAutopilotConfigs(JSON.parse(settings.autopilot_configs || '[]')); } catch { setAutopilotConfigs([]); }
       setSpeedToLeadEnabled(settings.speed_to_lead_enabled === '1');
       setSpeedToLeadTemplateId(settings.speed_to_lead_template_id || '');
       setVapiCampaignEnabled(settings.vapi_campaign_enabled === '1');
@@ -156,6 +178,13 @@ export function Settings() {
       { key: 'default_sequence_id', value: defaultSequenceId },
       { key: 'digest_email', value: digestEmail },
       { key: 'alert_phone', value: alertPhone },
+      { key: 'morning_alert_phone', value: morningAlertPhone },
+      { key: 'outcome_sequence_callback_requested', value: outcomeSeqCallback },
+      { key: 'outcome_sequence_voicemail', value: outcomeSeqVoicemail },
+      { key: 'outcome_sequence_gatekeeper', value: outcomeSeqGatekeeper },
+      { key: 'outcome_sequence_no_answer', value: outcomeSeqNoAnswer },
+      { key: 'hail_trigger_enabled', value: hailTriggerEnabled ? '1' : '0' },
+      { key: 'hail_sequence_id', value: hailSequenceId },
       { key: 'daily_send_limit', value: dailySendLimit },
       { key: 'monthly_report_enabled', value: monthlyReportEnabled ? '1' : '0' },
       { key: 'monthly_plan_cost', value: monthlyPlanCost },
@@ -176,6 +205,8 @@ export function Settings() {
       { key: 'vapi_first_message', value: vapiFirstMessage },
       { key: 'vapi_max_no_answer_attempts', value: vapiMaxNoAnswer },
       { key: 'daily_call_goal', value: dailyCallGoal },
+      { key: 'morning_queue_count', value: morningQueueCount },
+      { key: 'autopilot_configs', value: JSON.stringify(autopilotConfigs) },
       { key: 'speed_to_lead_enabled', value: speedToLeadEnabled ? '1' : '0' },
       { key: 'speed_to_lead_template_id', value: speedToLeadTemplateId },
       { key: 'vapi_campaign_enabled', value: vapiCampaignEnabled ? '1' : '0' },
@@ -196,14 +227,47 @@ export function Settings() {
     );
   }
 
+  const [tab, setTab] = useState<'general' | 'email' | 'calling' | 'automation' | 'advanced'>('general');
+
+  const TABS = [
+    { key: 'general' as const, label: 'General', icon: User },
+    { key: 'email' as const, label: 'Email', icon: Mail },
+    { key: 'calling' as const, label: 'Calling', icon: PhoneOutgoing },
+    { key: 'automation' as const, label: 'Automation', icon: Zap },
+    { key: 'advanced' as const, label: 'Advanced', icon: Code2 },
+  ];
+
   return (
     <div className="p-6 max-w-2xl">
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-4">
         <SettingsIcon className="w-4 h-4 text-orange-400" />
         <h1 className="text-sm font-semibold text-zinc-100">Settings</h1>
       </div>
 
+      {/* Tab navigation */}
+      <div className="flex items-center gap-1 mb-6 border-b border-white/[0.06] pb-px">
+        {TABS.map(t => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium rounded-t-lg transition-colors border-b-2 -mb-px',
+                tab === t.key
+                  ? 'text-orange-400 border-orange-500 bg-orange-500/[0.06]'
+                  : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-white/[0.02]',
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="space-y-6">
+        {/* === GENERAL TAB === */}
+        {tab === 'general' && <>
         {/* Compliance Checklist */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -350,6 +414,39 @@ export function Settings() {
             className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
           />
         </div>
+        </>}
+
+        {/* === EMAIL TAB === */}
+        {tab === 'email' && <>
+        {/* Email Deliverability Checklist */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldCheck className="w-4 h-4 text-orange-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Email Deliverability</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">Complete all steps to ensure emails land in inboxes and replies come back.</p>
+          <div className="space-y-2">
+            {[
+              { ok: !!resendApiKey, label: 'Resend API key configured' },
+              { ok: !!resendFrom && !resendFrom.includes('resend.dev'), label: 'Custom sending domain (not sandbox)' },
+              { ok: !!replyToEmail, label: 'Reply-to address set (required for reply capture)' },
+              { ok: !!appUrl, label: 'App URL configured (for unsubscribe links)' },
+              { ok: !!warmupStartDate, label: 'Warmup schedule active' },
+            ].map((item, i) => (
+              <div key={i} className="flex items-center gap-2.5">
+                {item.ok
+                  ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  : <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                <span className={cn('text-xs', item.ok ? 'text-zinc-400' : 'text-zinc-300')}>{item.label}</span>
+              </div>
+            ))}
+          </div>
+          {(!resendFrom || resendFrom.includes('resend.dev') || !replyToEmail) && (
+            <div className="mt-3 pt-3 border-t border-white/[0.04]">
+              <p className="text-[10px] text-red-400">Emails will land in spam or replies won't be captured until red items are resolved. Sequence auto-send is paused until reply-to is set.</p>
+            </div>
+          )}
+        </div>
 
         {/* Sam AI Auto-Reply */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
@@ -395,6 +492,22 @@ export function Settings() {
             <Mail className="w-4 h-4 text-zinc-400" />
             <h2 className="text-sm font-medium text-zinc-200">Email From Address</h2>
           </div>
+          {(!resendFrom || resendFrom.includes('resend.dev')) && (
+            <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                <span className="text-xs font-medium text-red-300">Emails going to spam</span>
+              </div>
+              <p className="text-[11px] text-red-400/80 mb-2">
+                You're using Resend's sandbox domain. All outbound emails will land in spam until you add a custom domain.
+              </p>
+              <ol className="text-[11px] text-zinc-400 space-y-1 list-none">
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">1.</span> Add your domain at <a href="https://resend.com/domains" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">resend.com/domains</a></li>
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">2.</span> Add SPF + DKIM DNS records (Resend gives you the values)</li>
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">3.</span> Set your From Address below once verified</li>
+              </ol>
+            </div>
+          )}
           <p className="text-xs text-zinc-500 mb-3">
             Must be a verified domain in Resend. Enter just the email, or "Name &lt;email&gt;" to control the display name.
           </p>
@@ -472,7 +585,10 @@ export function Settings() {
             <p className="text-xs text-zinc-600">Enable events: email.opened · email.clicked · email.bounced · email.complained</p>
           </div>
         )}
+        </>}
 
+        {/* === AUTOMATION TAB === */}
+        {tab === 'automation' && <>
         {/* Autopilot */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -584,6 +700,19 @@ export function Settings() {
               />
               <p className="text-[10px] text-zinc-600 mt-1">
                 Get an SMS when a prospect opens your email 2+ times.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Morning Alert Phone</label>
+              <input
+                type="tel"
+                value={morningAlertPhone}
+                onChange={e => setMorningAlertPhone(e.target.value)}
+                placeholder="+15125551234"
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">
+                Get a text at 8 AM CT with your queue count and yesterday's call stats.
               </p>
             </div>
             <div>
@@ -785,7 +914,10 @@ export function Settings() {
             </div>
           )}
         </div>
+        </>}
 
+        {/* === CALLING TAB === */}
+        {tab === 'calling' && <>
         {/* AI Cold Caller (VAPI) */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
           <div className="flex items-center gap-2 mb-1">
@@ -891,6 +1023,18 @@ export function Settings() {
               />
               <p className="text-[10px] text-zinc-600 mt-1">Shows a progress bar in the Caller page. Set to 0 to hide.</p>
             </div>
+            <div>
+              <label className="block text-xs text-zinc-500 mb-1">Morning Queue Size</label>
+              <input
+                type="number"
+                min={10}
+                max={500}
+                value={morningQueueCount}
+                onChange={e => setMorningQueueCount(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+              />
+              <p className="text-[10px] text-zinc-600 mt-1">How many leads to load into the AI call queue each morning at 8 AM. Default 100.</p>
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <label className="block text-xs text-zinc-400">Best Time Windows</label>
@@ -980,26 +1124,156 @@ export function Settings() {
           </div>
         </div>
 
-        {/* Inbound Reply Detection */}
-        {appUrl && replyToEmail && (
-          <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <MailCheck className="w-4 h-4 text-zinc-400" />
-              <h2 className="text-sm font-medium text-zinc-200">Inbound Reply Detection</h2>
+        {/* Call Outcome → Sequences */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <PhoneOutgoing className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Call Outcome — Sequences</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">
+            Auto-enroll leads into a sequence based on how a call ends. Runs on both AI calls and manual outcome overrides.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Interested</label>
+              <select
+                value={defaultSequenceId}
+                onChange={e => setDefaultSequenceId(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              >
+                <option value="">None</option>
+                {sequences?.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 mt-1">Lead is also advanced to Qualified. Uses the Default Sequence setting.</p>
             </div>
-            <p className="text-xs text-zinc-500 mb-3">
-              When a lead replies to a sequence email, their sequences auto-pause and they're marked <span className="text-violet-400">Qualified</span>. Requires Resend inbound email enabled and MX records set on your reply domain.
-            </p>
-            <div className="space-y-3">
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Callback Requested</label>
+              <select
+                value={outcomeSeqCallback}
+                onChange={e => setOutcomeSeqCallback(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              >
+                <option value="">None</option>
+                {sequences?.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 mt-1">Next-day callback is also scheduled automatically.</p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Voicemail</label>
+              <select
+                value={outcomeSeqVoicemail}
+                onChange={e => setOutcomeSeqVoicemail(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              >
+                <option value="">None</option>
+                {sequences?.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 mt-1">Fires after the post-call SMS is sent.</p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">Gatekeeper</label>
+              <select
+                value={outcomeSeqGatekeeper}
+                onChange={e => setOutcomeSeqGatekeeper(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              >
+                <option value="">None</option>
+                {sequences?.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 mt-1">Hit a receptionist. Next-day 7:30 AM callback is also scheduled.</p>
+            </div>
+            <div>
+              <label className="text-xs text-zinc-400 mb-1 block">No Answer</label>
+              <select
+                value={outcomeSeqNoAnswer}
+                onChange={e => setOutcomeSeqNoAnswer(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+              >
+                <option value="">None</option>
+                {sequences?.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 mt-1">Nobody picked up. Fires after the post-call SMS.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Hailstorm Trigger */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <CloudLightning className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Hailstorm Trigger</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHailTriggerEnabled(v => !v)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${hailTriggerEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${hailTriggerEnabled ? 'translate-x-4' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">
+            Checks NOAA every 6 hours for TX hail alerts. Boosts matching roofing leads +25 heat score and alerts you.
+          </p>
+          <div>
+            <label className="text-xs text-zinc-500 mb-1.5 block">Auto-enroll flagged leads in sequence</label>
+            <select
+              value={hailSequenceId}
+              onChange={e => setHailSequenceId(e.target.value)}
+              className="w-full bg-zinc-800 border border-white/[0.06] rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-orange-500/40 [color-scheme:dark]"
+            >
+              <option value="">None (heat boost only)</option>
+              {(sequences as any[])?.filter((s: any) => s.is_active).map((s: any) => (
+                <option key={s.id} value={String(s.id)}>{s.name}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-zinc-600 mt-1">Tip: create a "Roofing Storm Follow-Up" sequence and select it here.</p>
+          </div>
+        </div>
+
+        {/* Inbound Reply Detection */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <MailCheck className="w-4 h-4 text-zinc-400" />
+            <h2 className="text-sm font-medium text-zinc-200">Inbound Reply Detection</h2>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">
+            When a lead replies to a sequence email, their sequences auto-pause and they're marked <span className="text-violet-400">Qualified</span>. You'll get an SMS alert with their reply.
+          </p>
+          {(!replyToEmail || !appUrl) && (
+            <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <p className="text-[11px] text-red-400">Set your Reply-To Address and App URL above first. Without these, replies can't be captured.</p>
+            </div>
+          )}
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-zinc-500 mb-1 block">Setup (3 steps)</label>
+              <ol className="text-[11px] text-zinc-400 space-y-1.5 list-none">
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">1.</span> In <a href="https://resend.com/domains" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">Resend → Domains</a>, enable <strong className="text-zinc-300">Inbound</strong> on your domain</li>
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">2.</span> Add this MX record to your DNS: <code className="text-zinc-500">{replyToEmail ? replyToEmail.split('@')[1] : 'yourdomain.com'} MX 10 inbound.resend.com</code></li>
+                <li className="flex items-start gap-1.5"><span className="text-zinc-600 shrink-0">3.</span> In <a href="https://resend.com/webhooks" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">Resend → Webhooks</a>, add <strong className="text-zinc-300">email.received</strong> event to your existing webhook</li>
+              </ol>
+            </div>
+            {appUrl && (
               <div>
-                <label className="text-xs text-zinc-500 mb-1 block">Resend Inbound Webhook URL</label>
+                <label className="text-xs text-zinc-500 mb-1 block">Your Resend Webhook URL</label>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-300 truncate border border-white/[0.04]">
-                    {appUrl}/api/webhooks/email-inbound
+                    {appUrl}/api/webhooks/resend
                   </code>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(`${appUrl}/api/webhooks/email-inbound`);
+                      navigator.clipboard.writeText(`${appUrl}/api/webhooks/resend`);
                       setInboundCopied(true);
                       setTimeout(() => setInboundCopied(false), 2000);
                     }}
@@ -1009,17 +1283,12 @@ export function Settings() {
                     {inboundCopied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
+                <p className="text-[10px] text-zinc-600 mt-1">Same URL handles opens, clicks, bounces, AND inbound replies. Enable all events in Resend.</p>
               </div>
-              <div>
-                <label className="text-xs text-zinc-500 mb-1 block">DNS — MX Record (add to your reply domain)</label>
-                <code className="block px-3 py-2 bg-zinc-800 rounded-lg text-xs text-zinc-400 border border-white/[0.04]">
-                  {replyToEmail.split('@')[1] || 'mail.yourdomain.com'} &nbsp;MX &nbsp;10 &nbsp;inbound.resend.com
-                </code>
-              </div>
-              <p className="text-[10px] text-zinc-600">Enable inbound email in your Resend dashboard → Domains → your domain → Inbound. Replies to <span className="text-zinc-500">reply+*@{replyToEmail.split('@')[1] || 'yourdomain.com'}</span> will trigger this webhook.</p>
-            </div>
+            )}
+            <p className="text-[10px] text-zinc-600">Replies to <span className="text-zinc-500">reply+*@{replyToEmail ? replyToEmail.split('@')[1] : 'yourdomain.com'}</span> are auto-captured, sequences paused, and lead qualified.</p>
           </div>
-        )}
+        </div>
 
         {/* Missed Call Text-Back */}
         <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
@@ -1150,14 +1419,104 @@ export function Settings() {
             <p className="text-xs text-zinc-600 mt-2">Change <span className="text-zinc-500">data-service</span> to: hvac · roofing · plumbing · electrical · landscaping · general</p>
           </div>
         )}
+        </>}
+
+        {/* === ADVANCED TAB === */}
+        {tab === 'advanced' && <>
+        {/* Lead Autopilot */}
+        <div className="bg-zinc-900 rounded-xl p-5 shadow-surface border border-white/[0.04]">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-orange-400" />
+              <h2 className="text-sm font-semibold text-zinc-200">Lead Autopilot</h2>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  await runAutopilotImport();
+                  toast('Autopilot import triggered');
+                } catch (e: any) {
+                  toast(e.message, 'error');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-orange-500/10 border border-orange-500/20 text-orange-400 rounded-lg hover:bg-orange-500/20 transition-colors"
+            >
+              <Play className="w-3 h-3" /> Run Now
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">Runs every Sunday at 10 PM — automatically searches for new leads and imports them. Configure which cities and services to target.</p>
+
+          {/* Existing configs */}
+          {autopilotConfigs.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {autopilotConfigs.map((cfg, i) => (
+                <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-800/60 border border-white/[0.04] text-xs">
+                  <span className="text-zinc-300">{cfg.city}, {cfg.state} — <span className="text-zinc-500 capitalize">{cfg.service_type}</span></span>
+                  <button onClick={() => setAutopilotConfigs(prev => prev.filter((_, j) => j !== i))} className="text-zinc-600 hover:text-red-400 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add new config */}
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="block text-[10px] text-zinc-600 mb-1">City</label>
+              <input
+                type="text"
+                placeholder="Austin"
+                value={apNewCity}
+                onChange={e => setApNewCity(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-white/[0.06] text-xs text-zinc-200"
+              />
+            </div>
+            <div className="w-20">
+              <label className="block text-[10px] text-zinc-600 mb-1">State</label>
+              <input
+                type="text"
+                placeholder="TX"
+                maxLength={2}
+                value={apNewState}
+                onChange={e => setApNewState(e.target.value.toUpperCase())}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-white/[0.06] text-xs text-zinc-200"
+              />
+            </div>
+            <div className="w-32">
+              <label className="block text-[10px] text-zinc-600 mb-1">Service</label>
+              <select
+                value={apNewService}
+                onChange={e => setApNewService(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-800 border border-white/[0.06] text-xs text-zinc-200 [color-scheme:dark]"
+              >
+                {['hvac','plumbing','electrical','roofing','landscaping','pest_control','general'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => {
+                if (!apNewCity.trim() || !apNewState.trim()) return;
+                setAutopilotConfigs(prev => [...prev, { city: apNewCity.trim(), state: apNewState.trim(), service_type: apNewService }]);
+                setApNewCity('');
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-800 border border-white/[0.06] text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add
+            </button>
+          </div>
+          <p className="text-[10px] text-zinc-600 mt-3">Changes save when you click Save Settings above.</p>
+        </div>
 
         {/* Scoring Rules */}
         <ScoringRulesCard />
 
         {/* Demo Data */}
         <DemoDataCard />
+        </>}
 
-        {/* Save */}
+        {/* Save — always visible */}
         <button
           onClick={handleSave}
           disabled={saveMutation.isPending}

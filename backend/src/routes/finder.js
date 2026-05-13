@@ -10,6 +10,7 @@ const { computeProspectScore } = require('../services/prospectScoreService');
 const { scrapeWebsite } = require('../services/scrapeService');
 const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
 const { getTimezone } = require('../services/timezoneService');
+const { validatePhonesAsync } = require('../services/phoneValidationService');
 
 function hasGoogleKey() {
   const key = process.env.GOOGLE_PLACES_API_KEY;
@@ -283,6 +284,11 @@ router.post('/import', (req, res, next) => {
     }
 
     res.json({ success: true, data: { imported, skipped, auto_enrich, auto_enroll } });
+
+    // Non-blocking phone validation for newly imported leads
+    if (newLeadIds.length > 0) {
+      setImmediate(() => validatePhonesAsync(newLeadIds, db).catch(() => {}));
+    }
   } catch (err) { next(err); }
 });
 

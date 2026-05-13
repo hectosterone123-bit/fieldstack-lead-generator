@@ -25,6 +25,14 @@ const STATE_TO_TIMEZONE = {
   WI: 'America/Chicago', WY: 'America/Denver',
 };
 
+// GET /api/calls/morning-status — was the queue auto-loaded today?
+router.get('/morning-status', (req, res) => {
+  const loadedAt = db.get("SELECT value FROM settings WHERE key = 'morning_queue_loaded_at'")?.value || null;
+  const today = new Date().toISOString().slice(0, 10);
+  const queueCount = db.get("SELECT COUNT(*) as n FROM call_queue WHERE status = 'pending'")?.n || 0;
+  res.json({ success: true, data: { loaded_today: loadedAt === today, loaded_at: loadedAt, queue_count: queueCount } });
+});
+
 // GET /api/calls/active — currently active calls
 router.get('/active', (req, res) => {
   // Auto-complete calls stuck in active status for more than 5 minutes (VAPI max is 3 min)
@@ -250,11 +258,101 @@ router.post('/queue/auto-load', (req, res) => {
         (new Date(a.next_followup_at || 0).getTime() - new Date(b.next_followup_at || 0).getTime())
       );
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+    } else if (filter === 'direct_phone') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE direct_phone IS NOT NULL AND direct_phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+        ORDER BY CASE WHEN source = 'tdlr' THEN 0 ELSE 1 END, heat_score DESC
+      `);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
+    } else if (filter === 'hot') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE heat_score >= 70
+          AND phone IS NOT NULL AND phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+        ORDER BY heat_score DESC
+      `);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
+    } else if (filter === 'never_contacted') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE (contact_count IS NULL OR contact_count = 0)
+          AND last_contacted_at IS NULL
+          AND phone IS NOT NULL AND phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+        ORDER BY heat_score DESC
+      `);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+    } else if (filter === 'stale') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE last_contacted_at IS NOT NULL
+          AND last_contacted_at <= datetime('now', '-14 days')
+          AND phone IS NOT NULL AND phone != ''
+          AND status IN ('contacted', 'qualified', 'proposal_sent')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+        ORDER BY heat_score DESC
+      `);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
+    } else if (filter === 'mobile') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE phone_line_type = 'mobile'
+          AND phone IS NOT NULL AND phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+        ORDER BY heat_score DESC
+      `);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else {
-      whereClause = `WHERE status = 'new' AND phone IS NOT NULL AND dnc_at IS NULL
-                     AND (phone_valid IS NULL OR phone_valid != 0)
-                     ${service_type ? 'AND service_type = ?' : ''}`;
-      whereParams = service_type ? [service_type, limitCount] : [limitCount];
+      // Time-of-day smart queue (Central Time)
+      const ctHour = new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: false, hour: 'numeric' });
+      const hour = parseInt(ctHour, 10);
+      const isMorning = hour >= 9 && hour < 14;
+      const isEvening = hour >= 17;
+
+      if (isMorning) {
+        // Morning: ONLY direct contractor numbers — no gatekeepers, no office lines
+        const raw = db.all(`
+          SELECT * FROM leads
+          WHERE direct_phone IS NOT NULL AND direct_phone != ''
+            AND (gatekeeper_count IS NULL OR gatekeeper_count = 0)
+            AND status NOT IN ('booked', 'lost', 'closed_won')
+            AND dnc_at IS NULL
+            AND (phone_valid IS NULL OR phone_valid != 0)
+            ${service_type ? 'AND service_type = ?' : ''}
+          ORDER BY heat_score DESC
+        `, service_type ? [service_type] : []);
+        leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
+      } else if (isEvening) {
+        // Evening: gatekeeper leads first (gatekeepers gone home), then others
+        const raw = db.all(`
+          SELECT * FROM leads
+          WHERE phone IS NOT NULL AND phone != ''
+            AND status NOT IN ('booked', 'lost', 'closed_won')
+            AND dnc_at IS NULL
+            AND (phone_valid IS NULL OR phone_valid != 0)
+            ${service_type ? 'AND service_type = ?' : ''}
+          ORDER BY CASE WHEN gatekeeper_count > 0 THEN 0 ELSE 1 END, heat_score DESC
+        `, service_type ? [service_type] : []);
+        leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+      } else {
+        // Afternoon: mixed — all leads
+        whereClause = `WHERE phone IS NOT NULL AND phone != '' AND dnc_at IS NULL
+                       AND status NOT IN ('booked', 'lost', 'closed_won')
+                       AND (phone_valid IS NULL OR phone_valid != 0)
+                       ${service_type ? 'AND service_type = ?' : ''}`;
+        whereParams = service_type ? [service_type, limitCount] : [limitCount];
+      }
     }
 
     if (!leads) {
@@ -355,7 +453,7 @@ router.delete('/queue', (req, res) => {
 // PATCH /api/calls/bulk/outcome — bulk update call outcomes
 router.patch('/bulk/outcome', (req, res) => {
   const { call_ids, outcome } = req.body;
-  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred'];
+  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred', 'not_a_fit'];
   if (!Array.isArray(call_ids) || call_ids.length === 0) return res.status(400).json({ success: false, error: 'call_ids required' });
   if (!valid.includes(outcome)) return res.status(400).json({ success: false, error: 'Invalid outcome' });
 
@@ -443,7 +541,7 @@ router.post('/:callId/whisper', async (req, res, next) => {
 // PATCH /api/calls/:callId/outcome — manually set/override call outcome
 router.patch('/:callId/outcome', async (req, res) => {
   const { outcome } = req.body;
-  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred', 'gatekeeper'];
+  const valid = ['interested', 'callback_requested', 'not_interested', 'no_answer', 'voicemail', 'wrong_number', 'transferred', 'gatekeeper', 'not_a_fit'];
   if (!valid.includes(outcome)) {
     return res.status(400).json({ success: false, error: 'Invalid outcome' });
   }
@@ -465,6 +563,11 @@ router.patch('/:callId/outcome', async (req, res) => {
        updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [followup, call.lead_id]
     );
+    const cbSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_callback_requested'")?.value;
+    if (cbSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([call.lead_id], parseInt(cbSeqId));
+    }
   }
 
   if (outcome === 'gatekeeper') {
@@ -483,6 +586,35 @@ router.patch('/:callId/outcome', async (req, res) => {
       "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'call_attempt', 'Gatekeeper hit', 'Reached secretary/receptionist. Scheduled callback before 8 AM.')",
       [call.lead_id]
     );
+    const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
+    if (gkSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([call.lead_id], parseInt(gkSeqId));
+    }
+  }
+
+  if (outcome === 'no_answer') {
+    const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
+    if (naSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([call.lead_id], parseInt(naSeqId));
+    }
+  }
+
+  if (outcome === 'not_a_fit') {
+    db.run(
+      "UPDATE leads SET status = 'lost', dnc_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [call.lead_id]
+    );
+    db.run("DELETE FROM call_queue WHERE lead_id = ? AND status = 'pending'", [call.lead_id]);
+    db.run(
+      "UPDATE lead_sequences SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status IN ('active','paused')",
+      [call.lead_id]
+    );
+    db.run(
+      "INSERT INTO activities (lead_id, type, title) VALUES (?, 'status_change', 'Marked not a fit — removed from pipeline')",
+      [call.lead_id]
+    );
   }
 
   if (outcome === 'interested') {
@@ -498,6 +630,15 @@ router.patch('/:callId/outcome', async (req, res) => {
     const defaultSeqId = getDefaultSequenceId();
     if (defaultSeqId) {
       autoEnrollLeads([call.lead_id], parseInt(defaultSeqId));
+    }
+  }
+
+  // Auto-enroll voicemail in configured sequence
+  if (outcome === 'voicemail') {
+    const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
+    if (vmSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([call.lead_id], parseInt(vmSeqId));
     }
   }
 
@@ -603,7 +744,62 @@ router.post('/log-manual', (req, res) => {
     if (d.getDay() === 6) d.setDate(d.getDate() + 2);
     const followup = d.toISOString().split('T')[0] + ' 07:30:00';
     db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
+    const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
+    if (gkSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([lead_id], parseInt(gkSeqId));
+    }
   }
+
+  // Callback requested: schedule next-day callback + enroll sequence
+  if (outcome === 'callback_requested') {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const followup = d.toISOString().split('T')[0] + ' 09:00:00';
+    db.run('UPDATE leads SET next_followup_at = ?, status = CASE WHEN status = \'new\' THEN \'contacted\' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
+    const cbSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_callback_requested'")?.value;
+    if (cbSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([lead_id], parseInt(cbSeqId));
+    }
+  }
+
+  // Interested: qualify + enroll in default sequence
+  if (outcome === 'interested') {
+    db.run("UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'", [lead_id]);
+    db.run("UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')", [lead_id]);
+    const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
+    const defaultSeqId = getDefaultSequenceId();
+    if (defaultSeqId) autoEnrollLeads([lead_id], parseInt(defaultSeqId));
+  }
+
+  // Voicemail: enroll in voicemail sequence
+  if (outcome === 'voicemail') {
+    const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
+    if (vmSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([lead_id], parseInt(vmSeqId));
+    }
+  }
+
+  // No answer: enroll in no-answer sequence
+  if (outcome === 'no_answer') {
+    const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
+    if (naSeqId) {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([lead_id], parseInt(naSeqId));
+    }
+  }
+
+  // Not a fit: mark lost + DNC
+  if (outcome === 'not_a_fit') {
+    db.run("UPDATE leads SET status = 'lost', dnc_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lead_id]);
+    db.run("DELETE FROM call_queue WHERE lead_id = ? AND status = 'pending'", [lead_id]);
+    db.run("UPDATE lead_sequences SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status IN ('active','paused')", [lead_id]);
+  }
+
+  // Recompute heat score after call
+  try { recomputeHeatScore(lead_id, db); } catch { /* non-critical */ }
 
   res.json({ success: true, data: { call_id: result.lastInsertRowid } });
 });
@@ -640,6 +836,9 @@ router.post('/outcome-sms', async (req, res) => {
       voicemail: demoLink
         ? `Hey, we just tried calling you. Feel free to book a time here: ${demoLink}`
         : `Hey, we just tried calling you. We'll try again soon.`,
+      no_answer: demoLink
+        ? `Hey, tried reaching you — feel free to grab a time here: ${demoLink}`
+        : `Hey, tried reaching you. We'll follow up soon.`,
       not_interested: `No worries at all. If things change down the road, feel free to reach back out.`,
     };
 

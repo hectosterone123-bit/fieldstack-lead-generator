@@ -377,6 +377,393 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Reply Alerts — leads who replied to email, no follow-up yet */}
+      {stats?.replied_leads && stats.replied_leads.length > 0 && (
+        <div className="bg-zinc-900 border border-emerald-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Reply className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Replied — Needs Follow-Up</h2>
+            <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.replied_leads.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">replied to email · no response yet</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {stats.replied_leads.map((lead: RepliedLead) => {
+              const hoursAgo = lead.replied_at
+                ? Math.round((Date.now() - new Date(lead.replied_at).getTime()) / (1000 * 60 * 60))
+                : null;
+              return (
+                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-emerald-500/[0.02] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-emerald-500" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                      {hoursAgo !== null && (
+                        <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                          {hoursAgo < 1 ? 'just now' : hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo / 24)}d ago`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {lead.phone && <span className="font-data">{lead.phone}</span>}
+                      {lead.service_type && <span>· {lead.service_type}</span>}
+                      {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => setScriptLead(lead as unknown as Lead)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <FileText className="w-3 h-3" /> Script
+                    </button>
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Call Now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Hot Signals — leads who opened email in last 48h, not yet called back */}
+      {stats?.hot_signal_leads && stats.hot_signal_leads.length > 0 && (
+        <div className="bg-zinc-900 border border-orange-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Flame className="w-4 h-4 text-orange-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Hot Signals</h2>
+            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.hot_signal_leads.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">opened email · not yet called</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {stats.hot_signal_leads.map((lead: HotSignalLead) => {
+              const hoursAgo = lead.email_opened_at
+                ? Math.round((Date.now() - new Date(lead.email_opened_at).getTime()) / (1000 * 60 * 60))
+                : null;
+              return (
+                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-orange-500/[0.03] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500" />
+                  <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                      {hoursAgo !== null && (
+                        <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
+                          {hoursAgo < 1 ? 'just now' : `${hoursAgo}h ago`}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {lead.phone && <span className="font-data">{lead.phone}</span>}
+                      {lead.service_type && <span>· {lead.service_type}</span>}
+                      {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => setScriptLead(lead as unknown as Lead)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <FileText className="w-3 h-3" /> Script
+                    </button>
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Call Now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Today's Follow-ups */}
+      {followups && (
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+            <Clock className="w-4 h-4 text-orange-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Today's Follow-ups</h2>
+            {allFollowups.length > 0 && (
+              <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
+                {allFollowups.length}
+              </span>
+            )}
+          </div>
+
+          {allFollowups.length === 0 ? (
+            <div className="flex items-center justify-center gap-2.5 py-5 px-5">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span className="text-emerald-400 text-sm font-medium">All caught up! No follow-ups due.</span>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/[0.03]">
+              {allFollowups.map((lead: Lead) => {
+                const isOverdue = overdueIds.has(lead.id);
+                return (
+                  <div
+                    key={lead.id}
+                    className={cn(
+                      'flex items-center gap-3 px-5 py-3 transition-colors',
+                      isOverdue
+                        ? 'bg-red-500/[0.03] hover:bg-red-500/[0.06]'
+                        : 'bg-amber-500/[0.03] hover:bg-amber-500/[0.06]',
+                    )}
+                  >
+                    {/* Urgency bar */}
+                    <div className={cn(
+                      'w-0.5 self-stretch rounded-full flex-shrink-0',
+                      isOverdue ? 'bg-red-500' : 'bg-amber-500',
+                    )} />
+
+                    <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                        <span className={cn(
+                          'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                          isOverdue
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-amber-500/20 text-amber-400',
+                        )}>
+                          {isOverdue ? 'Overdue' : 'Due Today'}
+                        </span>
+                        {lead.email_opened_at && (
+                          <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                            <Flame className="w-2.5 h-2.5" /> Opened email
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                        {lead.phone && <span className="font-data">{lead.phone}</span>}
+                        {lead.service_type && <span>· {lead.service_type}</span>}
+                        {lead.owner_name && <span>· {lead.owner_name}</span>}
+                        <span>· {getOverdueText(lead.next_followup_at)}</span>
+                      </div>
+                    </button>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => setScriptLead(lead)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                        title="Open call script"
+                      >
+                        <FileText className="w-3 h-3" /> Script
+                      </button>
+                      <button
+                        onClick={() => logActivity.mutate(
+                          { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                          { onSuccess: () => toast('Call logged') },
+                        )}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                      >
+                        <Phone className="w-3 h-3" /> Log Call
+                      </button>
+                      <button
+                        onClick={() => snoozeLead.mutate(
+                          { id: lead.id, days: 1 },
+                          { onSuccess: () => toast('Snoozed 1 day') },
+                        )}
+                        className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                      >
+                        Snooze 1d
+                      </button>
+                      <button
+                        onClick={() => patchStatus.mutate(
+                          { id: lead.id, status: 'contacted' },
+                          { onSuccess: () => toast('Marked as contacted') },
+                        )}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                      >
+                        <CheckCircle className="w-3 h-3" /> Contacted
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Daily Call Queue — top 40 to call today */}
+      {dailyQueue && dailyQueue.queue.length > 0 && (
+        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <ListChecks className="w-4 h-4 text-orange-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Today's Call Queue</h2>
+            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
+              {dailyQueue.queue.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">ranked by priority · top {Math.min(dailyQueue.queue.length, 40)}</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {dailyQueue.queue.slice(0, 8).map((lead, i) => (
+              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-white/[0.02] transition-colors">
+                <span className="text-[11px] font-bold font-data text-zinc-600 w-5 text-center flex-shrink-0">{i + 1}</span>
+                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500/40" />
+                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                    <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded flex-shrink-0">{lead._reason}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                    {lead.phone && <span className="font-data">{lead.phone}</span>}
+                    {lead.owner_name && <span>· {lead.owner_name}</span>}
+                    {lead.city && <span>· {lead.city}</span>}
+                    <span className="text-orange-400/60">· score {lead._priority}</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+                >
+                  <Phone className="w-3 h-3" /> Log Call
+                </button>
+              </div>
+            ))}
+          </div>
+          {dailyQueue.queue.length > 8 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <button onClick={() => goLeads()} className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
+                +{dailyQueue.queue.length - 8} more in queue → view all leads
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* New Leads Alert — added in last 24h */}
+      {dailyQueue && dailyQueue.new_leads_24h.length > 0 && (
+        <div className="bg-zinc-900 border border-blue-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
+            <Star className="w-4 h-4 text-blue-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">New Leads</h2>
+            <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-medium">
+              {dailyQueue.new_leads_24h.length}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">added in last 24 hours — reach out now</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {dailyQueue.new_leads_24h.slice(0, 5).map(lead => (
+              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-blue-500/[0.02] transition-colors">
+                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-blue-500" />
+                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
+                    <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">New</span>
+                    {lead.heat_score >= 60 && <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0 flex items-center gap-1"><Flame className="w-2.5 h-2.5" />{lead.heat_score}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                    {lead.phone && <span className="font-data">{lead.phone}</span>}
+                    {lead.service_type && <span>· {lead.service_type}</span>}
+                    {lead.city && <span>· {lead.city}</span>}
+                  </div>
+                </button>
+                <button
+                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+                >
+                  <Phone className="w-3 h-3" /> Call Now
+                </button>
+              </div>
+            ))}
+          </div>
+          {dailyQueue.new_leads_24h.length > 5 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <button onClick={() => goLeads({ sort: 'created_at', order: 'desc' })} className="text-xs text-zinc-500 hover:text-blue-400 transition-colors">
+                +{dailyQueue.new_leads_24h.length - 5} more new leads → view all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Outreach Queue */}
+      <OutreachQueue />
+
+      {/* Ghost Detection — leads that went silent after contact */}
+      {stats && stats.ghost_count > 0 && (
+        <div className="bg-zinc-900 border border-amber-500/[0.12] rounded-xl shadow-surface mb-6 overflow-hidden">
+          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
+            <UserX className="w-4 h-4 text-amber-400" />
+            <h2 className="text-zinc-300 font-medium text-sm">Went Silent</h2>
+            <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">
+              {stats.ghost_count}
+            </span>
+            <span className="text-xs text-zinc-600 ml-auto">contacted 7+ days ago, no reply</span>
+          </div>
+          <div className="divide-y divide-white/[0.03]">
+            {(stats.ghost_leads || []).map(ghost => {
+              const daysSince = Math.floor(
+                (Date.now() - new Date(ghost.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24)
+              );
+              return (
+                <div key={ghost.id} className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02] transition-colors">
+                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-amber-500/40" />
+                  <button onClick={() => goLeads(undefined, ghost.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
+                    <span className="text-sm text-zinc-200 font-medium truncate block">{ghost.business_name}</span>
+                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
+                      {ghost.phone && <span>{ghost.phone}</span>}
+                      <span>· {ghost.service_type}</span>
+                      <span>· silent {daysSince}d</span>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => logActivity.mutate(
+                        { leadId: ghost.id, data: { type: 'call_attempt', title: 'Call logged' } },
+                        { onSuccess: () => toast('Call logged') },
+                      )}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Phone className="w-3 h-3" /> Log Call
+                    </button>
+                    <button
+                      onClick={() => snoozeLead.mutate(
+                        { id: ghost.id, days: 3 },
+                        { onSuccess: () => toast('Snoozed 3 days') },
+                      )}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      Snooze 3d
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {stats.ghost_count > 5 && (
+            <div className="px-5 py-3 border-t border-white/[0.04]">
+              <Link to="/leads" className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
+                +{stats.ghost_count - 5} more → view in Leads
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* — Analytics divider — */}
+      <div className="flex items-center gap-3 my-2 mb-6">
+        <div className="flex-1 h-px bg-white/[0.04]"/>
+        <span className="text-[10px] uppercase tracking-widest text-zinc-600 font-medium">Analytics</span>
+        <div className="flex-1 h-px bg-white/[0.04]"/>
+      </div>
+
       {/* KPI Cards — Row 1: Lead Gen Health */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-3">
         {/* Leads Found This Week — hero card */}
@@ -687,386 +1074,6 @@ export function Dashboard() {
       {/* Call Funnel */}
       {callFunnel && callFunnel.total > 0 && (
         <CallFunnel funnel={callFunnel} />
-      )}
-
-      {/* Reply Alerts — leads who replied to email, no follow-up yet */}
-      {stats?.replied_leads && stats.replied_leads.length > 0 && (
-        <div className="bg-zinc-900 border border-emerald-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
-            <Reply className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">Replied — Needs Follow-Up</h2>
-            <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-medium">
-              {stats.replied_leads.length}
-            </span>
-            <span className="text-xs text-zinc-600 ml-auto">replied to email · no response yet</span>
-          </div>
-          <div className="divide-y divide-white/[0.03]">
-            {stats.replied_leads.map((lead: RepliedLead) => {
-              const hoursAgo = lead.replied_at
-                ? Math.round((Date.now() - new Date(lead.replied_at).getTime()) / (1000 * 60 * 60))
-                : null;
-              return (
-                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-emerald-500/[0.02] transition-colors">
-                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-emerald-500" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
-                      {hoursAgo !== null && (
-                        <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
-                          {hoursAgo < 1 ? 'just now' : hoursAgo < 24 ? `${hoursAgo}h ago` : `${Math.floor(hoursAgo / 24)}d ago`}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                      {lead.phone && <span className="font-data">{lead.phone}</span>}
-                      {lead.service_type && <span>· {lead.service_type}</span>}
-                      {lead.owner_name && <span>· {lead.owner_name}</span>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => setScriptLead(lead as unknown as Lead)}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <FileText className="w-3 h-3" /> Script
-                    </button>
-                    <button
-                      onClick={() => logActivity.mutate(
-                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
-                        { onSuccess: () => toast('Call logged') },
-                      )}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <Phone className="w-3 h-3" /> Call Now
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Hot Signals — leads who opened email in last 48h, not yet called back */}
-      {stats?.hot_signal_leads && stats.hot_signal_leads.length > 0 && (
-        <div className="bg-zinc-900 border border-orange-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
-            <Flame className="w-4 h-4 text-orange-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">Hot Signals</h2>
-            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
-              {stats.hot_signal_leads.length}
-            </span>
-            <span className="text-xs text-zinc-600 ml-auto">opened email · not yet called</span>
-          </div>
-          <div className="divide-y divide-white/[0.03]">
-            {stats.hot_signal_leads.map((lead: HotSignalLead) => {
-              const hoursAgo = lead.email_opened_at
-                ? Math.round((Date.now() - new Date(lead.email_opened_at).getTime()) / (1000 * 60 * 60))
-                : null;
-              return (
-                <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-orange-500/[0.03] transition-colors">
-                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500" />
-                  <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
-                      {hoursAgo !== null && (
-                        <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">
-                          {hoursAgo < 1 ? 'just now' : `${hoursAgo}h ago`}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                      {lead.phone && <span className="font-data">{lead.phone}</span>}
-                      {lead.service_type && <span>· {lead.service_type}</span>}
-                      {lead.owner_name && <span>· {lead.owner_name}</span>}
-                    </div>
-                  </button>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => setScriptLead(lead as unknown as Lead)}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <FileText className="w-3 h-3" /> Script
-                    </button>
-                    <button
-                      onClick={() => logActivity.mutate(
-                        { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
-                        { onSuccess: () => toast('Call logged') },
-                      )}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <Phone className="w-3 h-3" /> Call Now
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* New Leads Alert — added in last 24h */}
-      {dailyQueue && dailyQueue.new_leads_24h.length > 0 && (
-        <div className="bg-zinc-900 border border-blue-500/20 rounded-xl shadow-surface mb-4 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
-            <Star className="w-4 h-4 text-blue-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">New Leads</h2>
-            <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-medium">
-              {dailyQueue.new_leads_24h.length}
-            </span>
-            <span className="text-xs text-zinc-600 ml-auto">added in last 24 hours — reach out now</span>
-          </div>
-          <div className="divide-y divide-white/[0.03]">
-            {dailyQueue.new_leads_24h.slice(0, 5).map(lead => (
-              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-blue-500/[0.02] transition-colors">
-                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-blue-500" />
-                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
-                    <span className="text-[10px] bg-blue-500/15 text-blue-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0">New</span>
-                    {lead.heat_score >= 60 && <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex-shrink-0 flex items-center gap-1"><Flame className="w-2.5 h-2.5" />{lead.heat_score}</span>}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                    {lead.phone && <span className="font-data">{lead.phone}</span>}
-                    {lead.service_type && <span>· {lead.service_type}</span>}
-                    {lead.city && <span>· {lead.city}</span>}
-                  </div>
-                </button>
-                <button
-                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
-                >
-                  <Phone className="w-3 h-3" /> Call Now
-                </button>
-              </div>
-            ))}
-          </div>
-          {dailyQueue.new_leads_24h.length > 5 && (
-            <div className="px-5 py-3 border-t border-white/[0.04]">
-              <button onClick={() => goLeads({ sort: 'created_at', order: 'desc' })} className="text-xs text-zinc-500 hover:text-blue-400 transition-colors">
-                +{dailyQueue.new_leads_24h.length - 5} more new leads → view all
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Daily Call Queue — top 40 to call today */}
-      {dailyQueue && dailyQueue.queue.length > 0 && (
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-4 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-3 border-b border-white/[0.04]">
-            <ListChecks className="w-4 h-4 text-orange-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">Today's Call Queue</h2>
-            <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
-              {dailyQueue.queue.length}
-            </span>
-            <span className="text-xs text-zinc-600 ml-auto">ranked by priority · top {Math.min(dailyQueue.queue.length, 40)}</span>
-          </div>
-          <div className="divide-y divide-white/[0.03]">
-            {dailyQueue.queue.slice(0, 8).map((lead, i) => (
-              <div key={lead.id} className="flex items-center gap-3 px-5 py-2.5 hover:bg-white/[0.02] transition-colors">
-                <span className="text-[11px] font-bold font-data text-zinc-600 w-5 text-center flex-shrink-0">{i + 1}</span>
-                <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-orange-500/40" />
-                <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
-                    <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded flex-shrink-0">{lead._reason}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                    {lead.phone && <span className="font-data">{lead.phone}</span>}
-                    {lead.owner_name && <span>· {lead.owner_name}</span>}
-                    {lead.city && <span>· {lead.city}</span>}
-                    <span className="text-orange-400/60">· score {lead._priority}</span>
-                  </div>
-                </button>
-                <button
-                  onClick={() => logActivity.mutate({ leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } }, { onSuccess: () => toast('Call logged') })}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
-                >
-                  <Phone className="w-3 h-3" /> Log Call
-                </button>
-              </div>
-            ))}
-          </div>
-          {dailyQueue.queue.length > 8 && (
-            <div className="px-5 py-3 border-t border-white/[0.04]">
-              <button onClick={() => goLeads()} className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
-                +{dailyQueue.queue.length - 8} more in queue → view all leads
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Today's Follow-ups */}
-      {followups && (
-        <div className="bg-zinc-900 border border-white/[0.06] rounded-xl shadow-surface mb-6 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
-            <Clock className="w-4 h-4 text-orange-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">Today's Follow-ups</h2>
-            {allFollowups.length > 0 && (
-              <span className="text-xs bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded-full font-medium">
-                {allFollowups.length}
-              </span>
-            )}
-          </div>
-
-          {allFollowups.length === 0 ? (
-            <div className="flex items-center justify-center gap-2.5 py-5 px-5">
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-              <span className="text-emerald-400 text-sm font-medium">All caught up! No follow-ups due.</span>
-            </div>
-          ) : (
-            <div className="divide-y divide-white/[0.03]">
-              {allFollowups.map((lead: Lead) => {
-                const isOverdue = overdueIds.has(lead.id);
-                return (
-                  <div
-                    key={lead.id}
-                    className={cn(
-                      'flex items-center gap-3 px-5 py-3 transition-colors',
-                      isOverdue
-                        ? 'bg-red-500/[0.03] hover:bg-red-500/[0.06]'
-                        : 'bg-amber-500/[0.03] hover:bg-amber-500/[0.06]',
-                    )}
-                  >
-                    {/* Urgency bar */}
-                    <div className={cn(
-                      'w-0.5 self-stretch rounded-full flex-shrink-0',
-                      isOverdue ? 'bg-red-500' : 'bg-amber-500',
-                    )} />
-
-                    <button onClick={() => goLeads(undefined, lead.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-zinc-200 font-medium truncate">{lead.business_name}</span>
-                        <span className={cn(
-                          'text-[10px] font-semibold px-1.5 py-0.5 rounded',
-                          isOverdue
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-amber-500/20 text-amber-400',
-                        )}>
-                          {isOverdue ? 'Overdue' : 'Due Today'}
-                        </span>
-                        {lead.email_opened_at && (
-                          <span className="text-[10px] bg-orange-500/15 text-orange-400 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
-                            <Flame className="w-2.5 h-2.5" /> Opened email
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                        {lead.phone && <span className="font-data">{lead.phone}</span>}
-                        {lead.service_type && <span>· {lead.service_type}</span>}
-                        {lead.owner_name && <span>· {lead.owner_name}</span>}
-                        <span>· {getOverdueText(lead.next_followup_at)}</span>
-                      </div>
-                    </button>
-
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      <button
-                        onClick={() => setScriptLead(lead)}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                        title="Open call script"
-                      >
-                        <FileText className="w-3 h-3" /> Script
-                      </button>
-                      <button
-                        onClick={() => logActivity.mutate(
-                          { leadId: lead.id, data: { type: 'call_attempt', title: 'Call logged' } },
-                          { onSuccess: () => toast('Call logged') },
-                        )}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                      >
-                        <Phone className="w-3 h-3" /> Log Call
-                      </button>
-                      <button
-                        onClick={() => snoozeLead.mutate(
-                          { id: lead.id, days: 1 },
-                          { onSuccess: () => toast('Snoozed 1 day') },
-                        )}
-                        className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                      >
-                        Snooze 1d
-                      </button>
-                      <button
-                        onClick={() => patchStatus.mutate(
-                          { id: lead.id, status: 'contacted' },
-                          { onSuccess: () => toast('Marked as contacted') },
-                        )}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                      >
-                        <CheckCircle className="w-3 h-3" /> Contacted
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Outreach Queue */}
-      <OutreachQueue />
-
-      {/* Ghost Detection — leads that went silent after contact */}
-      {stats && stats.ghost_count > 0 && (
-        <div className="bg-zinc-900 border border-amber-500/[0.12] rounded-xl shadow-surface mb-6 overflow-hidden">
-          <div className="flex items-center gap-2.5 px-5 py-4 border-b border-white/[0.04]">
-            <UserX className="w-4 h-4 text-amber-400" />
-            <h2 className="text-zinc-300 font-medium text-sm">Went Silent</h2>
-            <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full font-medium">
-              {stats.ghost_count}
-            </span>
-            <span className="text-xs text-zinc-600 ml-auto">contacted 7+ days ago, no reply</span>
-          </div>
-          <div className="divide-y divide-white/[0.03]">
-            {(stats.ghost_leads || []).map(ghost => {
-              const daysSince = Math.floor(
-                (Date.now() - new Date(ghost.last_contacted_at).getTime()) / (1000 * 60 * 60 * 24)
-              );
-              return (
-                <div key={ghost.id} className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02] transition-colors">
-                  <div className="w-0.5 self-stretch rounded-full flex-shrink-0 bg-amber-500/40" />
-                  <button onClick={() => goLeads(undefined, ghost.id)} className="flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
-                    <span className="text-sm text-zinc-200 font-medium truncate block">{ghost.business_name}</span>
-                    <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500">
-                      {ghost.phone && <span>{ghost.phone}</span>}
-                      <span>· {ghost.service_type}</span>
-                      <span>· silent {daysSince}d</span>
-                    </div>
-                  </button>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <button
-                      onClick={() => logActivity.mutate(
-                        { leadId: ghost.id, data: { type: 'call_attempt', title: 'Call logged' } },
-                        { onSuccess: () => toast('Call logged') },
-                      )}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      <Phone className="w-3 h-3" /> Log Call
-                    </button>
-                    <button
-                      onClick={() => snoozeLead.mutate(
-                        { id: ghost.id, days: 3 },
-                        { onSuccess: () => toast('Snoozed 3 days') },
-                      )}
-                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-lg transition-colors"
-                    >
-                      Snooze 3d
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {stats.ghost_count > 5 && (
-            <div className="px-5 py-3 border-t border-white/[0.04]">
-              <Link to="/leads" className="text-xs text-zinc-500 hover:text-orange-400 transition-colors">
-                +{stats.ghost_count - 5} more → view in Leads
-              </Link>
-            </div>
-          )}
-        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

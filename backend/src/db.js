@@ -505,6 +505,18 @@ async function initDb() {
   // Migration: hyper-personalized cold outreach generator
   try { db.run("ALTER TABLE leads ADD COLUMN cold_write_data TEXT"); } catch(e) {}
 
+  // Migration: hail trigger alert log
+  db.run(`CREATE TABLE IF NOT EXISTS hail_alerts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    noaa_id      TEXT UNIQUE,
+    area_desc    TEXT,
+    event_type   TEXT,
+    detected_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    leads_flagged INTEGER DEFAULT 0
+  )`);
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hail_trigger_enabled', '0')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hail_sequence_id', '')"); } catch(e) {}
+
   saveDb();
   return db;
 }

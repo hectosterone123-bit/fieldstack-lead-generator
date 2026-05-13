@@ -217,6 +217,13 @@ async function autoSendDueItems() {
 
   if (enrollments.length === 0) return;
 
+  // Block sending if reply-to not configured — replies would be lost
+  const replyTo = db.get("SELECT value FROM settings WHERE key = 'reply_to_email'")?.value;
+  if (!replyTo) {
+    console.log('[scheduler] reply_to_email not configured — skipping auto-send to prevent lost replies');
+    return;
+  }
+
   let { remaining } = getRemainingBudget();
   if (remaining <= 0) {
     console.log('[scheduler] daily send limit reached, skipping auto-send');

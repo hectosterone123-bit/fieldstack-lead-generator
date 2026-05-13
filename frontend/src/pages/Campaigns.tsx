@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Send, Users, Mail, MessageSquare, Clock, AlertTriangle, CheckCircle,
   SkipForward, Eye, X, Zap, Target, TrendingUp, MailOpen,
-  PhoneCall, Play, Gauge, Reply, Settings as SettingsIcon, Sparkles,
+  PhoneCall, Play, Gauge, Reply, Settings as SettingsIcon, Sparkles, FlaskConical,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import {
@@ -577,6 +577,11 @@ function QueueRow({ item, onPreview, onMarkSent, onMarkReplied, onSkip, onSend, 
           {item.ai_personalize && (
             <span className="flex items-center gap-0.5 text-violet-400 font-medium">
               <Sparkles className="w-2.5 h-2.5" /> AI
+            </span>
+          )}
+          {item.has_ab_test && (
+            <span className="flex items-center gap-0.5 text-violet-400 font-medium">
+              <FlaskConical className="w-2.5 h-2.5" /> A/B
             </span>
           )}
           <span>·</span>
