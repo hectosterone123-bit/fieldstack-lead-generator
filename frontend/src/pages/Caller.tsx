@@ -5,7 +5,7 @@ import {
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
   Bot, Zap, X, Square, Brain, Search, Shield, Mail,
-  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming,
+  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming, Star, ChevronDown,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -210,6 +210,9 @@ export function Caller() {
 
   // Floating widget
   const [widgetExpanded, setWidgetExpanded] = useState(false);
+
+  // Pitch Pivot
+  const [activePivot, setActivePivot] = useState<string | null>(null);
 
   // Speed Mode + Session stats (Phase 2 + 5)
   const [speedMode, setSpeedMode] = useState(false);
@@ -952,6 +955,76 @@ export function Caller() {
     };
     recorder.stop();
   };
+
+  // Pitch Pivot — services config
+  const PIVOT_SERVICES = [
+    {
+      id: 'sam_ai',
+      label: 'Sam AI',
+      icon: Bot,
+      signal: (l: any) => !!l.has_website,
+      badge: () => 'has website',
+      color: 'text-orange-400',
+      bg: 'bg-orange-500/[0.06] border-orange-500/20',
+      transition: 'Quick question — when someone fills your contact form, who follows up with them?',
+      points: [
+        'Texts every new lead back in under 60 seconds — even at midnight',
+        'Works 24/7 so you never lose a hot lead on a job site',
+        'Books appointments automatically, no back-and-forth',
+      ],
+      close: 'We can set this up this week — 5 booked quotes guaranteed or you don\'t pay.',
+    },
+    {
+      id: 'reviews',
+      label: 'Review Recovery',
+      icon: Star,
+      signal: (l: any) => (l.rating && l.rating < 4.0) || (l.review_count != null && l.review_count < 15),
+      badge: (l: any) => l.rating ? `${l.rating}★ · ${l.review_count ?? 0} reviews` : `${l.review_count ?? 0} reviews`,
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/[0.06] border-amber-500/20',
+      transition: (l: any) => `I pulled up your Google profile — you\'re at ${l.rating ? `${l.rating} stars` : 'very few reviews'}. Competitors at 4.8 get 3x more calls.`,
+      points: [
+        'After every job, Sam auto-texts your customer with a direct Google review link',
+        'Gets you 5–10 new reviews per month on autopilot',
+        'Bumps you above competitors in local search — more inbound calls',
+      ],
+      close: 'Takes 10 minutes to set up. Add-on to Sam or standalone — your call.',
+    },
+    {
+      id: 'missed_call',
+      label: 'Missed Call Text-Back',
+      icon: PhoneIncoming,
+      signal: () => true,
+      badge: () => 'always relevant',
+      color: 'text-blue-400',
+      bg: 'bg-blue-500/[0.06] border-blue-500/20',
+      transition: 'How often do you miss calls when you\'re on a job site?',
+      points: [
+        'When you miss a call, Sam texts back in 30 seconds: "Hey, saw I missed you — I\'m on a job. Can I call you at 5?"',
+        'Keeps the lead warm instead of them calling your competitor',
+        'Already included in Sam — just needs to be activated',
+      ],
+      close: 'It\'s already included — takes 2 minutes to turn on.',
+    },
+    {
+      id: 'follow_up',
+      label: 'Quote Follow-Up',
+      icon: RefreshCw,
+      signal: (l: any) => l.status === 'proposal_sent' || (l.estimated_value && l.estimated_value > 0) || (l.contact_count && l.contact_count >= 3),
+      badge: (l: any) => l.status === 'proposal_sent' ? 'quote sent' : 'established',
+      color: 'text-emerald-400',
+      bg: 'bg-emerald-500/[0.06] border-emerald-500/20',
+      transition: 'What\'s your close rate on quotes you send out — do most people just ghost you?',
+      points: [
+        '5-touch automated follow-up over 7 days after you send a quote',
+        'SMS + email combo — stops the moment they reply',
+        'Closes 20–30% more quotes that would\'ve ghosted',
+      ],
+      close: 'Also includes reactivation blasts to your past customers — easy repeat revenue.',
+    },
+  ] as const;
+
+  const pivots = manualLead ? PIVOT_SERVICES.filter(p => p.signal(manualLead as any)) : [];
 
   // Pace projection (Phase 5)
   const elapsedSessionMin = (Date.now() - sessionStartTime) / 60000;
@@ -2132,8 +2205,58 @@ export function Caller() {
             )}
           </div>
 
-          {/* Right: AI Coach */}
+          {/* Right: Pitch Pivot + AI Coach */}
           <div className="space-y-4">
+
+            {/* Pitch Pivot Panel */}
+            {manualLead && pivots.length > 0 && (
+              <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-4">
+                <p className="text-[10px] text-zinc-600 mb-2.5 uppercase tracking-wide font-medium">Pitch Pivot</p>
+                <div className="space-y-1.5">
+                  {pivots.map(p => {
+                    const Icon = p.icon;
+                    const isOpen = activePivot === p.id;
+                    const badge = p.badge(manualLead as any);
+                    const transition = typeof p.transition === 'function' ? p.transition(manualLead as any) : p.transition;
+                    return (
+                      <div key={p.id}>
+                        <button
+                          onClick={() => setActivePivot(isOpen ? null : p.id)}
+                          className={cn(
+                            'w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs border transition-colors',
+                            isOpen
+                              ? `${p.bg} ${p.color}`
+                              : 'bg-zinc-800/40 border-white/[0.05] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.10]'
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="font-medium">{p.label}</span>
+                            <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full border', isOpen ? 'bg-white/[0.08] border-white/10' : 'bg-zinc-700/60 border-white/[0.05]')}>{badge}</span>
+                          </div>
+                          <ChevronDown className={cn('w-3 h-3 transition-transform', isOpen && 'rotate-180')} />
+                        </button>
+                        {isOpen && (
+                          <div className={cn('mt-1 p-3 rounded-lg border text-xs space-y-2.5', p.bg)}>
+                            <p className="text-zinc-300 italic leading-relaxed">"{transition}"</p>
+                            <ul className="space-y-1.5">
+                              {p.points.map((pt, i) => (
+                                <li key={i} className="flex items-start gap-2 text-zinc-400">
+                                  <span className={cn('mt-0.5 w-1 h-1 rounded-full flex-shrink-0', p.color.replace('text-', 'bg-'))} />
+                                  {pt}
+                                </li>
+                              ))}
+                            </ul>
+                            <p className={cn('font-medium leading-relaxed', p.color)}>"{p.close}"</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="bg-zinc-900 rounded-xl border border-orange-500/20 p-5 sticky top-6">
               <div className="flex items-center gap-2 mb-1">
                 <Zap className="w-4 h-4 text-orange-400" />
