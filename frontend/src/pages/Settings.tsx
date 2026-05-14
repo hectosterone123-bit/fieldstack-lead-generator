@@ -79,6 +79,7 @@ export function Settings() {
   const [webhookCopied, setWebhookCopied] = useState(false);
   const [inboundCopied, setInboundCopied] = useState(false);
   const [voiceWebhookCopied, setVoiceWebhookCopied] = useState(false);
+  const [tab, setTab] = useState<'general' | 'email' | 'calling' | 'automation' | 'advanced'>('general');
 
   const { data: callScripts } = useQuery({
     queryKey: ['call-scripts'],
@@ -226,8 +227,6 @@ export function Settings() {
       </div>
     );
   }
-
-  const [tab, setTab] = useState<'general' | 'email' | 'calling' | 'automation' | 'advanced'>('general');
 
   const TABS = [
     { key: 'general' as const, label: 'General', icon: User },
