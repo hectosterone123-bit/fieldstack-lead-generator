@@ -191,6 +191,20 @@ CREATE TABLE IF NOT EXISTS review_requests (
 CREATE INDEX IF NOT EXISTS idx_review_requests_lead_id ON review_requests(lead_id);
 CREATE INDEX IF NOT EXISTS idx_review_requests_phone ON review_requests(phone);
 CREATE INDEX IF NOT EXISTS idx_review_requests_status ON review_requests(status);
+
+CREATE TABLE IF NOT EXISTS estimates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead_id     INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+  job_type    TEXT NOT NULL,
+  notes       TEXT,
+  scope       TEXT,
+  line_items  TEXT,
+  total_low   REAL,
+  total_high  REAL,
+  confidence  TEXT,
+  flags       TEXT,
+  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 `;
 
 async function initDb() {
@@ -324,6 +338,9 @@ async function initDb() {
   // Migration: fix loom link placeholders + improve copy across steps 2-7
   migrateTemplatesV3();
 
+  // Migration: add no-loom cold opener + trim follow-ups + rewrite re-engage
+  migrateTemplatesV4();
+
   // Migration: add cold call sales scripts (Sandler, Challenger, etc.)
   migrateColdCallScripts();
 
@@ -431,7 +448,7 @@ async function initDb() {
   )`);
   try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value) VALUES (1, 'Email Opened', 'email_opened', 'add', 10)"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value) VALUES (2, 'Email Replied', 'email_replied', 'add', 20)"); } catch(e) {}
-  try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value, condition_type, condition_value) VALUES (3, 'No Activity 14 Days', 'no_activity_days', 'subtract', 15, 'score_above', 20)"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO scoring_rules (id, name, trigger, action, value, condition_type, condition_value) VALUES (3, 'No Activity 7 Days', 'no_activity_days', 'subtract', 15, 'score_above', 20)"); } catch(e) {}
 
   // Seed default templates if table is empty
   seedDefaultTemplates();
@@ -516,6 +533,17 @@ async function initDb() {
   )`);
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hail_trigger_enabled', '0')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('hail_sequence_id', '')"); } catch(e) {}
+
+  // Migration: Sam AI demo recordings for shareable conversation replays
+  db.run(`CREATE TABLE IF NOT EXISTS sam_demo_recordings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    share_token     TEXT NOT NULL UNIQUE,
+    contractor_name TEXT NOT NULL,
+    service_type    TEXT NOT NULL,
+    city            TEXT NOT NULL,
+    messages        TEXT NOT NULL,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
 
   saveDb();
   return db;
@@ -1218,6 +1246,93 @@ We're doing a limited rollout in {state} right now. If you want an early look, I
 No pressure, no pitch history to rehash. Fresh start.
 
 Interested?
+
+{sender_name}
+Fieldstack`);
+}
+
+function migrateTemplatesV4() {
+  // Sentinel: skip if already run
+  const exists = get("SELECT id FROM templates WHERE name = 'Reveal — Cold Opener' AND is_default = 1 LIMIT 1");
+  if (exists) return;
+  console.log('[DB] Migrating templates v4: optimized cold email sequence...');
+
+  const ins = "INSERT INTO templates (name, channel, status_stage, step_order, subject, body, is_default) VALUES (?, 'email', ?, ?, ?, ?, 1)";
+  const upd = (name, subject, body) => {
+    if (subject !== null) {
+      db.run('UPDATE templates SET subject = ?, body = ? WHERE name = ? AND is_default = 1', [subject, body, name]);
+    } else {
+      db.run('UPDATE templates SET body = ? WHERE name = ? AND is_default = 1', [body, name]);
+    }
+  };
+
+  // ── New: primary cold opener (no Loom required) ──
+  db.run(ins, [
+    'Reveal — Cold Opener', 'contacted', 2,
+    "{business_name}'s leads",
+    `{first_name},
+
+When a homeowner fills out your contact form at 8 PM, what happens?
+
+Most {service_type} contractors in {city} have the same setup — hits an email inbox, someone sees it next morning, calls back around 10 AM. By then the homeowner booked someone else.
+
+The companies stealing market share right now aren't better at {service_type}. They just respond in under 5 minutes, every time, even at 8 PM.
+
+That's what we automate. Worth a 15-minute look?
+
+{sender_name}
+FieldStack`
+  ]);
+
+  // ── Step 4: trim Follow-Up #1 — Quick Question ──
+  upd('Follow-Up #1 — Quick Question', 'Quick question, {first_name}',
+    `{first_name},
+
+When a new lead comes in through your website or Google listing — does it go to an email, a CRM, a shared voicemail, or someone's phone?
+
+The gap between a 5-minute response and a 2-hour response is worth roughly $8,000/mo for the average {service_type} company in {city}. Same leads, same ads, same team.
+
+Still curious how you're set up.
+
+{sender_name}`);
+
+  // ── Step 5: trim Follow-Up #2 — Case Study ──
+  upd('Follow-Up #2 — Case Study', null,
+    `{first_name},
+
+Similar size to {business_name}. Decent reviews, steady lead flow, close rate stuck at 23%.
+
+Response time: 3 hours 47 minutes average.
+
+We set up automated speed-to-lead. Under 20 seconds, every time.
+
+60 days later:
+• Close rate: 23% → 58%
+• New bookings: +11/mo
+• Revenue: +$14,300/mo
+• Extra ad spend: $0
+
+Same leads. Just stopped losing them to whoever called back first.
+
+{business_name} looks similar. Worth showing you how it's set up?
+
+{sender_name}
+Fieldstack`);
+
+  // ── Step 7: rewrite Re-engage — What's New (Texas rollout angle) ──
+  upd("Re-engage — What's New", null,
+    `{first_name},
+
+Few things we added since we last talked:
+
+• AI that responds in under 20 seconds, sounds like a local person
+• Books directly into your Google Calendar after qualifying the lead
+• SMS + voice follow-up at 4h and 48h automatically
+• Local 512/737 number so homeowners actually pick up
+
+You're running {service_type} in {city} without a full-time CSR — that's exactly who this was built for.
+
+Doing a limited rollout in Texas right now. Want an early look?
 
 {sender_name}
 Fieldstack`);

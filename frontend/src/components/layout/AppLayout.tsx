@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import { Bell, BotMessageSquare, AlertTriangle, UserPlus, MailX, ShieldAlert, Wifi } from 'lucide-react';
+import { Bell, BotMessageSquare, AlertTriangle, UserPlus, MailX, ShieldAlert, Wifi, Clock, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { fetchFollowups } from '../../lib/api';
+import { Link } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { CopilotSidebar } from '../copilot/CopilotSidebar';
 import { CopilotContextProvider } from '../../lib/copilotContext';
@@ -34,8 +37,16 @@ export function AppLayout() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const bellRef = useRef<HTMLDivElement>(null);
+  const [pulseDismissed, setPulseDismissed] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  const { data: followups } = useQuery({
+    queryKey: ['followups'],
+    queryFn: fetchFollowups,
+    refetchInterval: 60_000,
+  });
+  const overdueCount = followups?.overdue?.length ?? 0;
 
   const addNotification = useCallback((type: NotifType, message: string) => {
     const note: Notification = { id: Math.random().toString(36).slice(2), type, message, time: new Date() };
@@ -134,8 +145,26 @@ export function AppLayout() {
       <div className="flex min-h-screen bg-zinc-950">
         <Sidebar />
         <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Follow-up pulse bar */}
+          {!pulseDismissed && overdueCount > 0 && (
+            <div className="flex-shrink-0 flex items-center justify-between px-6 py-1.5 bg-amber-500/10 border-b border-amber-500/20 sticky top-0 z-20">
+              <div className="flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-xs text-amber-300">
+                  {overdueCount} overdue follow-up{overdueCount > 1 ? 's' : ''} need{overdueCount === 1 ? 's' : ''} attention
+                </span>
+                <Link to="/" className="text-[10px] font-medium text-amber-400 hover:text-amber-200 px-2 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 transition-colors">
+                  View
+                </Link>
+              </div>
+              <button onClick={() => setPulseDismissed(true)} className="text-amber-500/60 hover:text-amber-300 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Top header bar */}
-          <header className="flex-shrink-0 h-14 flex items-center justify-between px-6 border-b border-white/[0.04] bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-20">
+          <header className={cn("flex-shrink-0 h-14 flex items-center justify-between px-6 border-b border-white/[0.04] bg-zinc-950/80 backdrop-blur-sm sticky z-20", !pulseDismissed && overdueCount > 0 ? 'top-[35px]' : 'top-0')}>
             <h1 className="text-zinc-100 font-semibold text-sm">{pageTitle}</h1>
             <div className="flex items-center gap-2">
               <button

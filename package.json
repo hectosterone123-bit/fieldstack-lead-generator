@@ -5,5 +5,8 @@
   "scripts": {
     "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
     "start": "cd backend && node src/server.js"
+  },
+  "dependencies": {
+    "playwright": "^1.60.0"
   }
 }

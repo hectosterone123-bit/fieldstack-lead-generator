@@ -60,10 +60,10 @@ router.get('/queue', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 10, 100); // Default 10, max 100
   const items = db.all(`
     SELECT cq.*, l.business_name, l.phone, l.city, l.state, l.contact_count, l.heat_score,
-           l.last_contacted_at, l.owner_name, l.direct_phone, l.gatekeeper_count
+           l.last_contacted_at, l.owner_name, l.direct_phone, l.gatekeeper_count, l.requeue_count
     FROM call_queue cq
     JOIN leads l ON l.id = cq.lead_id
-    WHERE cq.status = 'pending'
+    WHERE cq.status = 'pending' AND (cq.scheduled_for IS NULL OR cq.scheduled_for <= datetime('now'))
     ORDER BY cq.position ASC
     LIMIT ?
   `, [limit]);
@@ -238,12 +238,14 @@ router.post('/queue/auto-load', (req, res) => {
     let whereClause, whereParams;
     if (filter === 'callbacks_due') {
       whereClause = `WHERE next_followup_at IS NOT NULL AND next_followup_at <= datetime('now')
-                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
-      whereParams = [limitCount];
+                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)
+                     ${service_type ? 'AND service_type = ?' : ''}`;
+      whereParams = service_type ? [service_type, limitCount] : [limitCount];
     } else if (filter === 'this_week') {
       whereClause = `WHERE status = 'new' AND created_at >= datetime('now', '-7 days')
-                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)`;
-      whereParams = [limitCount];
+                     AND phone IS NOT NULL AND dnc_at IS NULL AND (phone_valid IS NULL OR phone_valid != 0)
+                     ${service_type ? 'AND service_type = ?' : ''}`;
+      whereParams = service_type ? [service_type, limitCount] : [limitCount];
     } else if (filter === 'gatekeeper') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -252,7 +254,8 @@ router.post('/queue/auto-load', (req, res) => {
           AND status NOT IN ('booked', 'lost', 'closed_won')
           AND dnc_at IS NULL
           AND (phone_valid IS NULL OR phone_valid != 0)
-      `);
+          ${service_type ? 'AND service_type = ?' : ''}
+      `, service_type ? [service_type] : []);
       raw.sort((a, b) =>
         ((b.gatekeeper_count ?? 0) - (a.gatekeeper_count ?? 0)) ||
         (new Date(a.next_followup_at || 0).getTime() - new Date(b.next_followup_at || 0).getTime())
@@ -264,8 +267,9 @@ router.post('/queue/auto-load', (req, res) => {
         WHERE direct_phone IS NOT NULL AND direct_phone != ''
           AND status NOT IN ('booked', 'lost', 'closed_won')
           AND dnc_at IS NULL
+          ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY CASE WHEN source = 'tdlr' THEN 0 ELSE 1 END, heat_score DESC
-      `);
+      `, service_type ? [service_type] : []);
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
     } else if (filter === 'hot') {
       const raw = db.all(`
@@ -275,8 +279,9 @@ router.post('/queue/auto-load', (req, res) => {
           AND status NOT IN ('booked', 'lost', 'closed_won')
           AND dnc_at IS NULL
           AND (phone_valid IS NULL OR phone_valid != 0)
+          ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
-      `);
+      `, service_type ? [service_type] : []);
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
     } else if (filter === 'never_contacted') {
       const raw = db.all(`
@@ -287,8 +292,9 @@ router.post('/queue/auto-load', (req, res) => {
           AND status NOT IN ('booked', 'lost', 'closed_won')
           AND dnc_at IS NULL
           AND (phone_valid IS NULL OR phone_valid != 0)
+          ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
-      `);
+      `, service_type ? [service_type] : []);
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else if (filter === 'stale') {
       const raw = db.all(`
@@ -299,8 +305,9 @@ router.post('/queue/auto-load', (req, res) => {
           AND status IN ('contacted', 'qualified', 'proposal_sent')
           AND dnc_at IS NULL
           AND (phone_valid IS NULL OR phone_valid != 0)
+          ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
-      `);
+      `, service_type ? [service_type] : []);
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
     } else if (filter === 'mobile') {
       const raw = db.all(`
@@ -310,8 +317,21 @@ router.post('/queue/auto-load', (req, res) => {
           AND status NOT IN ('booked', 'lost', 'closed_won')
           AND dnc_at IS NULL
           AND (phone_valid IS NULL OR phone_valid != 0)
+          ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
-      `);
+      `, service_type ? [service_type] : []);
+      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+    } else if (filter === 'no_website') {
+      const raw = db.all(`
+        SELECT * FROM leads
+        WHERE (has_website = 0 OR has_website IS NULL OR website IS NULL OR website = '')
+          AND phone IS NOT NULL AND phone != ''
+          AND status NOT IN ('booked', 'lost', 'closed_won')
+          AND dnc_at IS NULL
+          AND (phone_valid IS NULL OR phone_valid != 0)
+          ${service_type ? 'AND service_type = ?' : ''}
+        ORDER BY heat_score DESC
+      `, service_type ? [service_type] : []);
       leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else {
       // Time-of-day smart queue (Central Time)
@@ -658,6 +678,34 @@ router.patch('/:callId/outcome', async (req, res) => {
           [lead.id, `Auto-sent after ${outcome} call`, JSON.stringify({ twilio_sid: smsResult.sid, template_name: smsTemplateName })]
         );
       }
+    }
+  }
+
+  // Smart requeue: auto-retry no_answer / voicemail leads
+  if (['no_answer', 'voicemail'].includes(outcome) && call.lead_id) {
+    try {
+      const reqEnabled = db.get("SELECT value FROM settings WHERE key = 'requeue_enabled'")?.value;
+      if (reqEnabled === '1') {
+        const reqDelayDays = parseInt(db.get("SELECT value FROM settings WHERE key = 'requeue_delay_days'")?.value || '3') || 3;
+        const reqMax = parseInt(db.get("SELECT value FROM settings WHERE key = 'requeue_max_times'")?.value || '2') || 2;
+        const leadData = db.get('SELECT requeue_count FROM leads WHERE id = ?', [call.lead_id]);
+        const currentCount = leadData?.requeue_count || 0;
+
+        if (currentCount < reqMax) {
+          const delay = currentCount === 0 ? Math.min(reqDelayDays, 2) : reqDelayDays;
+          db.run('UPDATE leads SET requeue_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [currentCount + 1, call.lead_id]);
+          db.run(
+            "INSERT INTO call_queue (lead_id, template_id, position, status, scheduled_for) VALUES (?, ?, 999, 'pending', datetime('now', '+' || ? || ' days'))",
+            [call.lead_id, call.template_id || null, delay]
+          );
+          db.run(
+            "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Auto-requeued for retry', ?)",
+            [call.lead_id, `Retry #${currentCount + 1} scheduled in ${delay} day(s) after ${outcome}`]
+          );
+        }
+      }
+    } catch (reqErr) {
+      console.error('[Calls] Smart requeue error:', reqErr);
     }
   }
 

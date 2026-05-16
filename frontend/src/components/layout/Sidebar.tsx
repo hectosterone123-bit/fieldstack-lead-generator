@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing, BookOpen, PhoneIncoming, RadioTower, Lightbulb } from 'lucide-react';
+import { LayoutDashboard, Search, Users, Flame, MapPin, FileText, Repeat, MessageSquare, Settings, Target, Mail, Crosshair, PhoneOutgoing, BookOpen, PhoneIncoming, RadioTower, Lightbulb, Camera, Bot } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useFollowups } from '../../hooks/useLeads';
 
@@ -7,6 +7,7 @@ const navGroups = [
   {
     items: [
       { to: '/cockpit', icon: Crosshair, label: 'Cockpit' },
+      { to: '/demo-sms', icon: Bot, label: 'Sam Demo' },
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/finder', icon: Search, label: 'Find Leads' },
       { to: '/scraper', icon: Mail, label: 'Email Scraper' },
@@ -30,6 +31,7 @@ const navGroups = [
     label: 'System',
     items: [
       { to: '/insights', icon: Lightbulb, label: 'Insights' },
+      { to: '/estimate', icon: Camera, label: 'Estimator' },
       { to: '/settings', icon: Settings, label: 'Settings' },
     ],
   },

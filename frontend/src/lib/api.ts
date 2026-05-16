@@ -838,3 +838,138 @@ export async function fetchSettings(): Promise<Record<string, string>> {
 export async function updateSetting(key: string, value: string): Promise<{ key: string; value: string }> {
   return request(`/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) });
 }
+
+// ─── Estimates ────────────────────────────────────────────────────────────────
+
+export interface EstimateLineItem {
+  description: string;
+  quantity: number;
+  unit: string;
+  cost_low: number;
+  cost_high: number;
+}
+
+export interface EstimateResult {
+  scope: string;
+  line_items: EstimateLineItem[];
+  total_low: number;
+  total_high: number;
+  confidence: 'low' | 'medium' | 'high';
+  flags: string[];
+}
+
+export interface SavedEstimate extends EstimateResult {
+  id: number;
+  lead_id: number | null;
+  job_type: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export async function analyzeEstimate(imageBase64: string, mimeType: string, jobType: string, notes?: string): Promise<EstimateResult> {
+  return request('/estimates/analyze', {
+    method: 'POST',
+    body: JSON.stringify({ image_base64: imageBase64, mime_type: mimeType, job_type: jobType, notes }),
+  });
+}
+
+export async function saveEstimate(data: {
+  lead_id?: number | null;
+  job_type: string;
+  notes?: string;
+  scope: string;
+  line_items: EstimateLineItem[];
+  total_low: number;
+  total_high: number;
+  confidence: string;
+  flags: string[];
+}): Promise<{ id: number }> {
+  return request('/estimates', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function fetchEstimates(leadId?: number): Promise<SavedEstimate[]> {
+  const qs = leadId ? `?lead_id=${leadId}` : '';
+  return request(`/estimates${qs}`);
+}
+
+// ─── Sam AI Demo ──────────────────────────────────────────────────────────────
+
+export interface SamMessage {
+  role: 'homeowner' | 'sam';
+  text: string;
+}
+
+export interface SamContractor {
+  name: string;
+  service_type: string;
+  city: string;
+}
+
+export interface ProposalResult {
+  pain_point: string;
+  ghosted_pct: number;
+  monthly_ghosted: number;
+  monthly_revenue_at_risk: number;
+  sam_cost: number;
+  roi_multiple: string;
+  pitch: string;
+  proof_points: string[];
+  cta: string;
+}
+
+export async function simulateSamSms(
+  contractor: SamContractor,
+  messages: SamMessage[],
+): Promise<{ reply: string }> {
+  return request('/sam-demo/simulate', {
+    method: 'POST',
+    body: JSON.stringify({ contractor, messages }),
+  });
+}
+
+export async function generateProposal(data: {
+  name: string;
+  service_type: string;
+  city: string;
+  avg_job_value: number;
+  monthly_leads: number;
+  sam_price: number;
+}): Promise<ProposalResult> {
+  return request('/sam-demo/proposal', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function sendProposalEmail(data: {
+  to: string;
+  contractor_name: string;
+  pdf_base64: string;
+}): Promise<{ id: string }> {
+  return request('/sam-demo/send-proposal', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function saveDemoRecording(
+  contractor: SamContractor,
+  messages: SamMessage[],
+): Promise<{ token: string; url: string }> {
+  return request('/sam-demo/recordings', {
+    method: 'POST',
+    body: JSON.stringify({ contractor, messages }),
+  });
+}
+
+export interface DemoRecordingData {
+  contractor_name: string;
+  service_type: string;
+  city: string;
+  messages: SamMessage[];
+  created_at: string;
+}
+
+export async function fetchDemoRecording(token: string): Promise<DemoRecordingData> {
+  return request(`/sam-demo/recordings/${token}`);
+}

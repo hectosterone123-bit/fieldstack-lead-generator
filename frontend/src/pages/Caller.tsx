@@ -5,7 +5,7 @@ import {
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
   Bot, Zap, X, Square, Brain, Search, Shield, Mail,
-  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming, Star, ChevronDown,
+  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming, Star, ChevronDown, GlobeOff, Video, FileText, Download, Thermometer,
 } from 'lucide-react';
 import Vapi from '@vapi-ai/web';
 import {
@@ -16,7 +16,7 @@ import {
 import { useSequences, useEnrollLeads } from '../hooks/useSequences';
 import { useUpdateLead } from '../hooks/useLeads';
 import { useSendSms } from '../hooks/useSms';
-import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep } from '../lib/api';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep, fetchGbpData } from '../lib/api';
 import type { CallPrep } from '../lib/api';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getMorningStatus } from '../lib/api';
@@ -1578,10 +1578,18 @@ export function Caller() {
                           {repliedLeadIds.has(item.id) && (
                             <span className="text-[9px] font-medium bg-emerald-500/20 text-emerald-400 px-1 rounded">replied</span>
                           )}
+                          {(item.requeue_count ?? 0) > 0 && (
+                            <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              Retry #{item.requeue_count}
+                            </span>
+                          )}
                           {(item.gatekeeper_count ?? 0) > 0 && (
                             <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">
                               GK×{item.gatekeeper_count}
                             </span>
+                          )}
+                          {(item.heat_score ?? 100) < 20 && item.last_contacted_at && new Date(item.last_contacted_at) < new Date(Date.now() - 7 * 86400000) && (
+                            <span title="Cold — score decayed"><Flame className="w-3 h-3 text-zinc-600 opacity-40" /></span>
                           )}
                           <span className="text-[10px] font-data text-zinc-600">{item.heat_score ?? '—'}</span>
                         </div>
@@ -1727,6 +1735,11 @@ export function Caller() {
                           {manualLead.service_type ? ` · ${manualLead.service_type}` : ''}
                         </p>
                       )}
+                      {(manualLead as any).loom_url && (
+                        <a href={(manualLead as any).loom_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20 text-[10px] font-medium hover:bg-violet-500/20 transition-colors w-fit">
+                          <Video className="w-3 h-3" /> Loom
+                        </a>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-4">
                       <button
@@ -1777,6 +1790,122 @@ export function Caller() {
                       ) : null}
                     </div>
                   )}
+
+                  {/* Research Card */}
+                  {(() => {
+                    const ed = manualLead.enrichment_data ? (() => { try { return JSON.parse(manualLead.enrichment_data); } catch { return null; } })() : null;
+                    const pd = (manualLead as any).pitch_data ? (() => { try { return JSON.parse((manualLead as any).pitch_data); } catch { return null; } })() : null;
+                    const hasData = ed || pd || manualLead.rating != null;
+                    return hasData ? (
+                      <details className="mb-4 rounded-xl bg-zinc-800/50 border border-white/[0.05] overflow-hidden group/rc">
+                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors">
+                          <Search className="w-3.5 h-3.5" />
+                          Research Card
+                          <ChevronDown className="w-3 h-3 ml-auto transition-transform group-open/rc:rotate-180" />
+                        </summary>
+                        <div className="px-4 pb-3 space-y-2">
+                          {/* Rating + tech */}
+                          <div className="flex items-center gap-3 flex-wrap text-xs">
+                            {manualLead.rating != null && (
+                              <span className="flex items-center gap-1 text-zinc-300">
+                                <Star className="w-3 h-3 text-yellow-400 fill-current" />
+                                {manualLead.rating} {manualLead.review_count != null && <span className="text-zinc-600">({manualLead.review_count})</span>}
+                              </span>
+                            )}
+                            {ed?.tech_stack && <span className="px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-400 text-[10px]">{ed.tech_stack}</span>}
+                          </div>
+                          {/* Owner */}
+                          {((manualLead as any).owner_name || ed?.team_names?.[0]) && (
+                            <p className="text-[11px] text-zinc-500">Owner: <span className="text-zinc-300">{(manualLead as any).owner_name || ed.team_names[0]}</span></p>
+                          )}
+                          {/* Detected tools */}
+                          {ed?.detected_tools && (
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(ed.detected_tools).filter(([, v]) => v).map(([k, v]) => (
+                                <span key={k} className="px-1.5 py-0.5 rounded bg-zinc-700/60 text-[10px] text-zinc-400">{String(v)}</span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Services */}
+                          {ed?.services?.length > 0 && (
+                            <p className="text-[10px] text-zinc-600">Services: {ed.services.slice(0, 3).join(', ')}</p>
+                          )}
+                          {/* Pitch angle */}
+                          {pd?.pitch_angle && (
+                            <p className="text-[11px] text-orange-400/80 italic">{pd.pitch_angle}</p>
+                          )}
+                          {/* Actions */}
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await enrichLead(manualLead.id);
+                                  const fresh = await fetchLead(manualLead.id);
+                                  if (fresh) setManualLead(fresh);
+                                } catch {}
+                              }}
+                              className="text-[10px] px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
+                            >
+                              Enrich
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await fetchGbpData(manualLead.id);
+                                  const fresh = await fetchLead(manualLead.id);
+                                  if (fresh) setManualLead(fresh);
+                                } catch {}
+                              }}
+                              className="text-[10px] px-2 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors"
+                            >
+                              Reviews
+                            </button>
+                          </div>
+                        </div>
+                      </details>
+                    ) : null;
+                  })()}
+
+                  {/* Recent Activity Timeline */}
+                  {(() => {
+                    const activities = (manualLead as any).activities?.slice(0, 5) || [];
+                    const ACT_ICONS: Record<string, any> = {
+                      status_change: RefreshCw, note: FileText, call_attempt: Phone,
+                      email_sent: Mail, email_opened: Mail, email_clicked: Mail,
+                      email_bounced: Mail, email_replied: Mail,
+                      sms_sent: MessageSquare, heat_update: Thermometer,
+                      import: Download, enrichment: Sparkles,
+                    };
+                    const ACT_COLORS: Record<string, string> = {
+                      status_change: 'text-blue-400', note: 'text-zinc-400', call_attempt: 'text-green-400',
+                      email_sent: 'text-violet-400', email_opened: 'text-violet-400', email_clicked: 'text-violet-500',
+                      email_bounced: 'text-red-400', email_replied: 'text-emerald-400',
+                      sms_sent: 'text-emerald-400', heat_update: 'text-orange-400',
+                      import: 'text-zinc-400', enrichment: 'text-amber-400',
+                    };
+                    return activities.length > 0 ? (
+                      <details className="mb-4 rounded-xl bg-zinc-800/50 border border-white/[0.05] overflow-hidden group/at">
+                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors">
+                          <Clock className="w-3.5 h-3.5" />
+                          Recent Activity ({activities.length})
+                          <ChevronDown className="w-3 h-3 ml-auto transition-transform group-open/at:rotate-180" />
+                        </summary>
+                        <div className="px-4 pb-3 space-y-1.5">
+                          {activities.map((a: any) => {
+                            const AIcon = ACT_ICONS[a.type] || RefreshCw;
+                            const color = ACT_COLORS[a.type] || 'text-zinc-400';
+                            return (
+                              <div key={a.id} className="flex items-center gap-2">
+                                <AIcon className={cn('w-3 h-3 shrink-0', color)} />
+                                <span className="text-[11px] text-zinc-300 truncate flex-1">{a.title}</span>
+                                <span className="text-[10px] text-zinc-600 font-data shrink-0">{formatRelativeTime(a.created_at)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    ) : null;
+                  })()}
 
                   {/* Big dial button */}
                   <a
@@ -2947,6 +3076,7 @@ export function Caller() {
                 { label: 'Never Called', filter: 'never_contacted', icon: UserPlus },
                 { label: 'Re-engage', filter: 'stale', icon: RefreshCw },
                 { label: 'Mobile Only', filter: 'mobile', icon: Smartphone },
+                { label: 'No Website', filter: 'no_website', icon: GlobeOff },
               ] as const).map(p => (
                 <button
                   key={p.label}
@@ -2954,7 +3084,7 @@ export function Caller() {
                   onClick={() => {
                     if (!selectedScript) return;
                     autoLoadQueue.mutate(
-                      { count: 10, templateId: selectedScript, filter: p.filter },
+                      { count: 10, templateId: selectedScript, filter: p.filter, serviceType: leadServiceFilter || undefined },
                       { onSuccess: () => setShowAddLeads(false) }
                     );
                   }}

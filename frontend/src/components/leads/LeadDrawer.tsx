@@ -583,24 +583,42 @@ export function LeadDrawer({ leadId, onClose }: Props) {
               <div className="px-5 py-4 border-b border-white/[0.04] space-y-3">
                 <p className="text-overline text-zinc-600">Outreach Tracking</p>
                 <div>
-                  <label className="text-[10px] text-zinc-600 block mb-1">Loom Link</label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Video className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
-                      <input
-                        type="url"
-                        defaultValue={lead.loom_url || ''}
-                        onBlur={e => { if (e.target.value !== (lead.loom_url || '')) updateLead.mutate({ id: lead.id, data: { loom_url: e.target.value || null } as any }); }}
-                        placeholder="https://loom.com/share/..."
-                        className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark] transition-colors"
-                      />
+                  <label className="text-[10px] text-zinc-600 block mb-1">Loom / Video</label>
+                  {lead.loom_url ? (
+                    <div className="space-y-2">
+                      <div className="rounded-lg overflow-hidden border border-white/[0.06] aspect-video">
+                        <iframe
+                          src={lead.loom_url.replace('/share/', '/embed/')}
+                          allowFullScreen
+                          className="w-full h-full"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a href={lead.loom_url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-white/[0.06] rounded-lg text-xs text-zinc-400 hover:text-zinc-200 transition-colors">
+                          <ExternalLink className="w-3 h-3" /> Open
+                        </a>
+                        <button
+                          onClick={() => updateLead.mutate({ id: lead.id, data: { loom_url: null } as any })}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-red-500/10 border border-white/[0.06] rounded-lg text-xs text-zinc-500 hover:text-red-400 transition-colors"
+                        >
+                          <X className="w-3 h-3" /> Remove
+                        </button>
+                      </div>
                     </div>
-                    {lead.loom_url && (
-                      <a href={lead.loom_url} target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-white/[0.06] rounded-lg text-zinc-400 hover:text-zinc-200 transition-colors">
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Video className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+                        <input
+                          type="url"
+                          defaultValue=""
+                          onBlur={e => { if (e.target.value) updateLead.mutate({ id: lead.id, data: { loom_url: e.target.value } as any }); }}
+                          placeholder="Paste Loom URL..."
+                          className="w-full bg-zinc-800/60 border border-white/[0.06] rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-orange-500/40 [color-scheme:dark] transition-colors"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-600 block mb-1">Ghost Time</label>

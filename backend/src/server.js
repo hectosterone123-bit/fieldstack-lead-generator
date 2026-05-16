@@ -54,6 +54,8 @@ async function start() {
   const eventsRouter = require('./routes/events');
   const widgetRouter = require('./routes/widget');
   const demoRouter = require('./routes/demo');
+  const estimatesRouter = require('./routes/estimates');
+  const samDemoRouter = require('./routes/samDemo');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
@@ -72,6 +74,8 @@ async function start() {
   app.use('/api/events', eventsRouter);
   app.use('/api/widget', widgetRouter);
   app.use('/api/demo', demoRouter);
+  app.use('/api/estimates', estimatesRouter);
+  app.use('/api/sam-demo', samDemoRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

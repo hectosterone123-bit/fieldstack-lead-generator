@@ -15,11 +15,17 @@ import { ProspectingScript } from './pages/ProspectingScript';
 import { Callbacks } from './pages/Callbacks';
 import { SmsBlast } from './pages/SmsBlast';
 import { Insights } from './pages/Insights';
+import { Estimate } from './pages/Estimate';
+import { SamDemo } from './pages/SamDemo';
+import { DemoRecording } from './pages/DemoRecording';
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public routes (no sidebar/layout) */}
+        <Route path="/demo/recording/:token" element={<DemoRecording />} />
+
         <Route element={<AppLayout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/cockpit" element={<Cockpit />} />
@@ -35,6 +41,8 @@ function App() {
           <Route path="/callbacks" element={<Callbacks />} />
           <Route path="/prospecting" element={<ProspectingScript />} />
           <Route path="/insights" element={<Insights />} />
+          <Route path="/estimate" element={<Estimate />} />
+          <Route path="/demo-sms" element={<SamDemo />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

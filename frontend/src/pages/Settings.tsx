@@ -1381,6 +1381,54 @@ export function Settings() {
           </p>
         </div>
 
+        {/* Smart Requeue */}
+        <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Repeat className="w-4 h-4 text-zinc-400" />
+              <h2 className="text-sm font-medium text-zinc-200">Smart Requeue</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRequeueEnabled(!requeueEnabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${requeueEnabled ? 'bg-orange-500' : 'bg-zinc-700'}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${requeueEnabled ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+            </button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">
+            Auto-retry no-answer and voicemail leads after a delay. Requeued items appear in your call queue when the scheduled date arrives.
+          </p>
+          {requeueEnabled && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Retry Delay (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={requeueDelayDays}
+                  onChange={e => setRequeueDelayDays(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+                />
+                <p className="text-[10px] text-zinc-600 mt-1">First retry uses min(this, 2 days). Subsequent retries use the full delay.</p>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Max Retries per Lead</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={requeueMaxTimes}
+                  onChange={e => setRequeueMaxTimes(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-zinc-800 border border-white/[0.06] text-sm text-zinc-200 [color-scheme:dark]"
+                />
+                <p className="text-[10px] text-zinc-600 mt-1">Stop retrying after this many attempts.</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Lead Capture Widget */}
         {appUrl && widgetApiKey && (
           <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">

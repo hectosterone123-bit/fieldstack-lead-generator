@@ -48,6 +48,10 @@ function applyNoActivityRules() {
       else if (rule.action === 'set') score = Math.max(0, Math.min(100, rule.value));
       if (score !== lead.heat_score) {
         db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [score, lead.id]);
+        db.run(
+          "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'heat_update', 'Heat score decayed', ?)",
+          [lead.id, `Score reduced from ${lead.heat_score} to ${score} (no activity for ${days}+ days)`]
+        );
       }
     }
   }

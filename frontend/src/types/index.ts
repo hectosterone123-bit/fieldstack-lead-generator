@@ -580,4 +580,5 @@ export interface CallQueueItem {
   direct_phone?: string | null;
   linkedin_url?: string | null;
   gatekeeper_count?: number;
+  requeue_count?: number;
 }
