@@ -763,8 +763,8 @@ export async function bulkUpdateCallOutcomes(callIds: number[], outcome: string)
   return request('/calls/bulk/outcome', { method: 'PATCH', body: JSON.stringify({ call_ids: callIds, outcome }) });
 }
 
-export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number, filter?: string): Promise<{ queued: number }> {
-  return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId, filter }) });
+export async function autoLoadQueue(serviceType?: string, count?: number, templateId?: number, filter?: string, statusFilter?: string, minHeat?: number): Promise<{ queued: number }> {
+  return request('/calls/queue/auto-load', { method: 'POST', body: JSON.stringify({ service_type: serviceType, count, template_id: templateId, filter, status_filter: statusFilter || undefined, min_heat: minHeat || undefined }) });
 }
 
 export async function getMorningStatus(): Promise<{ loaded_today: boolean; loaded_at: string | null; queue_count: number }> {

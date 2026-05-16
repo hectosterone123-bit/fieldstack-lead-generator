@@ -159,8 +159,8 @@ export function useAutoLoadQueue() {
   const qc = useQueryClient();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: ({ serviceType, count, templateId, filter }: { serviceType?: string; count?: number; templateId: number; filter?: string }) =>
-      autoLoadQueue(serviceType, count, templateId, filter),
+    mutationFn: ({ serviceType, count, templateId, filter, statusFilter, minHeat }: { serviceType?: string; count?: number; templateId: number; filter?: string; statusFilter?: string; minHeat?: number }) =>
+      autoLoadQueue(serviceType, count, templateId, filter, statusFilter, minHeat),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['call-queue'] });
       toast(`${data.queued} leads queued`);

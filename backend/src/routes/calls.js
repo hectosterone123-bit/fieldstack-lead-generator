@@ -208,11 +208,19 @@ function scoreLeadForMorning(lead) {
 
 // POST /api/calls/queue/auto-load — auto-load top N leads by heat_score or smart priority
 router.post('/queue/auto-load', (req, res) => {
-  const { service_type, count = 10, template_id, filter } = req.body;
+  const { service_type, count = 10, template_id, filter, status_filter, min_heat } = req.body;
   if (!template_id) {
     return res.status(400).json({ success: false, error: 'template_id required' });
   }
   const limitCount = Math.min(Math.max(parseInt(count) || 10, 1), 100); // 1–100, default 10
+
+  // Post-query filter: apply status_filter and min_heat before slicing
+  const postFilter = (raw) => {
+    let out = raw;
+    if (status_filter) out = out.filter(l => l.status === status_filter);
+    if (min_heat) out = out.filter(l => (l.heat_score ?? 0) >= parseInt(min_heat));
+    return out;
+  };
 
   let leads;
 
@@ -260,7 +268,7 @@ router.post('/queue/auto-load', (req, res) => {
         ((b.gatekeeper_count ?? 0) - (a.gatekeeper_count ?? 0)) ||
         (new Date(a.next_followup_at || 0).getTime() - new Date(b.next_followup_at || 0).getTime())
       );
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else if (filter === 'direct_phone') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -270,7 +278,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY CASE WHEN source = 'tdlr' THEN 0 ELSE 1 END, heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
     } else if (filter === 'hot') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -282,7 +290,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
     } else if (filter === 'never_contacted') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -295,7 +303,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else if (filter === 'stale') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -308,7 +316,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone || l.phone }));
     } else if (filter === 'mobile') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -320,7 +328,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else if (filter === 'no_website') {
       const raw = db.all(`
         SELECT * FROM leads
@@ -332,7 +340,7 @@ router.post('/queue/auto-load', (req, res) => {
           ${service_type ? 'AND service_type = ?' : ''}
         ORDER BY heat_score DESC
       `, service_type ? [service_type] : []);
-      leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+      leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
     } else {
       // Time-of-day smart queue (Central Time)
       const ctHour = new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour12: false, hour: 'numeric' });
@@ -352,7 +360,7 @@ router.post('/queue/auto-load', (req, res) => {
             ${service_type ? 'AND service_type = ?' : ''}
           ORDER BY heat_score DESC
         `, service_type ? [service_type] : []);
-        leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
+        leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.direct_phone }));
       } else if (isEvening) {
         // Evening: gatekeeper leads first (gatekeepers gone home), then others
         const raw = db.all(`
@@ -364,7 +372,7 @@ router.post('/queue/auto-load', (req, res) => {
             ${service_type ? 'AND service_type = ?' : ''}
           ORDER BY CASE WHEN gatekeeper_count > 0 THEN 0 ELSE 1 END, heat_score DESC
         `, service_type ? [service_type] : []);
-        leads = raw.slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
+        leads = postFilter(raw).slice(0, limitCount).map(l => ({ id: l.id, phone: l.phone }));
       } else {
         // Afternoon: mixed — all leads
         whereClause = `WHERE phone IS NOT NULL AND phone != '' AND dnc_at IS NULL
