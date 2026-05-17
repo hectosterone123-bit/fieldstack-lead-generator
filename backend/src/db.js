@@ -458,7 +458,8 @@ async function initDb() {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
   // Seed default VM templates
-  const vmCount = db.get('SELECT COUNT(*) as c FROM voicemail_templates')?.c || 0;
+  const vmCountResult = db.exec('SELECT COUNT(*) FROM voicemail_templates');
+  const vmCount = vmCountResult[0]?.values[0][0] || 0;
   if (vmCount === 0) {
     db.run("INSERT INTO voicemail_templates (name, body, is_default) VALUES ('Introduction', 'Hey, this is {sender_name} with {company_name}. We help {service_type} companies in {city} get more jobs from their website. Give me a ring back when you get a chance — my number is {phone}.', 1)");
     db.run("INSERT INTO voicemail_templates (name, body) VALUES ('Follow-up', 'Hey it''s {sender_name} again — just following up on my earlier call. We''ve been getting great results for {service_type} companies in your area. Would love 10 minutes of your time. Call me back at {phone}.')");
