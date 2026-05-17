@@ -18,7 +18,7 @@ import {
 import { useSequences, useEnrollLeads } from '../hooks/useSequences';
 import { useUpdateLead } from '../hooks/useLeads';
 import { useSendSms } from '../hooks/useSms';
-import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep, fetchGbpData, suggestWhisper, fetchVoicemailTemplates, dropVoicemail } from '../lib/api';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep, fetchGbpData, suggestWhisper, fetchVoicemailTemplates } from '../lib/api';
 import type { CallPrep } from '../lib/api';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getMorningStatus } from '../lib/api';
@@ -247,8 +247,6 @@ export function Caller() {
   // Voicemail drop templates
   const [vmTemplates, setVmTemplates] = useState<Array<{ id: number; name: string; body: string; is_default: number; use_count: number }>>([]);
   const [selectedVmTemplate, setSelectedVmTemplate] = useState<number | null>(null);
-  const [showVmDrop, setShowVmDrop] = useState(false);
-  const [droppingVm, setDroppingVm] = useState(false);
 
   // Enroll in sequence popup (after Interested outcome)
   const [enrollModal, setEnrollModal] = useState<{ leadId: number; leadName: string } | null>(null);
