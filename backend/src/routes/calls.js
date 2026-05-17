@@ -445,7 +445,42 @@ router.post('/queue/next', async (req, res, next) => {
     }
 
     let scriptBody = '';
-    const template = db.get('SELECT * FROM templates WHERE id = ?', [next_item.template_id]);
+    let template = db.get('SELECT * FROM templates WHERE id = ?', [next_item.template_id]);
+
+    // A/B variant routing: if template has a variant_group, pick the underdog or winner
+    if (template && template.variant_group) {
+      const variants = db.all(
+        "SELECT * FROM templates WHERE variant_group = ? AND channel = 'call_script'",
+        [template.variant_group]
+      );
+      if (variants.length > 1) {
+        const variantIds = variants.map(v => v.id);
+        const counts = db.all(
+          `SELECT template_id, COUNT(*) as n, SUM(CASE WHEN outcome IN ('interested','callback_requested') THEN 1 ELSE 0 END) as wins
+           FROM calls WHERE template_id IN (${variantIds.map(() => '?').join(',')}) AND created_at >= datetime('now','-90 days')
+           GROUP BY template_id`,
+          variantIds
+        );
+        const countMap = {};
+        for (const c of counts) countMap[c.template_id] = c;
+        const MIN_CALLS = 30;
+        const allReady = variants.every(v => (countMap[v.id]?.n || 0) >= MIN_CALLS);
+        if (allReady) {
+          // Pick winner (highest conversion rate)
+          template = variants.reduce((a, b) => {
+            const aRate = (countMap[a.id]?.wins || 0) / (countMap[a.id]?.n || 1);
+            const bRate = (countMap[b.id]?.wins || 0) / (countMap[b.id]?.n || 1);
+            return bRate > aRate ? b : a;
+          });
+        } else {
+          // Pick variant with fewest calls (exploration)
+          template = variants.reduce((a, b) =>
+            (countMap[a.id]?.n || 0) <= (countMap[b.id]?.n || 0) ? a : b
+          );
+        }
+      }
+    }
+
     if (template) {
       scriptBody = renderTemplate(template.body, lead);
     }
@@ -461,7 +496,7 @@ router.post('/queue/next', async (req, res, next) => {
 
     db.run(
       `INSERT INTO calls (lead_id, template_id, vapi_call_id, status, monitor_listen_url, monitor_control_url, started_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [lead.id, next_item.template_id, result.callId, result.status || 'queued', result.listenUrl || null, result.controlUrl || null]
+      [lead.id, template?.id || next_item.template_id, result.callId, result.status || 'queued', result.listenUrl || null, result.controlUrl || null]
     );
 
     const call = db.get('SELECT * FROM calls WHERE vapi_call_id = ?', [result.callId]);
@@ -566,6 +601,54 @@ router.post('/:callId/whisper', async (req, res, next) => {
   }
 });
 
+// POST /api/calls/:callId/suggest-whisper — AI-suggested coaching message based on live transcript + past intel
+router.post('/:callId/suggest-whisper', async (req, res, next) => {
+  try {
+    if (!process.env.GROQ_API_KEY) return res.status(500).json({ success: false, error: 'GROQ_API_KEY not set' });
+
+    const call = db.get(`
+      SELECT c.*, l.business_name, l.service_type, l.city, l.state
+      FROM calls c
+      JOIN leads l ON l.id = c.lead_id
+      WHERE c.id = ?
+    `, [req.params.callId]);
+    if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+
+    // Past call intel from previous calls on this lead
+    const pastCalls = db.all(
+      'SELECT ai_key_intel, outcome FROM calls WHERE lead_id = ? AND id != ? AND ai_key_intel IS NOT NULL ORDER BY created_at DESC LIMIT 3',
+      [call.lead_id, call.id]
+    );
+    const pastIntel = pastCalls.length > 0
+      ? pastCalls.map(c => `[${c.outcome}] ${c.ai_key_intel}`).join('\n')
+      : 'None yet';
+
+    // Last 6 transcript lines
+    const transcript = call.transcript || '';
+    const recentLines = transcript.split('\n').slice(-6).join('\n') || 'Call just started';
+
+    const fetch = require('node-fetch');
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${process.env.GROQ_API_KEY}` },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [
+          { role: 'system', content: 'You coach a sales AI on live calls. Write 1-2 sentences the AI should naturally say next to overcome the current objection or advance toward booking a demo. Output ONLY the coaching message — no quotes, no labels, no explanation.' },
+          { role: 'user', content: `Business: ${call.business_name || 'Unknown'} (${call.service_type || 'contractor'}, ${[call.city, call.state].filter(Boolean).join(', ')})\n\nPast intel from previous calls:\n${pastIntel}\n\nLive transcript (last lines):\n${recentLines}` }
+        ],
+        max_tokens: 120,
+        temperature: 0.4,
+      }),
+    });
+    const json = await response.json();
+    const suggestion = json.choices?.[0]?.message?.content?.trim() || '';
+    res.json({ success: true, data: { suggestion } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // PATCH /api/calls/:callId/outcome — manually set/override call outcome
 router.patch('/:callId/outcome', async (req, res) => {
   const { outcome } = req.body;
@@ -658,6 +741,25 @@ router.patch('/:callId/outcome', async (req, res) => {
     const defaultSeqId = getDefaultSequenceId();
     if (defaultSeqId) {
       autoEnrollLeads([call.lead_id], parseInt(defaultSeqId));
+    }
+  }
+
+  // Not interested: snooze 90 days + tag
+  if (outcome === 'not_interested') {
+    const freshLead = db.get('SELECT tags, status FROM leads WHERE id = ?', [call.lead_id]);
+    if (freshLead) {
+      const tags = JSON.parse(freshLead.tags || '[]');
+      if (!tags.includes('not_interested')) tags.push('not_interested');
+      db.run(
+        `UPDATE leads SET tags = ?, next_followup_at = datetime('now', '+90 days'),
+         status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [JSON.stringify(tags), call.lead_id]
+      );
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Not Interested — Snoozed 90 days', 'Lead marked not interested. Tagged and follow-up scheduled in 90 days.')",
+        [call.lead_id]
+      );
     }
   }
 
@@ -768,16 +870,16 @@ Rules: Direct and confident. Focus on pain (missed leads, lost revenue) not feat
 
 // POST /api/calls/log-manual — log a manual call into the calls table (for cockpit + history)
 router.post('/log-manual', (req, res) => {
-  const { lead_id, outcome, duration_seconds, template_id } = req.body;
+  const { lead_id, outcome, duration_seconds, template_id, suggested_outcome, suggestion_accepted } = req.body;
   if (!lead_id) return res.status(400).json({ success: false, error: 'lead_id required' });
 
   const lead = db.get('SELECT id FROM leads WHERE id = ?', [lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
   const result = db.run(
-    `INSERT INTO calls (lead_id, template_id, status, outcome, duration_seconds, source, started_at, ended_at)
-     VALUES (?, ?, 'completed', ?, ?, 'manual', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-    [lead_id, template_id || null, outcome || null, duration_seconds || null]
+    `INSERT INTO calls (lead_id, template_id, status, outcome, duration_seconds, source, suggested_outcome, suggestion_accepted, started_at, ended_at)
+     VALUES (?, ?, 'completed', ?, ?, 'manual', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    [lead_id, template_id || null, outcome || null, duration_seconds || null, suggested_outcome || null, suggestion_accepted ? 1 : 0]
   );
 
   // Update lead contact tracking
@@ -844,6 +946,25 @@ router.post('/log-manual', (req, res) => {
     if (naSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
       autoEnrollLeads([lead_id], parseInt(naSeqId));
+    }
+  }
+
+  // Not interested: snooze 90 days + tag
+  if (outcome === 'not_interested') {
+    const freshLead = db.get('SELECT tags, status FROM leads WHERE id = ?', [lead_id]);
+    if (freshLead) {
+      const tags = JSON.parse(freshLead.tags || '[]');
+      if (!tags.includes('not_interested')) tags.push('not_interested');
+      db.run(
+        `UPDATE leads SET tags = ?, next_followup_at = datetime('now', '+90 days'),
+         status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        [JSON.stringify(tags), lead_id]
+      );
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Not Interested — Snoozed 90 days', 'Lead marked not interested. Tagged and follow-up scheduled in 90 days.')",
+        [lead_id]
+      );
     }
   }
 
@@ -952,7 +1073,20 @@ router.post('/schedule-callback', async (req, res) => {
       }
     } catch { /* ignore SMS failure */ }
 
-    res.json({ success: true, data: { scheduled: true, sms_sent: smsSent } });
+    // Create Google Calendar event if enabled
+    let calendarCreated = false;
+    try {
+      const { createCalendarEvent } = require('../services/calendarService');
+      const event = await createCalendarEvent(db, {
+        summary: `Callback: ${lead.business_name}`,
+        description: `Lead: ${lead.business_name}\nPhone: ${lead.phone || 'N/A'}\nService: ${lead.service_type || ''}\nCity: ${lead.city || ''}${notes ? '\nNotes: ' + notes : ''}`,
+        startTime: callback_datetime,
+        durationMinutes: 15,
+      });
+      if (event) calendarCreated = true;
+    } catch { /* ignore calendar failure */ }
+
+    res.json({ success: true, data: { scheduled: true, sms_sent: smsSent, calendar_created: calendarCreated } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1087,6 +1221,39 @@ router.get('/funnel', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/calls/funnel/by-hour — pickup rate broken down by hour of day
+router.get('/funnel/by-hour', (req, res, next) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const rows = db.all(`
+      SELECT
+        CAST(strftime('%H', started_at) AS INTEGER) as hour,
+        COUNT(*) as total,
+        SUM(CASE WHEN outcome NOT IN ('no_answer','voicemail','gatekeeper') AND outcome IS NOT NULL THEN 1 ELSE 0 END) as pickups,
+        SUM(CASE WHEN outcome IN ('interested','callback_requested') THEN 1 ELSE 0 END) as interested,
+        ROUND(AVG(duration_seconds)) as avg_duration
+      FROM calls
+      WHERE status = 'completed'
+        AND started_at IS NOT NULL
+        AND started_at >= datetime('now', '-' || ? || ' days')
+      GROUP BY hour
+      ORDER BY hour ASC
+    `, [days]);
+
+    const data = rows.map(r => ({
+      hour: r.hour,
+      total: r.total,
+      pickups: r.pickups,
+      interested: r.interested,
+      avg_duration: r.avg_duration || 0,
+      connect_rate: r.total > 0 ? Math.round((r.pickups / r.total) * 100) : 0,
+      interest_rate: r.pickups > 0 ? Math.round((r.interested / r.pickups) * 100) : 0,
+    }));
+
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+});
+
 router.get('/:callId', (req, res) => {
   const call = db.get(`
     SELECT c.*, l.business_name, l.phone, l.city, l.state, l.service_type, l.email
@@ -1097,6 +1264,69 @@ router.get('/:callId', (req, res) => {
 
   if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
   res.json({ success: true, data: call });
+});
+
+// ── Voicemail Drop Templates ──────────────────────────────────────────────────
+
+router.get('/voicemail-templates', (req, res) => {
+  const templates = db.all('SELECT * FROM voicemail_templates ORDER BY is_default DESC, name ASC');
+  res.json({ success: true, data: templates });
+});
+
+router.post('/voicemail-templates', (req, res) => {
+  const { name, body } = req.body;
+  if (!name || !body) return res.status(400).json({ success: false, error: 'name and body required' });
+  const result = db.run('INSERT INTO voicemail_templates (name, body) VALUES (?, ?)', [name, body]);
+  res.json({ success: true, data: { id: result.lastInsertRowid } });
+});
+
+router.put('/voicemail-templates/:id', (req, res) => {
+  const { name, body, is_default } = req.body;
+  const existing = db.get('SELECT id FROM voicemail_templates WHERE id = ?', [req.params.id]);
+  if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
+  if (is_default) db.run('UPDATE voicemail_templates SET is_default = 0');
+  db.run('UPDATE voicemail_templates SET name = COALESCE(?, name), body = COALESCE(?, body), is_default = COALESCE(?, is_default) WHERE id = ?',
+    [name || null, body || null, is_default !== undefined ? (is_default ? 1 : 0) : null, req.params.id]);
+  res.json({ success: true });
+});
+
+router.delete('/voicemail-templates/:id', (req, res) => {
+  db.run('DELETE FROM voicemail_templates WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+router.post('/:callId/voicemail-drop', (req, res) => {
+  const { template_id } = req.body;
+  const call = db.get('SELECT * FROM calls WHERE id = ?', [req.params.callId]);
+  if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+
+  const template = template_id
+    ? db.get('SELECT * FROM voicemail_templates WHERE id = ?', [template_id])
+    : db.get('SELECT * FROM voicemail_templates WHERE is_default = 1 LIMIT 1');
+  if (!template) return res.status(400).json({ success: false, error: 'No voicemail template found' });
+
+  // Increment use count
+  db.run('UPDATE voicemail_templates SET use_count = use_count + 1 WHERE id = ?', [template.id]);
+
+  // Mark call as voicemail outcome
+  db.run("UPDATE calls SET outcome = 'voicemail' WHERE id = ?", [call.id]);
+
+  // Log activity
+  db.run(
+    "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'call_attempt', 'Voicemail dropped', ?)",
+    [call.lead_id, `Template: ${template.name}`]
+  );
+
+  // Enroll in voicemail sequence if configured
+  const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
+  if (vmSeqId) {
+    try {
+      const { autoEnrollLeads } = require('../services/enrollmentService');
+      autoEnrollLeads([call.lead_id], parseInt(vmSeqId));
+    } catch {}
+  }
+
+  res.json({ success: true, data: { template_name: template.name, template_body: template.body } });
 });
 
 module.exports = router;

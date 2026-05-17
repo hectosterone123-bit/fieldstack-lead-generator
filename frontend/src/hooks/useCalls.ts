@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchActiveCalls, fetchCallHistory, fetchCallQueue, fetchTemplateStats, fetchCallFunnel,
+  fetchCallFunnelByHour,
   startAiCall, endAiCall, setCallQueue, callNextInQueue, clearCallQueue, updateCallOutcome,
   bulkUpdateCallOutcomes, autoLoadQueue, whisperCall,
 } from '../lib/api';
@@ -25,6 +26,13 @@ export function useCallFunnel(days = 30) {
   return useQuery({
     queryKey: ['call-funnel', days],
     queryFn: () => fetchCallFunnel(days),
+  });
+}
+
+export function useCallFunnelByHour(days = 30) {
+  return useQuery({
+    queryKey: ['call-funnel-by-hour', days],
+    queryFn: () => fetchCallFunnelByHour(days),
   });
 }
 

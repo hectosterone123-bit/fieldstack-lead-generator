@@ -7,6 +7,30 @@ const { recomputeHeatScore } = require('../services/heatScoreService');
 const { applyRules } = require('../services/scoringRulesService');
 const { emit } = require('../services/eventBus');
 
+// Bump a lead to the top of the call queue when a strong signal arrives (email clicked/replied, SMS replied)
+function bumpLeadToCallQueue(leadId) {
+  try {
+    const lead = db.get('SELECT phone, phone_valid, dnc_at FROM leads WHERE id = ?', [leadId]);
+    if (!lead?.phone || lead.phone_valid === 0 || lead.dnc_at) return;
+
+    const existing = db.get("SELECT id, position FROM call_queue WHERE lead_id = ? AND status = 'pending'", [leadId]);
+    if (existing) {
+      const minPos = db.get("SELECT MIN(position) as m FROM call_queue WHERE status='pending'")?.m ?? 1;
+      db.run('UPDATE call_queue SET position = ? WHERE id = ?', [minPos - 1, existing.id]);
+      return;
+    }
+
+    const template = db.get("SELECT id FROM templates WHERE channel='call_script' ORDER BY is_default DESC, step_order ASC LIMIT 1");
+    if (!template) return;
+
+    const minPos = db.get("SELECT MIN(position) as m FROM call_queue WHERE status='pending'")?.m ?? 1;
+    db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, ?, 'pending')",
+      [leadId, template.id, minPos - 1]);
+  } catch (err) {
+    console.error('[bumpLeadToCallQueue] Error:', err.message);
+  }
+}
+
 // Resend webhook signature verification (svix)
 function verifyResendSignature(req) {
   const secret = process.env.RESEND_WEBHOOK_SECRET;
@@ -112,6 +136,8 @@ router.post('/resend', async (req, res) => {
       );
 
       applyRules(activity.lead_id, 'email_opened');
+      // Small heat boost on open
+      db.run('UPDATE leads SET heat_score = MIN(100, heat_score + 5), updated_at = CURRENT_TIMESTAMP WHERE id = ?', [activity.lead_id]);
 
       // Multi-open alert: SMS to user when lead opens 2+ times
       const openCount = db.get(
@@ -147,10 +173,12 @@ router.post('/resend', async (req, res) => {
       // Boost heat score on click — stronger buying signal than open
       const lead = db.get('SELECT * FROM leads WHERE id = ?', [activity.lead_id]);
       if (lead) {
-        const newScore = Math.min(recomputeHeatScore(lead) + 5, 100);
+        const newScore = Math.min(recomputeHeatScore(lead) + 10, 100);
         if (newScore !== lead.heat_score) {
           db.run('UPDATE leads SET heat_score = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newScore, lead.id]);
         }
+        // Queue bump if heat ≥ 50 (warm enough to warrant a call)
+        if ((lead.heat_score || 0) >= 40) bumpLeadToCallQueue(activity.lead_id);
       }
       applyRules(activity.lead_id, 'email_clicked');
     }
@@ -231,6 +259,9 @@ router.post('/resend', async (req, res) => {
           [leadId, 'note', 'Sequence auto-paused', 'Lead replied via email — all active sequences paused']);
         db.run("UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')", [leadId]);
         applyRules(leadId, 'email_replied');
+        // Strong signal — boost heat and bump to top of call queue
+        db.run('UPDATE leads SET heat_score = MIN(100, heat_score + 20), updated_at = CURRENT_TIMESTAMP WHERE id = ?', [leadId]);
+        bumpLeadToCallQueue(leadId);
 
         // SMS alert to operator
         const smsService = require('../services/smsService');

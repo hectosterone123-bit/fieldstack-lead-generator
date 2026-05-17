@@ -222,7 +222,27 @@ router.post('/webhook', express.urlencoded({ extended: false }), async (req, res
     }
   }
 
-  if (lead) applyRules(lead.id, 'sms_replied');
+  if (lead) {
+    applyRules(lead.id, 'sms_replied');
+    // Strong signal — boost heat score and bump to top of call queue
+    db.run('UPDATE leads SET heat_score = MIN(100, heat_score + 20), updated_at = CURRENT_TIMESTAMP WHERE id = ?', [lead.id]);
+    // Bump to top of call queue
+    try {
+      if (lead.phone && lead.phone_valid !== 0 && !lead.dnc_at) {
+        const existing = db.get("SELECT id, position FROM call_queue WHERE lead_id = ? AND status = 'pending'", [lead.id]);
+        if (existing) {
+          const minPos = db.get("SELECT MIN(position) as m FROM call_queue WHERE status='pending'")?.m ?? 1;
+          db.run('UPDATE call_queue SET position = ? WHERE id = ?', [minPos - 1, existing.id]);
+        } else {
+          const tmpl = db.get("SELECT id FROM templates WHERE channel='call_script' ORDER BY is_default DESC, step_order ASC LIMIT 1");
+          if (tmpl) {
+            const minPos = db.get("SELECT MIN(position) as m FROM call_queue WHERE status='pending'")?.m ?? 1;
+            db.run("INSERT INTO call_queue (lead_id, template_id, position, status) VALUES (?, ?, ?, 'pending')", [lead.id, tmpl.id, minPos - 1]);
+          }
+        }
+      }
+    } catch (e) { /* non-critical */ }
+  }
 
   // Sam AI auto-reply
   try {

@@ -56,6 +56,7 @@ async function start() {
   const demoRouter = require('./routes/demo');
   const estimatesRouter = require('./routes/estimates');
   const samDemoRouter = require('./routes/samDemo');
+  const roleplayRouter = require('./routes/roleplay');
 
   app.use('/api/leads', leadsRouter);
   app.use('/api/finder', finderRouter);
@@ -76,6 +77,7 @@ async function start() {
   app.use('/api/demo', demoRouter);
   app.use('/api/estimates', estimatesRouter);
   app.use('/api/sam-demo', samDemoRouter);
+  app.use('/api/roleplay', roleplayRouter);
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

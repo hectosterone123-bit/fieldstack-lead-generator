@@ -434,6 +434,44 @@ async function initDb() {
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('booking_link', '')"); } catch(e) {}
   try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('sam_auto_reply_enabled', '0')"); } catch(e) {}
 
+  // Migration: heat score decay settings
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('heat_decay_enabled', '1')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('heat_decay_threshold_days', '30')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('heat_decay_rate', '1')"); } catch(e) {}
+  try { db.run("INSERT OR IGNORE INTO settings (key, value) VALUES ('heat_decay_floor', '10')"); } catch(e) {}
+
+  // Migration: script variant A/B testing
+  try { db.run('ALTER TABLE templates ADD COLUMN variant_group TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE templates ADD COLUMN variant_label TEXT'); } catch(e) {}
+
+  // Migration: auto-disposition suggestion tracking
+  try { db.run('ALTER TABLE calls ADD COLUMN suggested_outcome TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE calls ADD COLUMN suggestion_accepted INTEGER DEFAULT 0'); } catch(e) {}
+
+  // Migration: voicemail drop templates
+  db.run(`CREATE TABLE IF NOT EXISTS voicemail_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    body TEXT NOT NULL,
+    is_default INTEGER DEFAULT 0,
+    use_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  )`);
+  // Seed default VM templates
+  const vmCount = db.get('SELECT COUNT(*) as c FROM voicemail_templates')?.c || 0;
+  if (vmCount === 0) {
+    db.run("INSERT INTO voicemail_templates (name, body, is_default) VALUES ('Introduction', 'Hey, this is {sender_name} with {company_name}. We help {service_type} companies in {city} get more jobs from their website. Give me a ring back when you get a chance — my number is {phone}.', 1)");
+    db.run("INSERT INTO voicemail_templates (name, body) VALUES ('Follow-up', 'Hey it''s {sender_name} again — just following up on my earlier call. We''ve been getting great results for {service_type} companies in your area. Would love 10 minutes of your time. Call me back at {phone}.')");
+    db.run("INSERT INTO voicemail_templates (name, body) VALUES ('Time-sensitive', 'Hey {owner_name}, quick message — we have a couple openings this month for {service_type} companies in {city} looking to grow their online leads. Spots fill fast so give me a call back at {phone} if you want to chat.')");
+  }
+
+  // Migration: Google Calendar integration
+  db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_enabled','0')");
+  db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_refresh_token','')");
+  db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_client_id','')");
+  db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_client_secret','')");
+  db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_redirect_uri','http://localhost:3001/api/settings/google-calendar/callback')");
+
   // Migration: configurable lead scoring rules
   db.run(`CREATE TABLE IF NOT EXISTS scoring_rules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -5,18 +5,20 @@ import {
   Phone, Clock, CheckCircle2, ArrowRight,
   Loader2, UserCheck, ExternalLink, MapPin, Ban, StickyNote, SkipForward, Headphones, MessageSquare,
   Bot, Zap, X, Square, Brain, Search, Shield, Mail,
-  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming, Star, ChevronDown, GlobeOff, Video, FileText, Download, Thermometer,
+  ShieldAlert, UserPlus, RefreshCw, Smartphone, Flame, Sparkles, PhoneIncoming, Star, ChevronDown, GlobeOff, Video, FileText, Download, Thermometer, Swords,
 } from 'lucide-react';
+import { RoleplayModal } from '../components/caller/RoleplayModal';
+import { DrillModal } from '../components/caller/DrillModal';
 import Vapi from '@vapi-ai/web';
 import {
   useActiveCalls, useCallHistory, useCallQueue, useEndCall,
   useCallNextInQueue, useClearCallQueue, useSetCallQueue, useUpdateCallOutcome,
-  useBulkUpdateCallOutcomes, useAutoLoadQueue, useTemplateStats,
+  useBulkUpdateCallOutcomes, useAutoLoadQueue, useTemplateStats, useCallFunnelByHour,
 } from '../hooks/useCalls';
 import { useSequences, useEnrollLeads } from '../hooks/useSequences';
 import { useUpdateLead } from '../hooks/useLeads';
 import { useSendSms } from '../hooks/useSms';
-import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep, fetchGbpData } from '../lib/api';
+import { fetchLeads, fetchLead, fetchTemplates, fetchSettings, takeoverCall, logActivity, whisperCall, validateLeadPhone, coachCall, previewTemplate, patchLeadStatus, sendOutcomeSms, scheduleCallback, logManualCall, uploadVoiceNote, enrichLead, quickEmail, fetchRepliedLeads, fetchCallPrep, fetchGbpData, suggestWhisper, fetchVoicemailTemplates, dropVoicemail } from '../lib/api';
 import type { CallPrep } from '../lib/api';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { getMorningStatus } from '../lib/api';
@@ -74,6 +76,8 @@ export function Caller() {
   const updateLead = useUpdateLead();
   const { toast } = useToast();
   const { data: templateStatsData = [] } = useTemplateStats();
+  const [byHourDays, setByHourDays] = useState(30);
+  const { data: byHourData = [] } = useCallFunnelByHour(byHourDays);
 
   // Transform template stats into UI format
   const scriptStats = templateStatsData.map((stat: any) => ({
@@ -88,6 +92,8 @@ export function Caller() {
   const [selectedScript, setSelectedScript] = useState<number | null>(null);
   const [showAddLeads, setShowAddLeads] = useState(false);
   const [showManualLeadBrowser, setShowManualLeadBrowser] = useState(false);
+  const [showRoleplay, setShowRoleplay] = useState(false);
+  const [showDrill, setShowDrill] = useState(false);
   const [availableLeads, setAvailableLeads] = useState<Lead[]>([]);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<number>>(new Set());
   const [leadSearch, setLeadSearch] = useState('');
@@ -125,6 +131,7 @@ export function Caller() {
   // Whisper coaching
   const [whisperText, setWhisperText] = useState('');
   const [sendingWhisper, setSendingWhisper] = useState(false);
+  const [suggestingWhisper, setSuggestingWhisper] = useState(false);
 
   // Campaign mode badge
   const [campaignActive, setCampaignActive] = useState(false);
@@ -179,11 +186,17 @@ export function Caller() {
   // Text Instead (gatekeeper bypass SMS)
   const [textInsteadLeadId, setTextInsteadLeadId] = useState<number | null>(null);
   const [textInsteadBody, setTextInsteadBody] = useState('');
+  const [senderName, setSenderName] = useState('');
   const sendSmsMutation = useSendSms();
 
-  function openTextInstead(lead: { id: number; business_name: string; first_name?: string | null }) {
-    const name = (lead.first_name || '').trim() || lead.business_name;
-    setTextInsteadBody(`Hey ${name}, this is Hector — quick question about ${lead.business_name}'s lead follow-up. Worth 2 min?`);
+  function openTextInstead(lead: { id: number; business_name: string; first_name?: string | null; owner_name?: string | null; service_type?: string | null; city?: string | null }) {
+    const firstName = (lead.first_name || lead.owner_name || '').split(' ')[0].trim();
+    const greeting = firstName ? `Hey ${firstName}` : 'Hey';
+    const from = senderName || 'Hector';
+    const serviceRef = lead.service_type ? `${lead.service_type} companies` : 'contractors';
+    const cityRef = lead.city ? ` in ${lead.city}` : '';
+    const linkLine = bookingLink ? ` Worth a quick chat? ${bookingLink}` : ' Worth a quick chat?';
+    setTextInsteadBody(`${greeting}, this is ${from} — couldn't get through. We help ${serviceRef}${cityRef} capture website leads they're missing.${linkLine}`);
     setTextInsteadLeadId(lead.id);
   }
 
@@ -227,6 +240,15 @@ export function Caller() {
   const [sessionCallbackCount, setSessionCallbackCount] = useState(0);
   const [sessionDone, setSessionDone] = useState(false);
   const [streak, setStreak] = useState(0);
+
+  // Auto-disposition suggestion
+  const [suggestedOutcome, setSuggestedOutcome] = useState<string | null>(null);
+
+  // Voicemail drop templates
+  const [vmTemplates, setVmTemplates] = useState<Array<{ id: number; name: string; body: string; is_default: number; use_count: number }>>([]);
+  const [selectedVmTemplate, setSelectedVmTemplate] = useState<number | null>(null);
+  const [showVmDrop, setShowVmDrop] = useState(false);
+  const [droppingVm, setDroppingVm] = useState(false);
 
   // Enroll in sequence popup (after Interested outcome)
   const [enrollModal, setEnrollModal] = useState<{ leadId: number; leadName: string } | null>(null);
@@ -308,11 +330,17 @@ export function Caller() {
       setDailyGoal(parseInt(s.daily_call_goal || '0', 10) || 0);
       setCampaignActive(s.vapi_campaign_enabled === '1');
       setBookingLink(s.booking_link || '');
+      setSenderName(s.sender_name || '');
       const pubKey = s.vapi_public_key;
       if (!pubKey) return;
       const v = new Vapi(pubKey);
       v.on('call-end', () => { setBargedIn(false); setMuted(true); });
       vapiRef.current = v;
+    }).catch(() => {});
+    fetchVoicemailTemplates().then(templates => {
+      setVmTemplates(templates);
+      const def = templates.find(t => t.is_default) || templates[0];
+      if (def) setSelectedVmTemplate(def.id);
     }).catch(() => {});
     return () => {
       vapiRef.current?.stop().catch(() => {});
@@ -507,6 +535,19 @@ export function Caller() {
     }
   };
 
+  const handleSuggestWhisper = async () => {
+    if (!activeCall) return;
+    setSuggestingWhisper(true);
+    try {
+      const result = await suggestWhisper(activeCall.id);
+      if (result.suggestion) setWhisperText(result.suggestion);
+    } catch {
+      toast('Could not generate suggestion', 'error');
+    } finally {
+      setSuggestingWhisper(false);
+    }
+  };
+
   const handleWhisper = async () => {
     if (!whisperText.trim() || !activeCall) return;
     setSendingWhisper(true);
@@ -677,7 +718,7 @@ export function Caller() {
     setLoggingCall(true);
     try {
       // Log to calls table (for cockpit stats + history) — fire and forget, but invalidate cache on success
-      logManualCall(loggedLeadId, outcome || undefined, manualElapsed > 0 ? manualElapsed : undefined, selectedScript || undefined)
+      logManualCall(loggedLeadId, outcome || undefined, manualElapsed > 0 ? manualElapsed : undefined, selectedScript || undefined, suggestedOutcome || undefined, outcome === suggestedOutcome)
         .then(() => {
           queryClient.invalidateQueries({ queryKey: ['call-history'] });
           queryClient.invalidateQueries({ queryKey: ['cockpit'] });
@@ -821,6 +862,24 @@ export function Caller() {
     const timer = setInterval(() => setManualElapsed(Math.floor((Date.now() - manualCallStartTime) / 1000)), 1000);
     return () => clearInterval(timer);
   }, [manualCallStartTime]);
+
+  // Auto-disposition: compute suggestion based on elapsed time + notes
+  useEffect(() => {
+    if (!manualCallStartTime) { setSuggestedOutcome(null); return; }
+    const lower = (manualNote || '').toLowerCase();
+    let suggestion: string | null = null;
+    if (lower.includes('voicemail') || lower.includes('left message')) suggestion = 'voicemail';
+    else if (lower.includes('callback') || lower.includes('call back') || lower.includes('busy')) suggestion = 'callback_requested';
+    else if (lower.includes('interested') || lower.includes('quote') || lower.includes('schedule')) suggestion = 'interested';
+    else if (lower.includes('not interested') || lower.includes('no thanks')) suggestion = 'not_interested';
+    else if (lower.includes('gatekeeper') || lower.includes('receptionist') || lower.includes('secretary')) suggestion = 'gatekeeper';
+    else if (lower.includes('wrong number')) suggestion = 'wrong_number';
+    else if (manualElapsed < 10) suggestion = 'no_answer';
+    else if (manualElapsed < 20) suggestion = 'voicemail';
+    else if (manualElapsed > 120) suggestion = 'interested';
+    else if (manualElapsed > 60) suggestion = 'callback_requested';
+    setSuggestedOutcome(suggestion);
+  }, [manualElapsed, manualNote, manualCallStartTime]);
 
   // Speed Mode keyboard shortcuts
   useEffect(() => {
@@ -1227,13 +1286,34 @@ export function Caller() {
                   key={outcome}
                   onClick={() => handleLogManualCall(outcome)}
                   disabled={loggingCall}
-                  className={cn('relative py-5 rounded-xl text-base font-semibold border-2 transition-colors disabled:opacity-40', cls)}
+                  className={cn(
+                    'relative py-5 rounded-xl text-base font-semibold border-2 transition-colors disabled:opacity-40',
+                    cls,
+                    suggestedOutcome === outcome && 'ring-2 ring-orange-500 ring-offset-1 ring-offset-zinc-900'
+                  )}
                 >
                   {loggingCall ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : label}
                   <span className="absolute top-1.5 right-2 text-[10px] font-mono opacity-40">[{key}]</span>
+                  {suggestedOutcome === outcome && (
+                    <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] text-orange-400 font-medium">suggested</span>
+                  )}
                 </button>
               ))}
             </div>
+            {vmTemplates.length > 0 && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
+                <span>VM template:</span>
+                <select
+                  value={selectedVmTemplate ?? ''}
+                  onChange={e => setSelectedVmTemplate(e.target.value ? Number(e.target.value) : null)}
+                  className="bg-zinc-800 border border-white/[0.06] rounded px-2 py-1 text-zinc-300 text-xs"
+                >
+                  {vmTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}{t.is_default ? ' (default)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1650,8 +1730,12 @@ export function Caller() {
                             onClick={async () => {
                               try {
                                 await sendSmsMutation.mutateAsync({ lead_id: queueView[selectedQueueIndex].id, body: textInsteadBody });
+                                await logManualCall(queueView[selectedQueueIndex].lead_id ?? queueView[selectedQueueIndex].id, 'gatekeeper', 0, undefined);
                                 setTextInsteadLeadId(null);
-                                toast('SMS sent');
+                                toast('SMS sent — logged as gatekeeper');
+                                if (queueView.length > selectedQueueIndex + 1) {
+                                  selectQueueLead(queueView[selectedQueueIndex + 1], selectedQueueIndex + 1);
+                                }
                               } catch { toast('Failed to send SMS', 'error'); }
                             }}
                             disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
@@ -1750,6 +1834,20 @@ export function Caller() {
                         className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
                       >
                         Detail
+                      </button>
+                      <button
+                        onClick={() => setShowRoleplay(true)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 transition-colors"
+                        title="Practice this pitch with AI roleplay"
+                      >
+                        <Swords className="w-3 h-3" /> Roleplay
+                      </button>
+                      <button
+                        onClick={() => setShowDrill(true)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
+                        title="Rapid-fire objection drill — 10 reps"
+                      >
+                        <Zap className="w-3 h-3" /> Drill
                       </button>
                       <button
                         onClick={skipQueueLead}
@@ -2431,8 +2529,9 @@ export function Caller() {
                               onClick={async () => {
                                 try {
                                   await sendSmsMutation.mutateAsync({ lead_id: manualLead.id, body: textInsteadBody });
+                                  await logManualCall(manualLead.id, 'gatekeeper', 0, undefined);
                                   setTextInsteadLeadId(null);
-                                  toast('SMS sent');
+                                  toast('SMS sent — logged as gatekeeper');
                                 } catch { toast('Failed to send SMS', 'error'); }
                               }}
                               disabled={sendSmsMutation.isPending || !textInsteadBody.trim()}
@@ -2633,6 +2732,11 @@ export function Caller() {
                 </div>
 
                 {/* Whisper coaching */}
+                {activeCall?.ai_key_intel && (
+                  <p className="text-[10px] text-zinc-600 bg-zinc-800/50 rounded px-2 py-1.5 leading-relaxed">
+                    <span className="text-zinc-500 font-medium">Past intel: </span>{activeCall.ai_key_intel}
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <input
                     value={whisperText}
@@ -2641,6 +2745,14 @@ export function Caller() {
                     placeholder="Whisper to AI (lead can't hear this)…"
                     className="flex-1 px-3 py-2 rounded-lg text-sm bg-amber-950/30 border border-amber-500/20 text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-amber-500/40 [color-scheme:dark]"
                   />
+                  <button
+                    onClick={handleSuggestWhisper}
+                    disabled={suggestingWhisper || activeCall?.status !== 'in_progress'}
+                    title="AI-suggest a whisper based on transcript + past intel"
+                    className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs bg-zinc-800 border border-white/[0.06] text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30"
+                  >
+                    {suggestingWhisper ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  </button>
                   <button
                     onClick={handleWhisper}
                     disabled={!whisperText.trim() || sendingWhisper || activeCall?.status !== 'in_progress'}
@@ -2918,6 +3030,47 @@ export function Caller() {
               </div>
             )}
           </div>
+
+          {/* Connect Rate by Hour */}
+          {byHourData.length > 0 && (
+            <div className="bg-zinc-900 rounded-xl border border-white/[0.06] p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-medium text-zinc-400">Connect Rate by Hour</h2>
+                <div className="flex gap-1">
+                  {[7, 30, 90].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setByHourDays(d)}
+                      className={cn('text-[10px] px-2 py-0.5 rounded border transition-colors', byHourDays === d
+                        ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+                        : 'border-white/[0.06] text-zinc-600 hover:text-zinc-400')}
+                    >{d}d</button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                {byHourData.filter(r => r.hour >= 7 && r.hour <= 20).map(r => {
+                  const label = r.hour === 12 ? '12 PM' : r.hour < 12 ? `${r.hour} AM` : `${r.hour - 12} PM`;
+                  const isGood = r.connect_rate >= 70;
+                  const isOk = r.connect_rate >= 40;
+                  const barColor = isGood ? 'bg-emerald-500' : isOk ? 'bg-amber-500' : 'bg-red-500/70';
+                  const textColor = isGood ? 'text-emerald-400' : isOk ? 'text-amber-400' : 'text-red-400';
+                  const isPrime = r.hour === 8 || r.hour === 9 || r.hour === 16 || r.hour === 17;
+                  return (
+                    <div key={r.hour} className={cn('flex items-center gap-2', isPrime && 'ring-1 ring-orange-500/20 rounded px-1.5 -mx-1.5')}>
+                      <span className="text-[10px] text-zinc-600 w-10 text-right flex-shrink-0">{label}</span>
+                      <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className={cn('h-full rounded-full transition-all', barColor)} style={{ width: `${r.connect_rate}%` }} />
+                      </div>
+                      <span className={cn('text-[10px] font-data w-8 text-right', textColor)}>{r.connect_rate}%</span>
+                      <span className="text-[10px] text-zinc-700 w-12 text-right">{r.total}c</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-zinc-700 mt-2">Green ≥70% · Amber ≥40% · Orange border = prime window</p>
+            </div>
+          )}
 
           {/* Script A/B Stats */}
           {scriptStats.length > 1 && (
@@ -3502,6 +3655,16 @@ export function Caller() {
           </button>
         </div>
       </div>
+    )}
+
+    {/* Roleplay Modal */}
+    {showRoleplay && manualLead && (
+      <RoleplayModal lead={manualLead} onClose={() => setShowRoleplay(false)} />
+    )}
+
+    {/* Sprint Drill Modal */}
+    {showDrill && (
+      <DrillModal onClose={() => setShowDrill(false)} />
     )}
     </>
   );

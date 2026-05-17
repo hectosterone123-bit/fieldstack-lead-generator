@@ -3,7 +3,7 @@ const db = require('../db');
 const { renderTemplate } = require('./templateService');
 const emailService = require('./emailService');
 const smsService = require('./smsService');
-const { recomputeHeatScore } = require('./heatScoreService');
+const { recomputeHeatScore, applyHeatDecay } = require('./heatScoreService');
 const { applyNoActivityRules } = require('./scoringRulesService');
 const { generatePersonalizedEmail } = require('./claudeService');
 const { getTimezone, isInSendWindow } = require('./timezoneService');
@@ -94,6 +94,7 @@ function startSequenceScheduler() {
       await sendHotLeadDecayAlerts();
       autoRequeueStaleLeads();
       applyNoActivityRules();
+      applyHeatDecay(db);
     } catch (err) {
       console.error('[Scheduler] Digest error:', err.message);
       await sendAlert('Daily digest error', `Digest failed: ${err.message}`);

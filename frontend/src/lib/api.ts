@@ -771,8 +771,8 @@ export async function getMorningStatus(): Promise<{ loaded_today: boolean; loade
   return request('/calls/morning-status');
 }
 
-export async function logManualCall(leadId: number, outcome?: string, durationSeconds?: number, templateId?: number): Promise<{ call_id: number }> {
-  return request('/calls/log-manual', { method: 'POST', body: JSON.stringify({ lead_id: leadId, outcome, duration_seconds: durationSeconds, template_id: templateId }) });
+export async function logManualCall(leadId: number, outcome?: string, durationSeconds?: number, templateId?: number, suggestedOutcome?: string, suggestionAccepted?: boolean): Promise<{ call_id: number }> {
+  return request('/calls/log-manual', { method: 'POST', body: JSON.stringify({ lead_id: leadId, outcome, duration_seconds: durationSeconds, template_id: templateId, suggested_outcome: suggestedOutcome, suggestion_accepted: suggestionAccepted }) });
 }
 
 export async function sendOutcomeSms(leadId: number, outcome: string): Promise<{ sent?: boolean; skipped?: boolean; sid?: string }> {
@@ -791,6 +791,15 @@ export async function validateLeadPhone(id: number): Promise<{ phone_valid: bool
   return request(`/leads/${id}/validate-phone`, { method: 'POST' });
 }
 
+// Voicemail templates
+export async function fetchVoicemailTemplates(): Promise<Array<{ id: number; name: string; body: string; is_default: number; use_count: number }>> {
+  return request('/calls/voicemail-templates');
+}
+
+export async function dropVoicemail(callId: number, templateId?: number): Promise<{ template_name: string; template_body: string }> {
+  return request(`/calls/${callId}/voicemail-drop`, { method: 'POST', body: JSON.stringify({ template_id: templateId }) });
+}
+
 export async function coachCall(lead_id: number | null, objection: string, script_body?: string): Promise<{ suggestion: string }> {
   return request('/calls/coach', { method: 'POST', body: JSON.stringify({ lead_id, objection, script_body }) });
 }
@@ -805,6 +814,21 @@ export async function fetchCallFunnel(days = 30): Promise<{
   no_answer: number; voicemail: number; not_interested: number; gatekeeper: number; avg_duration: number;
 }> {
   return request(`/calls/funnel?days=${days}`);
+}
+
+export async function fetchCallFunnelByHour(days = 30): Promise<Array<{
+  hour: number; total: number; pickups: number; interested: number;
+  avg_duration: number; connect_rate: number; interest_rate: number;
+}>> {
+  return request(`/calls/funnel/by-hour?days=${days}`);
+}
+
+export async function suggestWhisper(callId: number): Promise<{ suggestion: string }> {
+  return request(`/calls/${callId}/suggest-whisper`, { method: 'POST' });
+}
+
+export async function fetchRealObjections(): Promise<string[]> {
+  return request('/roleplay/real-objections');
 }
 
 // ─── Scoring Rules ────────────────────────────────────────────────────────────
@@ -890,6 +914,41 @@ export async function saveEstimate(data: {
 export async function fetchEstimates(leadId?: number): Promise<SavedEstimate[]> {
   const qs = leadId ? `?lead_id=${leadId}` : '';
   return request(`/estimates${qs}`);
+}
+
+// ─── Roleplay ─────────────────────────────────────────────────────────────────
+
+export async function roleplayMessage(
+  leadId: number,
+  scenario: string,
+  messages: { role: string; content: string }[]
+): Promise<{ reply: string; outcome: string | null }> {
+  return request('/roleplay/message', {
+    method: 'POST',
+    body: JSON.stringify({ lead_id: leadId, scenario, messages }),
+  });
+}
+
+export async function roleplayCoach(
+  leadId: number,
+  scenario: string,
+  messages: { role: string; content: string }[],
+  outcome: string | null
+): Promise<{ report: string }> {
+  return request('/roleplay/coach', {
+    method: 'POST',
+    body: JSON.stringify({ lead_id: leadId, scenario, messages, outcome }),
+  });
+}
+
+export async function roleplayDrill(
+  objection: string,
+  response: string
+): Promise<{ score: number; feedback: string }> {
+  return request('/roleplay/drill', {
+    method: 'POST',
+    body: JSON.stringify({ objection, response }),
+  });
 }
 
 // ─── Sam AI Demo ──────────────────────────────────────────────────────────────
