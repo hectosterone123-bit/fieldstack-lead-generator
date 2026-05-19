@@ -466,6 +466,9 @@ async function initDb() {
     db.run("INSERT INTO voicemail_templates (name, body) VALUES ('Time-sensitive', 'Hey {owner_name}, quick message — we have a couple openings this month for {service_type} companies in {city} looking to grow their online leads. Spots fill fast so give me a call back at {phone} if you want to chat.')");
   }
 
+  // Migration: real contact tracking
+  try { db.run('ALTER TABLE leads ADD COLUMN last_real_contact_at DATETIME'); } catch(e) {}
+
   // Migration: Google Calendar integration
   db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_enabled','0')");
   db.run("INSERT OR IGNORE INTO settings (key,value) VALUES ('google_calendar_refresh_token','')");

@@ -172,6 +172,58 @@ router.post('/queue', (req, res) => {
   res.json({ success: true, data: { queued } });
 });
 
+// Helper: compute follow-up gap (days) based on heat + real contact history
+function computeFollowupDays(lead) {
+  const heat = lead.heat_score || 0;
+  const contacts = lead.contact_count || 0;
+  const realPick = db.get(
+    "SELECT id FROM calls WHERE lead_id = ? AND outcome NOT IN ('no_answer','voicemail','gatekeeper','wrong_number') AND outcome IS NOT NULL LIMIT 1",
+    [lead.id]
+  );
+  const hadRealContact = !!realPick;
+
+  if (!hadRealContact && contacts >= 4 && heat < 35) return 30;
+  if (!hadRealContact && contacts >= 3) return 21;
+  if (heat >= 60 && contacts < 3) return 3;
+  if (heat >= 40) return 7;
+  return 14;
+}
+
+// Helper: auto-tag dead leads after repeated failed contact attempts
+function checkAndTagDeadLead(lead) {
+  const contacts = lead.contact_count || 0;
+  const heat = lead.heat_score || 0;
+  if (contacts < 4 || heat >= 35) return;
+  const realPick = db.get(
+    "SELECT id FROM calls WHERE lead_id = ? AND outcome NOT IN ('no_answer','voicemail','gatekeeper','wrong_number') AND outcome IS NOT NULL LIMIT 1",
+    [lead.id]
+  );
+  if (realPick) return;
+  try {
+    const tags = JSON.parse(lead.tags || '[]');
+    if (!tags.includes('low_priority')) {
+      tags.push('low_priority');
+      db.run('UPDATE leads SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [JSON.stringify(tags), lead.id]);
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Auto-tagged: low priority', '4+ contact attempts with no pickup. Cadence extended to 30 days.')",
+        [lead.id]
+      );
+    }
+  } catch {}
+}
+
+// Helper: set next_followup_at using score-gated cadence
+function scheduleFollowup(lead, timeStr) {
+  const days = computeFollowupDays(lead);
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  // Skip weekends
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  const followup = d.toISOString().split('T')[0] + (timeStr || ' 09:00:00');
+  db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead.id]);
+  return followup;
+}
+
 // Helper: daily-queue priority scoring (matches /api/leads/daily-queue)
 function scoreLeadForMorning(lead) {
   const now = Date.now();
@@ -202,6 +254,9 @@ function scoreLeadForMorning(lead) {
 
   // High rating bonus
   if (lead.rating >= 4.5) score += 5;
+
+  // Penalty: contacted multiple times but never got a real pickup
+  if (!lead.last_real_contact_at && (lead.contact_count || 0) > 2) score -= 20;
 
   return Math.round(score);
 }
@@ -669,7 +724,7 @@ router.patch('/:callId/outcome', async (req, res) => {
     d.setDate(d.getDate() + 1);
     const followup = d.toISOString().split('T')[0] + ' 09:00:00';
     db.run(
-      `UPDATE leads SET next_followup_at = ?,
+      `UPDATE leads SET next_followup_at = ?, last_real_contact_at = CURRENT_TIMESTAMP,
        status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
        updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       [followup, call.lead_id]
@@ -682,19 +737,12 @@ router.patch('/:callId/outcome', async (req, res) => {
   }
 
   if (outcome === 'gatekeeper') {
-    // Increment gatekeeper count + schedule early morning callback (7:30 AM next business day)
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [call.lead_id]);
+    db.run('UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [call.lead_id]);
+    scheduleFollowup(freshLead, ' 07:30:00');
+    checkAndTagDeadLead(freshLead);
     db.run(
-      'UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [call.lead_id]
-    );
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    if (d.getDay() === 0) d.setDate(d.getDate() + 1); // skip Sunday
-    if (d.getDay() === 6) d.setDate(d.getDate() + 2); // skip Saturday
-    const followup = d.toISOString().split('T')[0] + ' 07:30:00';
-    db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, call.lead_id]);
-    db.run(
-      "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'call_attempt', 'Gatekeeper hit', 'Reached secretary/receptionist. Scheduled callback before 8 AM.')",
+      "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'call_attempt', 'Gatekeeper hit', 'Reached secretary/receptionist. Rescheduled based on lead priority.')",
       [call.lead_id]
     );
     const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
@@ -705,6 +753,9 @@ router.patch('/:callId/outcome', async (req, res) => {
   }
 
   if (outcome === 'no_answer') {
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [call.lead_id]);
+    scheduleFollowup(freshLead, ' 09:00:00');
+    checkAndTagDeadLead(freshLead);
     const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
     if (naSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -734,7 +785,7 @@ router.patch('/:callId/outcome', async (req, res) => {
       [call.lead_id]
     );
     db.run(
-      "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
+      "UPDATE leads SET status = 'qualified', last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
       [call.lead_id]
     );
     const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
@@ -744,8 +795,13 @@ router.patch('/:callId/outcome', async (req, res) => {
     }
   }
 
+  if (outcome === 'transferred') {
+    db.run('UPDATE leads SET last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [call.lead_id]);
+  }
+
   // Not interested: snooze 90 days + tag
   if (outcome === 'not_interested') {
+    db.run('UPDATE leads SET last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [call.lead_id]);
     const freshLead = db.get('SELECT tags, status FROM leads WHERE id = ?', [call.lead_id]);
     if (freshLead) {
       const tags = JSON.parse(freshLead.tags || '[]');
@@ -763,8 +819,11 @@ router.patch('/:callId/outcome', async (req, res) => {
     }
   }
 
-  // Auto-enroll voicemail in configured sequence
+  // Auto-enroll voicemail in configured sequence + score-gated reschedule
   if (outcome === 'voicemail') {
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [call.lead_id]);
+    scheduleFollowup(freshLead, ' 09:00:00');
+    checkAndTagDeadLead(freshLead);
     const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
     if (vmSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -873,7 +932,7 @@ router.post('/log-manual', (req, res) => {
   const { lead_id, outcome, duration_seconds, template_id, suggested_outcome, suggestion_accepted } = req.body;
   if (!lead_id) return res.status(400).json({ success: false, error: 'lead_id required' });
 
-  const lead = db.get('SELECT id FROM leads WHERE id = ?', [lead_id]);
+  const lead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
   if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
   const result = db.run(
@@ -890,18 +949,12 @@ router.post('/log-manual', (req, res) => {
     [lead_id]
   );
 
-  // Gatekeeper: increment count + schedule early morning callback
+  // Gatekeeper: increment count + score-gated reschedule
   if (outcome === 'gatekeeper') {
-    db.run(
-      'UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [lead_id]
-    );
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    if (d.getDay() === 0) d.setDate(d.getDate() + 1);
-    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
-    const followup = d.toISOString().split('T')[0] + ' 07:30:00';
-    db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
+    db.run('UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [lead_id]);
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    scheduleFollowup(freshLead, ' 07:30:00');
+    checkAndTagDeadLead(freshLead);
     const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
     if (gkSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -909,12 +962,12 @@ router.post('/log-manual', (req, res) => {
     }
   }
 
-  // Callback requested: schedule next-day callback + enroll sequence
+  // Callback requested: schedule next-day callback + enroll sequence + track real contact
   if (outcome === 'callback_requested') {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     const followup = d.toISOString().split('T')[0] + ' 09:00:00';
-    db.run('UPDATE leads SET next_followup_at = ?, status = CASE WHEN status = \'new\' THEN \'contacted\' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
+    db.run('UPDATE leads SET next_followup_at = ?, last_real_contact_at = CURRENT_TIMESTAMP, status = CASE WHEN status = \'new\' THEN \'contacted\' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead_id]);
     const cbSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_callback_requested'")?.value;
     if (cbSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -922,17 +975,20 @@ router.post('/log-manual', (req, res) => {
     }
   }
 
-  // Interested: qualify + enroll in default sequence
+  // Interested: qualify + enroll in default sequence + track real contact
   if (outcome === 'interested') {
     db.run("UPDATE lead_sequences SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE lead_id = ? AND status = 'active'", [lead_id]);
-    db.run("UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')", [lead_id]);
+    db.run("UPDATE leads SET status = 'qualified', last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')", [lead_id]);
     const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
     const defaultSeqId = getDefaultSequenceId();
     if (defaultSeqId) autoEnrollLeads([lead_id], parseInt(defaultSeqId));
   }
 
-  // Voicemail: enroll in voicemail sequence
+  // Voicemail: score-gated reschedule + enroll in voicemail sequence
   if (outcome === 'voicemail') {
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    scheduleFollowup(freshLead, ' 09:00:00');
+    checkAndTagDeadLead(freshLead);
     const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
     if (vmSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -940,8 +996,11 @@ router.post('/log-manual', (req, res) => {
     }
   }
 
-  // No answer: enroll in no-answer sequence
+  // No answer: score-gated reschedule + enroll in no-answer sequence
   if (outcome === 'no_answer') {
+    const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [lead_id]);
+    scheduleFollowup(freshLead, ' 09:00:00');
+    checkAndTagDeadLead(freshLead);
     const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
     if (naSeqId) {
       const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -949,23 +1008,21 @@ router.post('/log-manual', (req, res) => {
     }
   }
 
-  // Not interested: snooze 90 days + tag
+  // Not interested: snooze 90 days + tag + track real contact
   if (outcome === 'not_interested') {
-    const freshLead = db.get('SELECT tags, status FROM leads WHERE id = ?', [lead_id]);
-    if (freshLead) {
-      const tags = JSON.parse(freshLead.tags || '[]');
-      if (!tags.includes('not_interested')) tags.push('not_interested');
-      db.run(
-        `UPDATE leads SET tags = ?, next_followup_at = datetime('now', '+90 days'),
-         status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
-         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-        [JSON.stringify(tags), lead_id]
-      );
-      db.run(
-        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Not Interested — Snoozed 90 days', 'Lead marked not interested. Tagged and follow-up scheduled in 90 days.')",
-        [lead_id]
-      );
-    }
+    db.run('UPDATE leads SET last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [lead_id]);
+    const tags = JSON.parse(lead.tags || '[]');
+    if (!tags.includes('not_interested')) tags.push('not_interested');
+    db.run(
+      `UPDATE leads SET tags = ?, next_followup_at = datetime('now', '+90 days'),
+       status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      [JSON.stringify(tags), lead_id]
+    );
+    db.run(
+      "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Not Interested — Snoozed 90 days', 'Lead marked not interested. Tagged and follow-up scheduled in 90 days.')",
+      [lead_id]
+    );
   }
 
   // Not a fit: mark lost + DNC

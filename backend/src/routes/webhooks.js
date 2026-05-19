@@ -32,6 +32,53 @@ function bumpLeadToCallQueue(leadId) {
 }
 
 // Resend webhook signature verification (svix)
+// Score-gated follow-up scheduling helpers (mirrors calls.js)
+function computeFollowupDays(lead) {
+  const heat = lead.heat_score || 0;
+  const contacts = lead.contact_count || 0;
+  const realPick = db.get(
+    "SELECT id FROM calls WHERE lead_id = ? AND outcome NOT IN ('no_answer','voicemail','gatekeeper','wrong_number') AND outcome IS NOT NULL LIMIT 1",
+    [lead.id]
+  );
+  const hadRealContact = !!realPick;
+  if (!hadRealContact && contacts >= 4 && heat < 35) return 30;
+  if (!hadRealContact && contacts >= 3) return 21;
+  if (heat >= 60 && contacts < 3) return 3;
+  if (heat >= 40) return 7;
+  return 14;
+}
+
+function scheduleFollowup(lead, timeStr) {
+  const days = computeFollowupDays(lead);
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  const followup = d.toISOString().split('T')[0] + (timeStr || ' 09:00:00');
+  db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, lead.id]);
+}
+
+function checkAndTagDeadLead(lead) {
+  const contacts = lead.contact_count || 0;
+  const heat = lead.heat_score || 0;
+  if (contacts < 4 || heat >= 35) return;
+  const realPick = db.get(
+    "SELECT id FROM calls WHERE lead_id = ? AND outcome NOT IN ('no_answer','voicemail','gatekeeper','wrong_number') AND outcome IS NOT NULL LIMIT 1",
+    [lead.id]
+  );
+  if (realPick) return;
+  try {
+    const tags = JSON.parse(lead.tags || '[]');
+    if (!tags.includes('low_priority')) {
+      tags.push('low_priority');
+      db.run('UPDATE leads SET tags = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [JSON.stringify(tags), lead.id]);
+      db.run(
+        "INSERT INTO activities (lead_id, type, title, description) VALUES (?, 'note', 'Auto-tagged: low priority', '4+ contact attempts with no pickup. Cadence extended to 30 days.')",
+        [lead.id]
+      );
+    }
+  } catch {}
+}
+
 function verifyResendSignature(req) {
   const secret = process.env.RESEND_WEBHOOK_SECRET;
   if (!secret) return true; // skip if not configured
@@ -486,18 +533,17 @@ router.post('/vapi', async (req, res) => {
       );
     }
 
-    // Auto-schedule callback for tomorrow 9 AM
+    // Auto-schedule callback for tomorrow 9 AM + track real contact
     if (outcome === 'callback_requested') {
       const d = new Date();
       d.setDate(d.getDate() + 1);
       const followup = d.toISOString().split('T')[0] + ' 09:00:00';
       db.run(
-        `UPDATE leads SET next_followup_at = ?,
+        `UPDATE leads SET next_followup_at = ?, last_real_contact_at = CURRENT_TIMESTAMP,
          status = CASE WHEN status = 'new' THEN 'contacted' ELSE status END,
          updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         [followup, callRecord.lead_id]
       );
-      // Auto-enroll in configured callback sequence
       const cbSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_callback_requested'")?.value;
       if (cbSeqId) {
         const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -570,21 +616,29 @@ router.post('/vapi', async (req, res) => {
       }
     }
 
-    // Auto-enroll interested leads + advance to qualified
+    // Auto-enroll interested leads + advance to qualified + track real contact
     if (outcome === 'interested') {
       const { autoEnrollLeads, getDefaultSequenceId } = require('../services/enrollmentService');
       const defaultSeqId = getDefaultSequenceId();
-      if (defaultSeqId) {
-        autoEnrollLeads([callRecord.lead_id], parseInt(defaultSeqId));
-      }
+      if (defaultSeqId) autoEnrollLeads([callRecord.lead_id], parseInt(defaultSeqId));
       db.run(
-        "UPDATE leads SET status = 'qualified', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
+        "UPDATE leads SET status = 'qualified', last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('new', 'contacted')",
         [callRecord.lead_id]
       );
     }
 
-    // Auto-enroll voicemail outcome in configured sequence
+    if (outcome === 'not_interested') {
+      db.run('UPDATE leads SET last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [callRecord.lead_id]);
+    }
+
+    if (outcome === 'transferred') {
+      db.run('UPDATE leads SET last_real_contact_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [callRecord.lead_id]);
+    }
+
+    // Voicemail: score-gated reschedule + enroll in configured sequence
     if (outcome === 'voicemail') {
+      const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [callRecord.lead_id]);
+      if (freshLead) { scheduleFollowup(freshLead, ' 09:00:00'); checkAndTagDeadLead(freshLead); }
       const vmSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_voicemail'")?.value;
       if (vmSeqId) {
         const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -592,15 +646,11 @@ router.post('/vapi', async (req, res) => {
       }
     }
 
-    // Gatekeeper: increment count + schedule early morning callback + enroll sequence
+    // Gatekeeper: increment count + score-gated reschedule + enroll sequence
     if (outcome === 'gatekeeper') {
       db.run('UPDATE leads SET gatekeeper_count = COALESCE(gatekeeper_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [callRecord.lead_id]);
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      if (d.getDay() === 0) d.setDate(d.getDate() + 1);
-      if (d.getDay() === 6) d.setDate(d.getDate() + 2);
-      const followup = d.toISOString().split('T')[0] + ' 07:30:00';
-      db.run('UPDATE leads SET next_followup_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [followup, callRecord.lead_id]);
+      const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [callRecord.lead_id]);
+      if (freshLead) { scheduleFollowup(freshLead, ' 07:30:00'); checkAndTagDeadLead(freshLead); }
       const gkSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_gatekeeper'")?.value;
       if (gkSeqId) {
         const { autoEnrollLeads } = require('../services/enrollmentService');
@@ -608,8 +658,10 @@ router.post('/vapi', async (req, res) => {
       }
     }
 
-    // No answer: enroll in configured sequence
+    // No answer: score-gated reschedule + enroll in configured sequence
     if (outcome === 'no_answer') {
+      const freshLead = db.get('SELECT * FROM leads WHERE id = ?', [callRecord.lead_id]);
+      if (freshLead) { scheduleFollowup(freshLead, ' 09:00:00'); checkAndTagDeadLead(freshLead); }
       const naSeqId = db.get("SELECT value FROM settings WHERE key = 'outcome_sequence_no_answer'")?.value;
       if (naSeqId) {
         const { autoEnrollLeads } = require('../services/enrollmentService');
